@@ -25,10 +25,10 @@ This document outlines the high-level engineering milestones and actionable task
 
 ## Milestone 4: Validation Pipeline & Risk Management
 **Objective**: Integrate the isolated engines into a sequential, rigorous pipeline that enforces strict risk limits and filters for quality.
-- [ ] **Task 4.1: Validation Pipeline Logic** - Construct the sequential flow (`Candidate -> Eligibility -> Regime -> Structure -> 15m Conf -> Volume/OI -> Entry/SL/TP`).
-- [ ] **Task 4.2: Risk/Reward Engine** - Implement risk parameter calculations (R:R ratios, target margin, leverage constraints, and position notional limits).
-- [ ] **Task 4.3: Scoring & Ranking** - Develop the confidence scoring mechanism and logic to filter down to the top 1-3 best candidates.
-- [ ] **Task 4.4: Invalidation Generator** - Write the logic to explicitly generate setup validation and invalidation rules (e.g., "15m close below X").
+- [x] **Task 4.1: Validation Pipeline Logic** - Construct the sequential flow (`Candidate -> Eligibility -> Regime -> Structure -> 15m Conf -> Volume/OI -> Entry/SL/TP`).
+- [x] **Task 4.2: Risk/Reward Engine** - Implement risk parameter calculations (R:R ratios, target margin, leverage constraints, and position notional limits).
+- [x] **Task 4.3: Scoring & Ranking** - Develop the confidence scoring mechanism and logic to filter down to the top 1-3 best candidates.
+- [x] **Task 4.4: Invalidation Generator** - Write the logic to explicitly generate setup validation and invalidation rules (e.g., "15m close below X").
 
 ## Milestone 5: Output, Formatting & Delivery
 **Objective**: Guarantee that validated signals adhere to the strict Signal Contract and deliver them to the end user.
