@@ -38,5 +38,5 @@ class VolumeEngine:
             "current_volume": current_vol,
             "rolling_avg_volume": rolling_avg,
             "ratio": ratio,
-            "is_expanded": ratio >= self.min_ratio
+            "is_expanded": bool(ratio >= self.min_ratio)
         }

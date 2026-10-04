@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 
-# Load env before imports
 load_dotenv()
 
 from src.pipeline import SignalPipeline
@@ -15,39 +14,28 @@ logger = get_logger(__name__)
 
 def main():
     logger.info("Initializing Crypto-AlrtBot...")
-    
-    # 1. Run Pipeline
+
     pipeline = SignalPipeline()
     candidates = pipeline.run_pipeline()
-    
+
     if not candidates:
-        logger.info("No viable signals generated today. Quality over quantity.")
+        logger.info("No viable signals generated. Quality over quantity – 0 signals today.")
         return
 
-    # 2. Output Services
     bot = TelegramBot()
-    formatter = TelegramFormatter()
     persistence = SignalPersistence()
 
-    # 3. Process, Validate, and Deliver
-    for cand_dict in candidates:
+    for rank, cand_dict in enumerate(candidates, start=1):
         try:
-            # Validate against Strict Schema
             signal = SignalModel(**cand_dict)
-            
-            # Persist
             persistence.save_signal(signal)
-            
-            # Format
-            msg = formatter.format_signal(signal)
-            
-            # Broadcast
+            msg = TelegramFormatter.format_signal(signal, rank=rank)
+            logger.info(f"Signal #{rank}: {signal.symbol} {signal.side} – confidence {signal.confidence}/100")
             bot.send_message(msg)
-            
         except Exception as e:
-            logger.error(f"Failed to process/validate signal for {cand_dict.get('symbol')}: {e}")
+            logger.error(f"Failed to publish signal for {cand_dict.get('symbol')}: {e}")
 
-    logger.info("Daily run complete.")
+    logger.info(f"Daily run complete. {len(candidates)} signal(s) published.")
 
 if __name__ == "__main__":
     main()
