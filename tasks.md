@@ -32,10 +32,10 @@ This document outlines the high-level engineering milestones and actionable task
 
 ## Milestone 5: Output, Formatting & Delivery
 **Objective**: Guarantee that validated signals adhere to the strict Signal Contract and deliver them to the end user.
-- [ ] **Task 5.1: Signal Contract Validation** - Implement JSON schema validation to ensure every generated signal matches the strict required schema.
-- [ ] **Task 5.2: Telegram Formatter** - Create the UI/Markdown formatter to match the exact `🚀 SIGNAL` template from the PRD.
-- [ ] **Task 5.3: Telegram Integration** - Integrate the Telegram Bot API to broadcast signals to a configured channel/chat.
-- [ ] **Task 5.4: Signal Persistence Layer** - Implement a local database or JSON logging system to store every generated signal for future auditing.
+- [x] **Task 5.1: Signal Contract Validation** - Implement JSON schema validation to ensure every generated signal matches the strict required schema.
+- [x] **Task 5.2: Telegram Formatter** - Create the UI/Markdown formatter to match the exact `🚀 SIGNAL` template from the PRD.
+- [x] **Task 5.3: Telegram Integration** - Integrate the Telegram Bot API to broadcast signals to a configured channel/chat.
+- [x] **Task 5.4: Signal Persistence Layer** - Implement a local database or JSON logging system to store every generated signal for future auditing.
 
 ## Milestone 6: Backtesting Engine & System Tuning
 **Objective**: Ensure the system is 100% deterministic, testable, and meets the strict "quality over quantity" mandate.
