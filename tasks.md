@@ -17,11 +17,11 @@ This document outlines the high-level engineering milestones and actionable task
 
 ## Milestone 3: Core Signal & Detection Engines
 **Objective**: Develop the individual, modular engines responsible for detecting specific setups and calculating precise trade parameters.
-- [ ] **Task 3.1: Volume Engine** - Implement deterministic volume expansion logic (e.g., `current_15m_volume / rolling_avg_15m_volume`).
-- [ ] **Task 3.2: Open Interest Engine** - Implement OI percentage change and price/OI divergence detection.
-- [ ] **Task 3.3: Entry Engine** - Develop entry calculation models (Market, Pullback, Breakout Retest, FVG) returning `entry_price` and `activation_condition`.
-- [ ] **Task 3.4: Stop-Loss Engine** - Build SL models (ATR-based and Structural support/resistance stops).
-- [ ] **Task 3.5: Take-Profit Engine** - Build TP calculation logic (TP1, TP2, TP3 based on R-multiples and structural targets).
+- [x] **Task 3.1: Volume Engine** - Implement deterministic volume expansion logic (e.g., `current_15m_volume / rolling_avg_15m_volume`).
+- [x] **Task 3.2: Open Interest Engine** - Implement OI percentage change and price/OI divergence detection.
+- [x] **Task 3.3: Entry Engine** - Develop entry calculation models (Market, Pullback, Breakout Retest, FVG) returning `entry_price` and `activation_condition`.
+- [x] **Task 3.4: Stop-Loss Engine** - Build SL models (ATR-based and Structural support/resistance stops).
+- [x] **Task 3.5: Take-Profit Engine** - Build TP calculation logic (TP1, TP2, TP3 based on R-multiples and structural targets).
 
 ## Milestone 4: Validation Pipeline & Risk Management
 **Objective**: Integrate the isolated engines into a sequential, rigorous pipeline that enforces strict risk limits and filters for quality.

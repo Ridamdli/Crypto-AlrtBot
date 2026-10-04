@@ -45,6 +45,11 @@ class BinanceFuturesClient:
         """Fetch current open interest."""
         return self._request("GET", "/fapi/v1/openInterest", params={"symbol": symbol})
     
+    def get_open_interest_hist(self, symbol: str, period: str = "15m", limit: int = 30) -> list:
+        """Fetch historical open interest."""
+        return self._request("GET", "/futures/data/openInterestHist", params={"symbol": symbol, "period": period, "limit": limit})
+
+    
     def get_funding_rate(self, symbol: str) -> list:
         """Fetch funding rate history."""
         return self._request("GET", "/fapi/v1/fundingRate", params={"symbol": symbol, "limit": 100})
