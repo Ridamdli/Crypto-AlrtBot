@@ -96,6 +96,59 @@ def test_paper_share_dry_run_posts_nothing(monkeypatch):
     assert out["payload"]["directionLong"] is False
 
 
+class _Resp:
+    def __init__(self, status, body):
+        self.status_code = status
+        self.text = body
+        self._body = body
+
+    def json(self):
+        import json as _json
+        return _json.loads(self._body)
+
+
+def test_paper_share_success_parses_base_ids(monkeypatch):
+    from src.invo.client import InvoClient
+    c = InvoClient()
+    monkeypatch.setattr(c.session, "post", lambda *a, **k: _Resp(200, (
+        '{"success": true, "baseIds": ["8b3ae3cd-af4a-46cd-a100-1bae4a93ed8e"],'
+        ' "remainingSim": 99, "error": null}'
+    )))
+    out = c.share_paper_trade(
+        {"symbol": "BTCUSDT", "side": "SHORT", "leverage": 7, "stop_loss": None},
+        token="tok", portfolio_id="pid",
+        entry_sim=1.15, price_target=29, dry_run=False,
+    )
+    assert out["dry_run"] is False
+    assert out["response"]["baseIds"] == ["8b3ae3cd-af4a-46cd-a100-1bae4a93ed8e"]
+    assert out["response"]["remainingSim"] == 99
+
+
+def test_paper_share_conflict_raises_with_base_ids(monkeypatch):
+    from src.invo.client import InvoConflictError, InvoClient
+    c = InvoClient()
+    monkeypatch.setattr(c.session, "post", lambda *a, **k: _Resp(200, (
+        '{"success": false, "baseIds": [], "remainingSim": null, "error": '
+        '{"msg": "An open investment in this asset already exists.", "code": null, '
+        '"data": {"conflicting_base_ids": ["a3050a07-225f-4858-bf6c-19546c9872cf"],'
+        ' "failedInvestments": null}}}'
+    )))
+    import pytest as _pt
+    with _pt.raises(InvoConflictError) as exc:
+        c.share_paper_trade(
+            {"symbol": "BTCUSDT", "side": "SHORT", "leverage": 7, "stop_loss": None},
+            token="tok", portfolio_id="pid",
+            entry_sim=1.15, price_target=29, dry_run=False,
+        )
+    assert exc.value.conflicting_base_ids == ["a3050a07-225f-4858-bf6c-19546c9872cf"]
+
+
+def test_share_ledger_roundtrip(tmp_path):
+    from src.invo.client import load_share_ledger, record_share
+    record_share(str(tmp_path), "SIG-1", {"baseIds": ["abc"], "symbol": "BTCUSDT"})
+    assert load_share_ledger(str(tmp_path))["SIG-1"]["baseIds"] == ["abc"]
+
+
 def test_live_share_posts_exact_path(monkeypatch):
     c = InvoClient(email="u@x.com", password="pw")
     c.access_token = "tok"

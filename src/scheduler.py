@@ -178,10 +178,11 @@ class BotScheduler:
             if not dry and (not token or not portfolio):
                 logger.warning("[Scheduler] Invo paper-share skipped: INVO_TOKEN/INVO_PORTFOLIO_ID missing")
                 return
+            from src.invo.client import InvoConflictError, record_share
             client = InvoClient()
             for sig in published:
                 try:
-                    client.share_paper_trade(
+                    out = client.share_paper_trade(
                         {"symbol": sig.symbol, "side": sig.side,
                          "leverage": sig.leverage, "stop_loss": sig.stop_loss},
                         token=token, portfolio_id=portfolio,
@@ -189,6 +190,24 @@ class BotScheduler:
                         price_target=float(sig.tp1),
                         dry_run=dry,
                     )
+                    if not out.get("dry_run"):
+                        record_share("data_store", getattr(sig, "signal_id", "?"), {
+                            "baseIds": (out.get("response") or {}).get("baseIds", []),
+                            "remainingSim": (out.get("response") or {}).get("remainingSim"),
+                            "symbol": sig.symbol,
+                            "side": sig.side,
+                            "portfolioId": portfolio,
+                        })
+                except InvoConflictError as e:
+                    # Setup already shared (same coin open) — not an error.
+                    logger.info(f"[Scheduler] Invo share skipped (already open): {e}")
+                    record_share("data_store", getattr(sig, "signal_id", "?"), {
+                        "baseIds": e.conflicting_base_ids,
+                        "already_open": True,
+                        "symbol": sig.symbol,
+                        "side": sig.side,
+                        "portfolioId": portfolio,
+                    })
                 except Exception as e:
                     logger.warning(f"[Scheduler] Invo paper share skipped for {sig.symbol}: {e}")
         except Exception as e:

@@ -32,6 +32,35 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+SHARE_LEDGER_NAME = "invo_shares.json"
+
+
+def load_share_ledger(storage_dir: str = "data_store"):
+    import json as _json
+    import os as _os
+
+    path = _os.path.join(storage_dir, SHARE_LEDGER_NAME)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = _json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
+
+
+def record_share(storage_dir: str, signal_id: str, entry: dict) -> None:
+    import json as _json
+    import os as _os
+
+    _os.makedirs(storage_dir, exist_ok=True)
+    ledger = load_share_ledger(storage_dir)
+    ledger[signal_id] = entry
+    try:
+        with open(_os.path.join(storage_dir, SHARE_LEDGER_NAME), "w", encoding="utf-8") as f:
+            _json.dump(ledger, f, indent=2)
+    except OSError as e:
+        logger.error(f"[Invo] Failed to save share ledger: {e}")
+
 DEFAULT_BASE_URL = "https://api.involio.com/v1_0"
 
 # Paper-share (no real money) posts to a different host, captured live from
@@ -65,6 +94,22 @@ class InvoApiError(Exception):
         super().__init__(f"Invo API HTTP {status}: {body[:300]}")
         self.status = status
         self.body = body
+
+
+class InvoConflictError(Exception):
+    """Same-coin position already open in this portfolio (server rule).
+
+    Not a failure: the setup is already shared. Carries the conflicting
+    baseIds so later update/close automation can target them.
+    """
+
+    def __init__(self, conflicting_base_ids, raw: dict):
+        super().__init__(
+            "An open investment in this asset already exists: "
+            f"{conflicting_base_ids}"
+        )
+        self.conflicting_base_ids = conflicting_base_ids or []
+        self.raw = raw
 
 
 class InvoClient:
@@ -220,8 +265,21 @@ class InvoClient:
         try:
             result = resp.json()
         except ValueError:
-            result = {"raw": resp.text}
-        logger.info(f"[Invo PAPER] shared {signal.get('symbol')} {signal.get('side')}: {result}")
+            raise InvoApiError(resp.status_code, resp.text)
+        # Server-level conflict: same coin already open in this portfolio.
+        # Shape (captured live): {"success": false, "baseIds": [],
+        #   "error": {"msg": "An open investment in this asset already exists.",
+        #   "data": {"conflicting_base_ids": [...]}}}
+        if not result.get("success", False):
+            err = result.get("error") or {}
+            data = err.get("data") or {}
+            if "already exists" in str(err.get("msg", "")):
+                raise InvoConflictError(data.get("conflicting_base_ids", []), result)
+            raise InvoApiError(resp.status_code, str(result)[:300])
+        logger.info(
+            f"[Invo PAPER] shared {signal.get('symbol')} {signal.get('side')}: "
+            f"baseIds={result.get('baseIds')} remainingSim={result.get('remainingSim')}"
+        )
         return {"dry_run": False, "payload": payload, "response": result}
 
     # ── share ───────────────────────────────────────────────────────────
