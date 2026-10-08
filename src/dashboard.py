@@ -175,49 +175,84 @@ PAGE = """<!DOCTYPE html>
 <title>Crypto-AlrtBot — Admin</title>
 <style>
 :root{--bg:#0b0e14;--card:#151a24;--line:#232b3b;--txt:#e6e9f0;--dim:#8b93a7;--green:#3ddc84;--red:#ff5c5c;--amber:#ffb454;--blue:#4da3ff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:20px;max-width:1100px;margin:auto}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{padding:20px;max-width:1100px;margin:auto}
 h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:26px 0 10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
 .sub{color:var(--dim);margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}.card .v{font-size:24px;font-weight:700}.card .k{color:var(--dim);font-size:12px}
-table{width:100%;border-collapse:collapse;background:var(--card);border-radius:10px;overflow:hidden}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);font-size:13px}th{color:var(--dim);font-weight:600;background:#111623}
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px;border:1px solid var(--line)}
+table{width:100%;min-width:640px;border-collapse:collapse;background:var(--card)}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap}th{color:var(--dim);font-weight:600;background:#111623}td:first-child{white-space:normal}
 .long{color:var(--green);font-weight:700}.short{color:var(--red);font-weight:700}
-.bar-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px}.bar-label{width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dim)}.bar{height:10px;background:var(--blue);border-radius:5px;min-width:2px}
+.bar-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px}.bar-label{width:170px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dim)}.bar{height:10px;background:var(--blue);border-radius:5px;min-width:2px}
 .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;background:#1e2636;border:1px solid var(--line)}
 .ok{color:var(--green)}.warn{color:var(--amber)}
 .refresh{color:var(--dim);font-size:12px}
+nav{position:sticky;top:0;z-index:10;background:rgba(11,14,20,.96);border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
+.nav-inner{max-width:1100px;margin:auto;padding:10px 20px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.brand{font-weight:800;margin-right:10px;white-space:nowrap}
+.tab{background:transparent;border:1px solid transparent;color:var(--dim);padding:7px 13px;border-radius:8px;font-size:13px;cursor:pointer}
+.tab:hover{color:var(--txt)}.tab.active{color:var(--txt);background:#1b2334;border-color:var(--line)}
+.page{display:none}.page.active{display:block}
+.mt{margin-top:12px}
+@media (max-width:640px){
+  .wrap{padding:12px}
+  h1{font-size:17px}
+  .grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  .card{padding:10px}.card .v{font-size:19px}
+  .tab{padding:6px 9px;font-size:12px}
+  .bar-label{width:110px}
+  th,td{padding:7px 8px;font-size:12px}
+}
 </style>
 </head>
 <body>
-<h1>🤖 Crypto-AlrtBot — Admin Dashboard</h1>
-<div class="sub">Backend overview: scheduler workers, signals & analytics · auto-refreshes every 60s <span id="upd" class="refresh"></span></div>
+<nav><div class="nav-inner">
+<span class="brand">🤖 AlrtBot Admin</span>
+<button class="tab active" data-page="overview">Overview</button>
+<button class="tab" data-page="signals">Signals</button>
+<button class="tab" data-page="results">Results</button>
+<button class="tab" data-page="paper">Paper</button>
+<button class="tab" data-page="workers">Workers</button>
+<span id="upd" class="refresh" style="margin-left:auto"></span>
+</div></nav>
+<div class="wrap">
+<div class="sub">Backend overview: scheduler workers, signals & analytics · auto-refreshes every 60s</div>
 
+<section class="page active" id="page-overview">
 <h2>Workers / Status</h2>
 <div class="grid" id="status-cards"></div>
-
 <h2>Signals per Symbol</h2>
 <div class="card"><div id="bars-symbol"></div></div>
-
 <h2>Signals per Day</h2>
 <div class="card"><div id="bars-day"></div></div>
+</section>
 
+<section class="page" id="page-signals">
+<h2>Recent Signals</h2>
+<div class="table-scroll"><table><thead><tr><th>Time (UTC)</th><th>Symbol</th><th>Side</th><th>Entry</th><th>SL</th><th>TP1</th><th>Conf</th><th>Strategy</th><th>Regime</th></tr></thead><tbody id="rows"></tbody></table></div>
+</section>
+
+<section class="page" id="page-results">
 <h2>Live Results (outcome ledger)</h2>
 <div class="grid" id="outcome-cards"></div>
-<div class="card" style="margin-top:12px"><div id="equity"></div></div>
-<table style="margin-top:12px"><thead><tr><th>Signal</th><th>Symbol</th><th>Side</th><th>Entry Hit</th><th>First Event</th><th>Net R</th><th>Status</th><th>Liq Price</th><th>Hold Time</th><th>Final</th></tr></thead><tbody id="orows"></tbody></table>
+<div class="card mt"><div id="equity"></div></div>
+<div class="table-scroll mt"><table><thead><tr><th>Signal</th><th>Symbol</th><th>Side</th><th>Entry Hit</th><th>First Event</th><th>Net R</th><th>Status</th><th>Liq Price</th><th>Hold Time</th><th>Final</th></tr></thead><tbody id="orows"></tbody></table></div>
+</section>
 
+<section class="page" id="page-paper">
 <h2>Paper Trading (virtual $1,000 — live test, no real money)</h2>
 <div class="grid" id="paper-cards"></div>
-<div class="card" style="margin-top:12px"><div id="paper-equity"></div></div>
-<table style="margin-top:12px"><thead><tr><th>Settled</th><th>Symbol</th><th>Side</th><th>Event</th><th>Net R</th><th>P&amp;L $</th><th>Hold Time</th><th>Equity $</th></tr></thead><tbody id="prows"></tbody></table>
+<div class="card mt"><div id="paper-equity"></div></div>
+<div class="table-scroll mt"><table><thead><tr><th>Settled</th><th>Symbol</th><th>Side</th><th>Event</th><th>Net R</th><th>P&amp;L $</th><th>Hold Time</th><th>Equity $</th></tr></thead><tbody id="prows"></tbody></table></div>
+</section>
 
-<h2>Recent Signals</h2>
-<table><thead><tr><th>Time (UTC)</th><th>Symbol</th><th>Side</th><th>Entry</th><th>SL</th><th>TP1</th><th>Conf</th><th>Strategy</th><th>Regime</th></tr></thead><tbody id="rows"></tbody></table>
-
+<section class="page" id="page-workers">
 <h2>Worker Scans (proof every cycle ran)</h2>
-<table><thead><tr><th>Time (UTC)</th><th>Type</th><th>Status</th><th>Candidates</th><th>Published</th></tr></thead><tbody id="scans"></tbody></table>
-
+<div class="table-scroll"><table><thead><tr><th>Time (UTC)</th><th>Type</th><th>Status</th><th>Candidates</th><th>Published</th></tr></thead><tbody id="scans"></tbody></table></div>
 <h2>Cooldowns (dedup ledger)</h2>
 <div class="card"><div id="cooldowns"></div></div>
+</section>
+</div>
 
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
@@ -265,6 +300,13 @@ async function load(){
   }catch(e){ document.getElementById('upd').textContent = '· error loading ('+e.message+(TOKEN?'':', hint: ?token=ADMIN_TOKEN')+')'; }
 }
 function card(v,k){ return '<div class="card"><div class="v">'+v+'</div><div class="k">'+k+'</div></div>'; }
+function showPage(name){
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.page===name));
+  document.querySelectorAll('.page').forEach(s=>s.classList.toggle('active', s.id==='page-'+name));
+  try{ history.replaceState(null,'',location.pathname+location.search+'#'+name); }catch(e){}
+}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click', ()=>showPage(b.dataset.page)));
+(function(){ const h=(location.hash||'').replace('#',''); if(h && document.getElementById('page-'+h)) showPage(h); })();
 load(); setInterval(load, 60000);
 </script>
 </body>
