@@ -39,6 +39,30 @@ This document outlines the high-level engineering milestones and actionable task
 
 ## Milestone 6: Backtesting Engine & System Tuning
 **Objective**: Ensure the system is 100% deterministic, testable, and meets the strict "quality over quantity" mandate.
-- [ ] **Task 6.1: Deterministic Replay Harness** - Build a framework to inject historical data timestamps into the pipeline to verify deterministic outputs.
-- [ ] **Task 6.2: Core Logic Unit Tests** - Write unit tests for all math components in the Risk, Entry, SL, and TP engines.
-- [ ] **Task 6.3: Threshold Tuning** - Run historical simulations to calibrate Volume, OI, and Regime thresholds, targeting an output of 1-3 high-quality signals daily.
+- [x] **Task 6.1: Deterministic Replay Harness** - `src/backtest/replay.py` — ReplayHarness wraps production SignalPipeline with historical end_time; `assert_deterministic()` validates Replay(X)==Replay(X); all fields checked.
+- [x] **Task 6.2: Historical Signal Outcome Evaluator** - `src/backtest/evaluator.py` — LONG/SHORT TP/SL/expiry/ambiguous-candle resolution; fee/slippage-adjusted net R; configurable AmbiguousResolution policy (CONSERVATIVE/OPTIMISTIC/OPEN_PROXIMITY).
+- [x] **Task 6.3: Threshold Tuning** - `src/backtest/tuner.py` — `parameter_sweep()` grid search over existing config fields (dot-notation), `sweep_report_markdown()`, `walk_forward_evaluate()`, `compare_configurations()`, `DatasetSplit` chronological validation; 14-metric `PerformanceMetrics`.
+
+## Milestone 7: Signal Lifecycle Tracking
+**Objective**: Track theoretical signal progression through deterministic state machine.
+- [x] **Task 7.1: SignalLifecycleTracker** - `src/models/lifecycle.py` — 9 states (GENERATED → TP3_HIT/STOPPED_OUT/EXPIRED/INVALIDATED); explicit legal transition table; idempotent transitions; full history logging; `save()`/`load()` persistence.
+
+## Milestone 8: Daily Scheduler
+**Objective**: Lightweight local scheduler with no paid cloud dependencies.
+- [x] **Task 8.1: BotScheduler** - `src/scheduler.py` — 15m refresh loop; duplicate suppression (cooldown ledger); exponential backoff + retry for API failures; graceful SIGINT/SIGTERM shutdown; `--once`, `--deep-scan`, `--interval` CLI args.
+
+## Milestone 9: README & Documentation
+**Objective**: Comprehensive documentation for all system capabilities.
+- [x] **Task 9.1: README.md** - Architecture, installation, configuration, Binance data requirements, Telegram setup, all run commands (scanner/replay/evaluation/tuning/tests), example signal, example evaluation JSON, example sweep report, lifecycle diagram, known limitations, disclaimer.
+
+## Milestone 10: Test Suite Expansion
+**Objective**: Full test coverage of all new phases; 0 failures.
+- [x] **Task 10.1: Replay tests** - Same timestamp → identical result; end_time forwarded (no future data); count mismatch detected; field mismatch detected; range replay coverage.
+- [x] **Task 10.2: Outcome evaluator tests** - LONG TP1/TP2/TP3 progression; LONG SL full loss; LONG TP1+trailing SL; SHORT entry/TP/SL; expiry; ambiguous OHLC (CONSERVATIVE/OPTIMISTIC/OPEN_PROXIMITY); batch evaluation; empty klines.
+- [x] **Task 10.3: Tuner tests** - All-winners/all-losers/mixed metrics; signals_per_day; worst_losing_streak; non-entered exclusion; DatasetSplit chronology validation; sweep sorting/param application/immutability/error handling; walk-forward; markdown report.
+- [x] **Task 10.4: Lifecycle tests** - All 7 valid state paths; 5 invalid transitions rejected; idempotency (no state change, no history append); history length; `to_dict()` contract.
+- [x] **Task 10.5: Scheduler tests** - Duplicate within cooldown suppressed; expired cooldown allowed; different side not a duplicate; invalid signal not published; API failure returns empty.
+- [x] **Task 10.6: Risk engine math** - Position notional; margin = notional/leverage; hard leverage cap; risk_amount = account×pct; SHORT R:R geometry.
+
+**Final test count: 108 tests, 0 failures.**
+

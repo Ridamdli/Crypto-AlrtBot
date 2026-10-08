@@ -1,11 +1,50 @@
+# Secrets
 .env
+*.env
+.env.local
+
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 .pytest_cache/
-data_store/
+.mypy_cache/
+.ruff_cache/
 *.egg-info/
 dist/
 build/
 .venv/
 venv/
+
+# Data & Cache
+data_store/
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+
+# Reports (generated - keep source docs)
+reports/*.json
+reports/*.md
+!reports/README.md
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Coverage
+.coverage
+htmlcov/

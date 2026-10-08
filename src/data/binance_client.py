@@ -1,6 +1,6 @@
 import requests
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from src.utils.logger import get_logger
 
@@ -45,14 +45,19 @@ class BinanceFuturesClient:
         """Fetch current open interest."""
         return self._request("GET", "/fapi/v1/openInterest", params={"symbol": symbol})
     
-    def get_open_interest_hist(self, symbol: str, period: str = "15m", limit: int = 30) -> list:
+    def get_open_interest_hist(self, symbol: str, period: str = "15m", limit: int = 30, end_time: Optional[int] = None) -> list:
         """Fetch historical open interest."""
-        return self._request("GET", "/futures/data/openInterestHist", params={"symbol": symbol, "period": period, "limit": limit})
+        params = {"symbol": symbol, "period": period, "limit": limit}
+        if end_time:
+            params["endTime"] = end_time
+        return self._request("GET", "/futures/data/openInterestHist", params=params)
 
-    
-    def get_funding_rate(self, symbol: str) -> list:
+    def get_funding_rate(self, symbol: str, limit: int = 100, end_time: Optional[int] = None) -> list:
         """Fetch funding rate history."""
-        return self._request("GET", "/fapi/v1/fundingRate", params={"symbol": symbol, "limit": 100})
+        params = {"symbol": symbol, "limit": limit}
+        if end_time:
+            params["endTime"] = end_time
+        return self._request("GET", "/fapi/v1/fundingRate", params=params)
     
     def get_mark_price(self, symbol: str) -> Dict[str, Any]:
         """Fetch mark price and current funding rate."""

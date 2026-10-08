@@ -1,15 +1,15 @@
 from typing import List, Dict, Any
 from src.utils.logger import get_logger
-from src.config import CONFIG
+from src.config import AppConfig
 
 logger = get_logger(__name__)
 
 class ScoringEngine:
-    def __init__(self):
-        self.cfg = CONFIG.scoring
-        self.min_confidence = CONFIG.signals.min_confidence
+    def __init__(self, config: AppConfig):
+        self.cfg = config.scoring
+        self.min_confidence = config.signals.min_confidence
 
-    def score_candidate(self, candidate_data: Dict[str, Any]) -> int:
+    def score_candidate(self, candidate_data: Dict[str, Any], config: AppConfig) -> int:
         """
         Calculates a confidence score 0-100 for a trade setup candidate.
         Weights per PRD §23: regime(20), structure(15), momentum(15),
@@ -38,18 +38,28 @@ class ScoringEngine:
         # 4. Volume (15pts)
         vol_data = candidate_data.get("volume_data", {})
         ratio = vol_data.get("ratio", 0)
-        if ratio >= CONFIG.volume.strong_ratio:
+        if ratio >= config.volume.strong_ratio:
             score += self.cfg.volume_weight
-        elif ratio >= CONFIG.volume.min_ratio:
+        elif ratio >= config.volume.min_ratio:
             score += int(self.cfg.volume_weight * 0.7)
 
         # 5. Open Interest (15pts)
         oi_data = candidate_data.get("oi_data", {})
+        oi_status = oi_data.get("status", "UNKNOWN")
         oi_signal = oi_data.get("signal", "neutral")
-        if (side == "LONG" and oi_signal == "bullish") or (side == "SHORT" and oi_signal == "bearish"):
-            score += self.cfg.oi_weight
-        elif not oi_data.get("divergence"):
-            score += self.cfg.oi_weight // 2
+        
+        if oi_status == "CONFIRMED":
+            if (side == "LONG" and oi_signal == "bullish") or (side == "SHORT" and oi_signal == "bearish"):
+                score += self.cfg.oi_weight
+            else:
+                # OI confirmed but opposite direction - still some info value
+                score += self.cfg.oi_weight // 2
+        elif oi_status == "UNKNOWN":
+            # No OI bonus or penalty
+            pass
+        elif oi_status == "REJECTED":
+            # OI divergence - small penalty
+            score -= self.cfg.oi_weight // 2
 
         # 6. Funding (5pts) – penalty if extreme vs side direction
         funding_penalty = candidate_data.get("funding_penalty", 0)
@@ -63,19 +73,23 @@ class ScoringEngine:
         rr = risk_data.get("risk_reward_ratios", {}).get("rr_tp1", 0)
         if rr >= 2.0:
             score += self.cfg.rr_weight
-        elif rr >= CONFIG.risk.min_rr_tp1:
+        elif rr >= config.risk.min_rr_tp1:
             score += int(self.cfg.rr_weight * 0.7)
 
         return min(100, score)
 
-    def rank_candidates(self, candidates: List[Dict[str, Any]], top_n: int = 3) -> List[Dict[str, Any]]:
-        """Score, filter by min confidence, and return top N."""
+    def rank_candidates(self, candidates: List[Dict[str, Any]], top_n=None, config: AppConfig = None) -> List[Dict[str, Any]]:
+        """Score, filter by min confidence, and return every viable signal.
+
+        top_n=None (default) means uncapped: all qualifying setups publish.
+        A numeric top_n keeps only the first N by confidence (legacy mode).
+        """
         for cand in candidates:
-            cand["confidence"] = self.score_candidate(cand)
+            cand["confidence"] = self.score_candidate(cand, config or AppConfig())
 
         viable = [c for c in candidates if c["confidence"] >= self.min_confidence]
         viable.sort(key=lambda x: x["confidence"], reverse=True)
 
-        top = viable[:top_n]
-        logger.info(f"Scored {len(candidates)} candidates → {len(viable)} viable → returning {len(top)}")
-        return top
+        out = viable if top_n is None else viable[:top_n]
+        logger.info(f"Scored {len(candidates)} candidates -> {len(viable)} viable -> returning {len(out)}")
+        return out

@@ -1,4 +1,4 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import concurrent.futures
 from src.data.ohlcv_fetcher import OHLCVFetcher
 from src.utils.logger import get_logger
@@ -10,7 +10,7 @@ class TimeframeManager:
         self.fetcher = fetcher
         self.timeframes = timeframes or ["15m", "1h", "4h"]
 
-    def fetch_multi_timeframe(self, symbol: str, limit: int = 200) -> Dict[str, List[Dict[str, Any]]]:
+    def fetch_multi_timeframe(self, symbol: str, limit: int = 200, end_time: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
         """
         Synchronously fetch multi-timeframe OHLCV data.
         Returns a dictionary keyed by timeframe.
@@ -19,7 +19,7 @@ class TimeframeManager:
         logger.info(f"Fetching multi-timeframe data for {symbol} ({', '.join(self.timeframes)})")
         
         def fetch_tf(tf):
-            return tf, self.fetcher.fetch_standardized_klines(symbol, tf, limit)
+            return tf, self.fetcher.fetch_standardized_klines(symbol, tf, limit, end_time=end_time)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.timeframes)) as executor:
             future_to_tf = {executor.submit(fetch_tf, tf): tf for tf in self.timeframes}

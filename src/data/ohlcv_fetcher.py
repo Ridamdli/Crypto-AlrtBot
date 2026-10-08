@@ -8,7 +8,7 @@ class OHLCVFetcher:
     def __init__(self, client: BinanceFuturesClient):
         self.client = client
 
-    def fetch_standardized_klines(self, symbol: str, interval: str, limit: int = 500) -> List[Dict[str, Any]]:
+    def fetch_standardized_klines(self, symbol: str, interval: str, limit: int = 500, end_time: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Fetches OHLCV data and returns it in a standardized list of dictionaries.
         Binance Kline layout:
@@ -27,7 +27,7 @@ class OHLCVFetcher:
             11: Ignore.
         ]
         """
-        raw_klines = self.client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        raw_klines = self.client.get_klines(symbol=symbol, interval=interval, limit=limit, end_time=end_time)
         standardized_data = []
         for k in raw_klines:
             standardized_data.append({

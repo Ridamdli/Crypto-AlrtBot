@@ -1,0 +1,14 @@
+.env
+.git
+__pycache__/
+*.pyc
+.pytest_cache/
+data_store/
+reports/
+tests/
+docs/
+.gitignore
+README.md
+AGENT.md
+tasks.md
+Dockerfile

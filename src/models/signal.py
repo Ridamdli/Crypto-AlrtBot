@@ -12,6 +12,7 @@ class SignalModel(BaseModel):
     side: str
     strategy_id: str = "momentum_volume_v1"
     strategy_version: str = "1.0.0"
+    configuration_hash: Optional[str] = None
 
     # Trade parameters
     entry: float
