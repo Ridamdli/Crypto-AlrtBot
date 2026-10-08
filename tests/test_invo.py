@@ -51,6 +51,51 @@ def test_live_share_requires_login_first(monkeypatch):
         c.share_position(_sig(), dry_run=False)
 
 
+def test_paper_share_payload_matches_captured_shape():
+    c = InvoClient()
+    p = c.build_paper_share_payload(
+        symbol="BTCUSDT", long=False, leverage=7,
+        entry_sim=1.1585205451150278, price_target=29,
+        stop_loss=None, liquidation_price=93233.43915343916,
+        portfolio_id="c43ec3e9-db34-4935-8219-4c81d7bcfb9e",
+    )
+    assert p == {
+        "ticker": "BTC",
+        "portfolioId": "c43ec3e9-db34-4935-8219-4c81d7bcfb9e",
+        "directionLong": False,
+        "entrySim": 1.1585205451150278,
+        "priceTarget": 29,
+        "stopLoss": None,
+        "leverage": 7,
+        "liquidationPrice": 93233.43915343916,
+    }
+
+
+def test_paper_headers_carry_required_app_fields():
+    h = InvoClient._paper_headers("tok123")
+    assert h["authorization"] == "Bearer tok123"
+    for k in ("nonce", "timestamp", "x-app-build-number", "x-app-release",
+              "x-app-version", "x-platform"):
+        assert h[k]
+
+
+def test_paper_share_dry_run_posts_nothing(monkeypatch):
+    c = InvoClient()
+    calls = []
+    monkeypatch.setattr(c.session, "post",
+                        lambda *a, **k: calls.append((a, k)) or None)
+    out = c.share_paper_trade(
+        {"symbol": "BTCUSDT", "side": "SHORT", "leverage": 7,
+         "stop_loss": None, "entry": 81500.0},
+        token="tok", portfolio_id="pid",
+        entry_sim=1.15, price_target=29, dry_run=True,
+    )
+    assert out["dry_run"] is True
+    assert calls == []
+    assert out["payload"]["ticker"] == "BTC"
+    assert out["payload"]["directionLong"] is False
+
+
 def test_live_share_posts_exact_path(monkeypatch):
     c = InvoClient(email="u@x.com", password="pw")
     c.access_token = "tok"

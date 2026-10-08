@@ -20,6 +20,8 @@ In dry-run mode share_position() builds and validates the exact payload,
 logs it, and returns it WITHOUT any POST. Nothing moves until both flags
 are deliberately flipped AND Invo credentials are configured.
 """
+import base64
+import os
 import time
 import uuid
 from typing import Any, Dict, Optional
@@ -31,6 +33,19 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_BASE_URL = "https://api.involio.com/v1_0"
+
+# Paper-share (no real money) posts to a different host, captured live from
+# the app: POST https://api.invoapp.com/v1_0/investments/ticker/create
+# Rate limit observed: 500 req / 5 min. Required headers: authorization,
+# nonce (random base64), timestamp (ms epoch), x-app-build-number,
+# x-app-release, x-app-version, x-platform.
+PAPER_SHARE_URL = "https://api.invoapp.com/v1_0/investments/ticker/create"
+APP_HEADERS = {
+    "x-app-build-number": "83",
+    "x-app-release": "1.0.59",
+    "x-app-version": "0.0.85",
+    "x-platform": "web",
+}
 
 # Hyperliquid asset indices for our universe (mainnet). Verified at share
 # time against the exchange metadata; unknown coins raise instead of guessing.
@@ -121,6 +136,93 @@ class InvoClient:
     def ensure_auth(self) -> None:
         if not self.access_token:
             self.login()
+
+    # ── paper share (no real money) ───────────────────────────────────
+    @staticmethod
+    def _paper_headers(token: str) -> Dict[str, str]:
+        """Exact header set the app sends with the paper-share POST."""
+        nonce = base64.b64encode(os.urandom(16)).decode()
+        headers = {
+            "authorization": f"Bearer {token}",
+            "content-type": "application/json",
+            "nonce": nonce,
+            "timestamp": str(int(time.time() * 1000)),
+            **APP_HEADERS,
+        }
+        return headers
+
+    @staticmethod
+    def build_paper_share_payload(
+        symbol: str,
+        long: bool,
+        leverage: float,
+        entry_sim: float,
+        price_target: Optional[float],
+        stop_loss: Optional[float],
+        liquidation_price: Optional[float],
+        portfolio_id: str,
+    ) -> Dict[str, Any]:
+        """Paper-share body, field-for-field as captured live from the app.
+
+        entry_sim / price_target semantics are taken from the caller's
+        explicit arguments (see scheduler mapping) — never guessed here.
+        """
+        coin = symbol.replace("USDT", "").replace("USDC", "").upper()
+        return {
+            "ticker": coin,
+            "portfolioId": portfolio_id,
+            "directionLong": bool(long),
+            "entrySim": float(entry_sim),
+            "priceTarget": price_target,
+            "stopLoss": stop_loss,
+            "leverage": int(leverage),
+            "liquidationPrice": liquidation_price,
+        }
+
+    def share_paper_trade(
+        self,
+        signal: Dict[str, Any],
+        token: str,
+        portfolio_id: str,
+        entry_sim: float,
+        price_target: Optional[float],
+        dry_run: bool = True,
+    ) -> Dict[str, Any]:
+        """Share one signal as a PAPER trade (no real money).
+
+        dry_run=True (default): build + validate payload, POST nothing.
+        dry_run=False: POSTs to the live portfolio immediately.
+        """
+        from src.papertrade.liquidation import estimate_liq_price
+
+        payload = self.build_paper_share_payload(
+            symbol=signal["symbol"],
+            long=(signal.get("side", "").upper() == "LONG"),
+            leverage=signal.get("leverage", 10),
+            entry_sim=entry_sim,
+            price_target=price_target,
+            stop_loss=signal.get("stop_loss"),
+            liquidation_price=estimate_liq_price(
+                signal.get("entry"), signal.get("side"), signal.get("leverage", 10)
+            ),
+            portfolio_id=portfolio_id,
+        )
+        if dry_run:
+            logger.info(f"[Invo PAPER DRY-RUN] would share {signal.get('symbol')} "
+                        f"{signal.get('side')}: {payload}")
+            return {"dry_run": True, "payload": payload}
+        resp = self.session.post(
+            PAPER_SHARE_URL, json=payload,
+            headers=self._paper_headers(token), timeout=self.timeout,
+        )
+        if resp.status_code not in (200, 201):
+            raise InvoApiError(resp.status_code, resp.text)
+        try:
+            result = resp.json()
+        except ValueError:
+            result = {"raw": resp.text}
+        logger.info(f"[Invo PAPER] shared {signal.get('symbol')} {signal.get('side')}: {result}")
+        return {"dry_run": False, "payload": payload, "response": result}
 
     # ── share ───────────────────────────────────────────────────────────
     @staticmethod
