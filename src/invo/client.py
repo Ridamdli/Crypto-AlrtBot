@@ -235,6 +235,16 @@ class InvoClient:
     ) -> Dict[str, Any]:
         """Share one signal as a PAPER trade (no real money).
 
+        Field mapping (verified live 2026-10-08 against the test portfolio):
+          ticker            base asset, e.g. BTCUSDT -> BTC
+          directionLong     side == LONG
+          entrySim          position size in SIM DOLLARS (portfolio sim bank;
+                            verified: posting 10.0 debited remainingSim by 10.0)
+          priceTarget       take-profit as ABSOLUTE price (form-verified)
+          stopLoss          stop-loss as ABSOLUTE price (null allowed)
+          leverage          integer 1..40
+          liquidationPrice  app-computed display value; 0.0 accepted at 1x
+
         dry_run=True (default): build + validate payload, POST nothing.
         dry_run=False: POSTs to the live portfolio immediately.
         """

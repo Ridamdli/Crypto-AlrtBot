@@ -160,15 +160,11 @@ class BotScheduler:
     def _share_paper_to_invo(self, published: list) -> None:  # noqa: C901 (gated bridge)
         """Auto-share published signals as Invo PAPER trades (no real money).
 
+        Mapping verified live: entrySim = position size in sim dollars
+        (INVO_SIM_SIZE, default 10.0); priceTarget/stopLoss = absolute prices.
         Gate: INVO_PAPER_ENABLED=true. Needs INVO_TOKEN + INVO_PORTFOLIO_ID.
-        entrySim/price_target derivation is pasted from the next capture;
-        until INVO_ENTRY_SIM_MODE is explicitly set, this dry-runs only.
         """
         if os.getenv("INVO_PAPER_ENABLED", "false").lower() != "true":
-            return
-        if os.getenv("INVO_ENTRY_SIM_MODE", "unresolved") == "unresolved":
-            logger.warning("[Scheduler] Invo paper-share skipped: entrySim semantics "
-                           "unresolved (need one LONG capture). Leaving dry-run.")
             return
         try:
             from src.invo.client import InvoClient
@@ -179,14 +175,18 @@ class BotScheduler:
                 logger.warning("[Scheduler] Invo paper-share skipped: INVO_TOKEN/INVO_PORTFOLIO_ID missing")
                 return
             from src.invo.client import InvoConflictError, record_share
+            try:
+                sim_size = float(os.getenv("INVO_SIM_SIZE", "10.0"))
+            except ValueError:
+                sim_size = 10.0
             client = InvoClient()
             for sig in published:
                 try:
-                    out = client.share_paper_trade(
+                    client.share_paper_trade(
                         {"symbol": sig.symbol, "side": sig.side,
                          "leverage": sig.leverage, "stop_loss": sig.stop_loss},
                         token=token, portfolio_id=portfolio,
-                        entry_sim=_resolve_entry_sim(sig),
+                        entry_sim=sim_size,
                         price_target=float(sig.tp1),
                         dry_run=dry,
                     )
@@ -318,19 +318,6 @@ class BotScheduler:
                 time.sleep(5)
 
         logger.info("[Scheduler] Scheduler loop exited cleanly.")
-
-def _resolve_entry_sim(sig) -> float:
-    """Derive Invo entrySim from a bot signal.
-
-    BLOCKED: the captured SHORT sample (entrySim=1.1585, priceTarget=29)
-    does not pin the encoding. Needs one LONG capture with TP+SL set plus
-    the market price at capture time. Raises until resolved — never guess.
-    """
-    raise NotImplementedError(
-        "entrySim semantics unresolved: capture one LONG paper share "
-        "(with TP+SL) + BTC price at that moment, then encode the mapping here."
-    )
-
 
 def main():
     parser = argparse.ArgumentParser(description="Crypto Daily Futures Signal Engine Scheduler")

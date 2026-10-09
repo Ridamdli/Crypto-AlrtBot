@@ -149,6 +149,24 @@ def test_share_ledger_roundtrip(tmp_path):
     assert load_share_ledger(str(tmp_path))["SIG-1"]["baseIds"] == ["abc"]
 
 
+def test_paper_share_uses_sim_dollar_size():
+    """entrySim = position size in sim dollars (verified live 2026-10-08:
+    posting entrySim=10.0 debited remainingSim by exactly 10.0)."""
+    from src.invo.client import InvoClient
+    c = InvoClient()
+    p = c.build_paper_share_payload(
+        symbol="BTCUSDT", long=True, leverage=1,
+        entry_sim=10.0, price_target=85000,
+        stop_loss=78000, liquidation_price=0.0,
+        portfolio_id="70bf5669-fa49-4014-b86e-43b2d51f757c",
+    )
+    assert p["entrySim"] == 10.0
+    assert p["priceTarget"] == 85000
+    assert p["stopLoss"] == 78000
+    assert p["directionLong"] is True
+    assert p["ticker"] == "BTC"
+
+
 def test_live_share_posts_exact_path(monkeypatch):
     c = InvoClient(email="u@x.com", password="pw")
     c.access_token = "tok"
