@@ -240,8 +240,9 @@ def test_conflict_precheck_is_local_only(tmp_path, monkeypatch):
     import json as _j
     import os as _o
     from src.invo.client import InvoClient
+    import time as _t
     shares = {"SIG-1": {"symbol": "BTCUSDT", "portfolioId": "P",
-                        "baseIds": ["b1"]}}
+                        "baseIds": ["b1"], "shared_at": int(_t.time())}}
     with open(_o.path.join(str(tmp_path), "invo_shares.json"), "w", encoding="utf-8") as f:
         _j.dump(shares, f)
     import src.invo.client as _mod
