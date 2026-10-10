@@ -187,10 +187,24 @@ class BotScheduler:
                 client.ensure_auth(email=email, app_password=app_password,
                                    device_id=os.getenv("INVO_DEVICE_ID", ""))
                 token = client.access_token or ""
+                # Local conflict screen (zero requests): skip coins we already
+                # shared while their outcome is still open.
+                import json as _json
+                try:
+                    with open("data_store/outcomes.json", encoding="utf-8") as _f:
+                        _outcomes = _json.load(_f)
+                        if not isinstance(_outcomes, dict):
+                            _outcomes = {}
+                except (FileNotFoundError, ValueError, OSError):
+                    _outcomes = {}
             else:
                 token = ""
+                _outcomes = {}
             for sig in published:
                 try:
+                    if not dry and client.already_shared_open(sig.symbol, portfolio, _outcomes):
+                        logger.info(f"[Scheduler] Invo share skipped (open position already shared): {sig.symbol}")
+                        continue
                     out = client.share_paper_trade(
                         {"symbol": sig.symbol, "side": sig.side,
                          "leverage": sig.leverage, "stop_loss": sig.stop_loss},

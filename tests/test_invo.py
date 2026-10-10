@@ -33,8 +33,8 @@ def test_bad_side_rejected():
         c.build_position_payload("BTCUSDT", "SIDEWAYS", 10)
 
 
-def test_dry_run_posts_nothing():
-    c = InvoClient()
+def test_dry_run_posts_nothing(tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
     calls = []
     c._post = lambda path, payload: calls.append((path, payload)) or {}
     out = c.share_position(_sig(), dry_run=True)
@@ -42,8 +42,8 @@ def test_dry_run_posts_nothing():
     assert calls == []
 
 
-def test_live_share_requires_login_first(monkeypatch):
-    c = InvoClient()
+def test_live_share_requires_login_first(monkeypatch, tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
     assert c.access_token is None
     monkeypatch.setattr(c, "ensure_auth",
                         lambda: (_ for _ in ()).throw(InvoAuthError("no creds")))
@@ -107,9 +107,9 @@ class _Resp:
         return _json.loads(self._body)
 
 
-def test_paper_share_success_parses_base_ids(monkeypatch):
+def test_paper_share_success_parses_base_ids(monkeypatch, tmp_path):
     from src.invo.client import InvoClient
-    c = InvoClient()
+    c = InvoClient(storage_dir=str(tmp_path))
     monkeypatch.setattr(c.session, "post", lambda *a, **k: _Resp(200, (
         '{"success": true, "baseIds": ["8b3ae3cd-af4a-46cd-a100-1bae4a93ed8e"],'
         ' "remainingSim": 99, "error": null}'
@@ -124,9 +124,9 @@ def test_paper_share_success_parses_base_ids(monkeypatch):
     assert out["response"]["remainingSim"] == 99
 
 
-def test_paper_share_conflict_raises_with_base_ids(monkeypatch):
+def test_paper_share_conflict_raises_with_base_ids(monkeypatch, tmp_path):
     from src.invo.client import InvoConflictError, InvoClient
-    c = InvoClient()
+    c = InvoClient(storage_dir=str(tmp_path))
     monkeypatch.setattr(c.session, "post", lambda *a, **k: _Resp(200, (
         '{"success": false, "baseIds": [], "remainingSim": null, "error": '
         '{"msg": "An open investment in this asset already exists.", "code": null, '
@@ -167,9 +167,9 @@ def test_paper_share_uses_sim_dollar_size():
     assert p["ticker"] == "BTC"
 
 
-def test_otp_self_login_flow(monkeypatch):
+def test_otp_self_login_flow(monkeypatch, tmp_path):
     from src.invo.client import InvoClient
-    c = InvoClient(email="u@gmail.com")
+    c = InvoClient(email="u@gmail.com", storage_dir=str(tmp_path))
 
     class R:
         def __init__(self, status, body):
@@ -201,11 +201,12 @@ def test_otp_self_login_flow(monkeypatch):
     assert any(u.endswith("/auth/login/email/start") for u in calls)
 
 
-def test_ensure_auth_needs_creds():
+def test_ensure_auth_needs_creds(tmp_path):
     from src.invo.client import InvoAuthError, InvoClient
     import pytest as _pt
+    # isolated storage: must not pick up any real local session file
     with _pt.raises(InvoAuthError):
-        InvoClient().ensure_auth()
+        InvoClient(storage_dir=str(tmp_path)).ensure_auth()
 
 
 def test_password_login_is_dead():
@@ -213,6 +214,44 @@ def test_password_login_is_dead():
     import pytest as _pt
     with _pt.raises(InvoAuthError):
         InvoClient(email="u@gmail.com").login()
+
+
+def test_session_persists_and_otp_cooldown(tmp_path):
+    from src.invo.session import SessionStore
+    st = SessionStore(str(tmp_path))
+    assert st.load() == {}
+    st.save({"access_token": "A", "refresh_token": "R"})
+    assert st.load()["access_token"] == "A"
+    assert st.otp_allowed() is True
+    st.mark_otp()
+    assert st.otp_allowed() is False
+    assert st.otp_allowed(cooldown_s=0) is True
+
+
+def test_activity_log_appends_and_trims(tmp_path):
+    from src.invo.session import log_activity, read_activity
+    for i in range(5):
+        log_activity(str(tmp_path), "evt", {"i": i}, cap=3)
+    rows = read_activity(str(tmp_path), limit=10)
+    assert [r["detail"]["i"] for r in rows] == [2, 3, 4]
+
+
+def test_conflict_precheck_is_local_only(tmp_path, monkeypatch):
+    import json as _j
+    import os as _o
+    from src.invo.client import InvoClient
+    shares = {"SIG-1": {"symbol": "BTCUSDT", "portfolioId": "P",
+                        "baseIds": ["b1"]}}
+    with open(_o.path.join(str(tmp_path), "invo_shares.json"), "w", encoding="utf-8") as f:
+        _j.dump(shares, f)
+    import src.invo.client as _mod
+    monkeypatch.setattr(_mod, "load_share_ledger",
+                        lambda *a, **k: shares)
+    c = InvoClient()
+    assert c.already_shared_open("BTCUSDT", "P", {}) is True
+    assert c.already_shared_open("BTCUSDT", "P", {"SIG-1": {"final": True}}) is False
+    assert c.already_shared_open("ETHUSDT", "P", {}) is False
+    assert c.already_shared_open("BTCUSDT", "OTHER", {}) is False
 
 
 def test_live_share_posts_exact_path(monkeypatch):

@@ -119,13 +119,19 @@ class InvoClient:
         email: str = "",
         base_url: str = DEFAULT_BASE_URL,
         timeout: int = 15,
+        storage_dir: str = "data_store",
     ):
+        from src.invo.session import SessionStore, log_activity
         self.email = email
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
-        self.access_token: Optional[str] = None
-        self.refresh_token: Optional[str] = None
+        self.store = SessionStore(storage_dir)
+        self._log = lambda event, detail=None: log_activity(storage_dir, event, detail)
+        # Resume the persisted session so tokens live across restarts.
+        saved = self.store.load()
+        self.access_token: Optional[str] = saved.get("access_token")
+        self.refresh_token: Optional[str] = saved.get("refresh_token")
 
     # ── email + OTP self-login (Invo is OTP-only; no passwords exist) ───
     def start_email_login(self, email: str) -> Dict[str, Any]:
@@ -165,7 +171,11 @@ class InvoClient:
         self.access_token = data.get("accessToken")
         self.refresh_token = data.get("refreshToken")
         if not self.access_token:
+            self._log("login_failed", {"reason": "missing accessToken"})
             raise InvoAuthError(f"verify response missing accessToken: {str(data)[:200]}")
+        self.store.save({"access_token": self.access_token,
+                         "refresh_token": self.refresh_token})
+        self._log("login_ok", {})
         logger.info("Invo email-OTP login ok.")
         return {"user_id": data.get("userId"), "username": data.get("username")}
 
@@ -207,17 +217,23 @@ class InvoClient:
             new_refresh = resp.json().get("refreshToken")
             if new_refresh:
                 self.refresh_token = new_refresh
+            self.store.save({"access_token": self.access_token,
+                             "refresh_token": self.refresh_token})
+            self._log("refresh_ok", {})
             return bool(self.access_token)
         except Exception:
+            self._log("refresh_failed", {})
             return False
 
     def ensure_auth(self, email: str = "", app_password: str = "",
                     device_id: str = "", otp_wait_s: int = 120) -> None:
         """Fully autonomous login: reuse token, else refresh, else OTP self-login.
 
-        1. access_token set -> done. 2. refresh_token -> silent rotation.
-        3. else: start OTP -> read code from mailbox -> verify. Raises
-        InvoAuthError if every path fails. Secrets stay in memory only.
+        1. memory/disk token -> done (zero requests). 2. refresh_token ->
+        silent rotation (one cheap GET). 3. else: OTP self-login, gated by
+        OTP_COOLDOWN_S so a bad stretch can never look like an attack.
+        Raises InvoAuthError if every path fails. Secrets stay in memory
+        (tokens) or the gitignored session file (never the repo).
         """
         if self.access_token:
             return
@@ -226,7 +242,12 @@ class InvoClient:
             return
         if not email or not app_password:
             raise InvoAuthError("no session: provide email + Gmail app password for OTP self-login")
+        if not self.store.otp_allowed():
+            self._log("otp_skipped_cooldown", {"email": email})
+            raise InvoAuthError("OTP login inside cooldown window; will retry on a later cycle")
         from src.invo.mailbox import MailboxReader
+        self.store.mark_otp()
+        self._log("otp_start", {"email": email})
         self.start_email_login(email)
         import time as _time
         deadline = _time.time() + otp_wait_s
@@ -236,6 +257,7 @@ class InvoClient:
             if not code:
                 _time.sleep(10)
         if not code:
+            self._log("otp_no_code", {"email": email})
             raise InvoAuthError("no OTP code arrived in the inbox within the wait window")
         self.verify_email_code(email, code, device_id=device_id)
 
@@ -281,6 +303,25 @@ class InvoClient:
             "liquidationPrice": liquidation_price,
         }
 
+    def already_shared_open(self, symbol: str, portfolio_id: str,
+                            outcomes: Optional[Dict[str, Dict[str, Any]]] = None) -> bool:
+        """True if we already shared this coin and its outcome isn't final.
+
+        Purely local (share ledger + outcome ledger) — ZERO requests, so a
+        repeat setup never even touches the platform, let alone conflicts.
+        """
+        shares = load_share_ledger()
+        outcomes = outcomes or {}
+        for sid, rec in shares.items():
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("symbol") != symbol or rec.get("portfolioId") != portfolio_id:
+                continue
+            oc = outcomes.get(sid, {})
+            if not oc.get("final", False):
+                return True
+        return False
+
     def share_paper_trade(
         self,
         signal: Dict[str, Any],
@@ -322,6 +363,8 @@ class InvoClient:
         if dry_run:
             logger.info(f"[Invo PAPER DRY-RUN] would share {signal.get('symbol')} "
                         f"{signal.get('side')}: {payload}")
+            self._log("share_dry_run", {"symbol": signal.get("symbol"),
+                                        "side": signal.get("side")})
             return {"dry_run": True, "payload": payload}
         resp = self.session.post(
             PAPER_SHARE_URL, json=payload,
@@ -341,8 +384,16 @@ class InvoClient:
             err = result.get("error") or {}
             data = err.get("data") or {}
             if "already exists" in str(err.get("msg", "")):
+                self._log("share_conflict", {"symbol": signal.get("symbol"),
+                                             "baseIds": data.get("conflicting_base_ids", [])})
                 raise InvoConflictError(data.get("conflicting_base_ids", []), result)
+            self._log("share_failed", {"symbol": signal.get("symbol"),
+                                       "response": str(result)[:200]})
             raise InvoApiError(resp.status_code, str(result)[:300])
+        self._log("share_posted", {"symbol": signal.get("symbol"),
+                                   "side": signal.get("side"),
+                                   "baseIds": result.get("baseIds", []),
+                                   "remainingSim": result.get("remainingSim")})
         logger.info(
             f"[Invo PAPER] shared {signal.get('symbol')} {signal.get('side')}: "
             f"baseIds={result.get('baseIds')} remainingSim={result.get('remainingSim')}"

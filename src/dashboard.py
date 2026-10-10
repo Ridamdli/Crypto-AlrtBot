@@ -89,6 +89,30 @@ def load_outcomes():
     return ledger if isinstance(ledger, dict) else {}
 
 
+def load_invo_status():
+    """Invo bridge status: session age + activity tail. Never exposes tokens."""
+    import time as _time
+    sess = _read_json(os.path.join(DATA_DIR, "invo_session.json"), {})
+    upd = sess.get("updated_at", 0) or 0
+    try:
+        age_h = round((_time.time() - float(upd)) / 3600.0, 1) if upd else None
+    except (TypeError, ValueError):
+        age_h = None
+    try:
+        from src.invo.session import read_activity
+        activity = read_activity(DATA_DIR, limit=30)
+    except Exception:
+        activity = []
+    shares = _read_json(os.path.join(DATA_DIR, "invo_shares.json"), {})
+    return {
+        "has_session": bool(sess.get("access_token")),
+        "session_age_hours": age_h,
+        "last_otp_at": sess.get("last_otp_at"),
+        "shared_setups": len(shares) if isinstance(shares, dict) else 0,
+        "activity": activity,
+    }
+
+
 def compute_outcome_stats(ledger):
     recs = list(ledger.values())
     final = [r for r in recs if r.get("final")]
@@ -212,6 +236,7 @@ nav{position:sticky;top:0;z-index:10;background:rgba(11,14,20,.96);border-bottom
 <button class="tab" data-page="signals">Signals</button>
 <button class="tab" data-page="results">Results</button>
 <button class="tab" data-page="paper">Paper</button>
+<button class="tab" data-page="invo">Invo</button>
 <button class="tab" data-page="workers">Workers</button>
 <span id="upd" class="refresh" style="margin-left:auto"></span>
 </div></nav>
@@ -246,6 +271,13 @@ nav{position:sticky;top:0;z-index:10;background:rgba(11,14,20,.96);border-bottom
 <div class="table-scroll mt"><table><thead><tr><th>Settled</th><th>Symbol</th><th>Side</th><th>Event</th><th>Net R</th><th>P&amp;L $</th><th>Hold Time</th><th>Equity $</th></tr></thead><tbody id="prows"></tbody></table></div>
 </section>
 
+<section class="page" id="page-invo">
+<h2>Invo Auto-Share (paper trades, no real money)</h2>
+<div class="grid" id="invo-cards"></div>
+<h2>Bridge Activity Log</h2>
+<div class="table-scroll"><table><thead><tr><th>Time (UTC)</th><th>Event</th><th>Detail</th></tr></thead><tbody id="invo-rows"></tbody></table></div>
+</section>
+
 <section class="page" id="page-workers">
 <h2>Worker Scans (proof every cycle ran)</h2>
 <div class="table-scroll"><table><thead><tr><th>Time (UTC)</th><th>Type</th><th>Status</th><th>Candidates</th><th>Published</th></tr></thead><tbody id="scans"></tbody></table></div>
@@ -260,7 +292,7 @@ async function get(p){ const sep = p.includes('?') ? '&' : '?'; const url = TOKE
 function bars(el, obj){ const e=document.getElementById(el); const ks=Object.keys(obj); if(!ks.length){e.innerHTML='<span class="warn">no data</span>';return;} const mx=Math.max(...ks.map(k=>obj[k])); e.innerHTML=ks.map(k=>'<div class="bar-row"><div class="bar-label">'+k+'</div><div class="bar" style="width:'+Math.max(2,Math.round(obj[k]/mx*280))+'px"></div><div>'+obj[k]+'</div></div>').join(''); }
 async function load(){
   try{
-    const [st, sig, an, oc, pp] = await Promise.all([get('/api/status'), get('/api/signals?limit=50'), get('/api/analytics'), get('/api/outcomes'), get('/api/paper')]);
+    const [st, sig, an, oc, pp, iv] = await Promise.all([get('/api/status'), get('/api/signals?limit=50'), get('/api/analytics'), get('/api/outcomes'), get('/api/paper'), get('/api/invo')]);
     document.getElementById('upd').textContent = '· updated ' + new Date().toLocaleTimeString();
     const last = st.last_signal;
     document.getElementById('status-cards').innerHTML =
@@ -295,6 +327,17 @@ async function load(){
     const pe = pp.equity_curve || [];
     document.getElementById('paper-equity').innerHTML = pe.length ? ('<div class="bar-label">Paper equity: <b class="'+(pe[pe.length-1].cum_pnl>=0?'ok':'warn')+'">'+(pe[pe.length-1].cum_pnl>=0?'+':'')+'$'+pe[pe.length-1].cum_pnl+'</b> over '+pe.length+' settled trades</div>' + pe.slice(-40).map(p=>'<div class="bar-row"><div class="bar-label">'+(p.t||'').slice(0,16)+'</div><div class="bar" style="width:'+Math.min(280,Math.abs(p.cum_pnl)*4+2)+'px;'+(p.cum_pnl<0?'background:var(--red)':'')+'"></div><div>$'+p.cum_pnl+'</div></div>').join('')) : '<span class="warn">no settled paper trades yet — positions settle when outcomes finalize</span>';
     document.getElementById('prows').innerHTML = (pp.recent_trades||[]).map(t=>'<tr><td>'+(t.settled_at||'').slice(0,16)+'</td><td><b>'+t.symbol+'</b></td><td class="'+(t.side==='LONG'?'long':'short')+'">'+t.side+'</td><td>'+(t.first_event||'—')+'</td><td>'+t.net_r+'R</td><td>'+t.pnl_usd+'</td><td>'+(t.holding_time||'—')+'</td><td>'+t.equity_after+'</td></tr>').join('') || '<tr><td colspan="8">no settled paper trades yet</td></tr>';
+    document.getElementById('invo-cards').innerHTML =
+      card(iv.has_session ? 'active' : 'no session', 'bridge session') +
+      card(iv.session_age_hours==null ? '—' : iv.session_age_hours + 'h', 'session age') +
+      card(iv.shared_setups, 'setups shared') +
+      card(iv.last_otp_at ? new Date(iv.last_otp_at*1000).toLocaleString() : 'never', 'last OTP login');
+    document.getElementById('invo-rows').innerHTML = (iv.activity||[]).slice().reverse().map(a=>{
+      const d = a.detail||{};
+      const det = [d.symbol, d.side, d.reason, d.email, Array.isArray(d.baseIds)? d.baseIds.length + ' baseIds' : ''].filter(Boolean).join(' · ');
+      const t = a.ts ? new Date(a.ts*1000).toLocaleString() : '';
+      return '<tr><td>'+t+'</td><td>'+a.event+'</td><td>'+det+'</td></tr>';
+    }).join('') || '<tr><td colspan="3">no bridge activity yet (bridge is disabled until you enable it)</td></tr>';
     const cd = st.scheduler_cooldowns || {}; const keys = Object.keys(cd);
     document.getElementById('cooldowns').innerHTML = keys.length ? keys.map(k=>'<span class="pill">'+k+' → '+cd[k]+'</span> ').join('') : '<span class="warn">ledger empty — nothing suppressed</span>';
   }catch(e){ document.getElementById('upd').textContent = '· error loading ('+e.message+(TOKEN?'':', hint: ?token=ADMIN_TOKEN')+')'; }
@@ -358,6 +401,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(list(reversed(signals[-limit:]))))
         elif path == "/api/analytics":
             self._send(200, json.dumps(compute_analytics(load_all_signals())))
+        elif path == "/api/invo":
+            self._send(200, json.dumps(load_invo_status()))
         elif path == "/api/paper":
             try:
                 from src.papertrade.portfolio import PaperPortfolio
