@@ -4,8 +4,9 @@ Invo (Involio) auto-share client.
 Reverse-engineered from the public web bundle at app.invoapp.com
 (main.dart.js). Endpoint map (base https://api.involio.com/v1_0):
 
-  POST /auth/login/email      {email, password} -> {accessToken, refreshToken, ...}
-  POST /auth/refresh_token    -> new accessToken (auto-retried on 401)
+  POST /auth/login/email/start {email} -> OTP to inbox (200 {"success":true})
+  POST /auth/login/email      {email, code} -> {accessToken, refreshToken, ...}
+  GET  /auth/refresh_token    -> new accessToken (auto-tried on 401)
   POST /dex/position/create   {clientTxId, coin, assetIndex, entry, submission?, tpslSubmission?, summary?}
   POST /dex/position/update   (TP/SL edits)
   POST /dex/position/close    (position close)
@@ -116,37 +117,65 @@ class InvoClient:
     def __init__(
         self,
         email: str = "",
-        password: str = "",
         base_url: str = DEFAULT_BASE_URL,
         timeout: int = 15,
     ):
         self.email = email
-        self.password = password
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
 
-    # ── auth ────────────────────────────────────────────────────────────
-    def login(self) -> Dict[str, Any]:
-        """Email login -> Bearer tokens. Raises InvoAuthError on failure."""
-        if not self.email or not self.password:
-            raise InvoAuthError("INVO_EMAIL / INVO_PASSWORD not configured")
+    # ── email + OTP self-login (Invo is OTP-only; no passwords exist) ───
+    def start_email_login(self, email: str) -> Dict[str, Any]:
+        """Trigger an OTP code to the inbox. Returns the raw server reply."""
         resp = self.session.post(
-            f"{self.base_url}/auth/login/email",
-            json={"email": self.email, "password": self.password},
+            f"{self.base_url}/auth/login/email/start",
+            json={"email": email},
             timeout=self.timeout,
         )
         if resp.status_code != 200:
-            raise InvoAuthError(f"login failed HTTP {resp.status_code}: {resp.text[:200]}")
-        data = resp.json()
+            raise InvoAuthError(f"OTP start failed HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            return resp.json()
+        except ValueError:
+            return {"raw": resp.text}
+
+    def verify_email_code(self, email: str, code: str, device_id: str = "") -> Dict[str, Any]:
+        """Exchange an inbox OTP code for Bearer tokens. Stores them on success.
+
+        Body shape verbatim from the app bundle (f9E serializer):
+        {email, code, deviceId, deviceType: null, deviceInfo: null}.
+        device_id should be a STABLE per-installation UUID (new device on
+        every login looks suspicious); pass it in, we never invent rotation.
+        """
+        resp = self.session.post(
+            f"{self.base_url}/auth/login/email",
+            json={"email": email, "code": code, "deviceId": device_id,
+                  "deviceType": None, "deviceInfo": None},
+            timeout=self.timeout,
+        )
+        if resp.status_code != 200:
+            raise InvoAuthError(f"OTP verify failed HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            data = resp.json()
+        except ValueError:
+            raise InvoAuthError("OTP verify returned non-JSON")
         self.access_token = data.get("accessToken")
         self.refresh_token = data.get("refreshToken")
         if not self.access_token:
-            raise InvoAuthError("login response missing accessToken")
-        logger.info("Invo login ok (userId hidden).")
+            raise InvoAuthError(f"verify response missing accessToken: {str(data)[:200]}")
+        logger.info("Invo email-OTP login ok.")
         return {"user_id": data.get("userId"), "username": data.get("username")}
+
+    def login(self) -> Dict[str, Any]:
+        """Password login — NOT supported by Invo (OTP-only platform).
+
+        Use start_email_login() + verify_email_code(), or the fully
+        autonomous ensure_auth() which reads the OTP from the mailbox.
+        """
+        raise InvoAuthError("Invo has no password login; use start_email_login/verify_email_code")
 
     def _headers(self) -> Dict[str, str]:
         return {"Authorization": f"Bearer {self.access_token}", "Content-Type": "application/json"}
@@ -165,22 +194,50 @@ class InvoClient:
             return {"raw": resp.text}
 
     def _refresh(self) -> bool:
+        """Silent rotation: GET /auth/refresh_token (per app bundle: GET, no body)."""
         try:
-            resp = self.session.post(
+            resp = self.session.get(
                 f"{self.base_url}/auth/refresh_token",
-                json={"refreshToken": self.refresh_token},
+                headers=self._headers(),
                 timeout=self.timeout,
             )
             if resp.status_code != 200:
                 return False
             self.access_token = resp.json().get("accessToken", self.access_token)
-            return True
+            new_refresh = resp.json().get("refreshToken")
+            if new_refresh:
+                self.refresh_token = new_refresh
+            return bool(self.access_token)
         except Exception:
             return False
 
-    def ensure_auth(self) -> None:
-        if not self.access_token:
-            self.login()
+    def ensure_auth(self, email: str = "", app_password: str = "",
+                    device_id: str = "", otp_wait_s: int = 120) -> None:
+        """Fully autonomous login: reuse token, else refresh, else OTP self-login.
+
+        1. access_token set -> done. 2. refresh_token -> silent rotation.
+        3. else: start OTP -> read code from mailbox -> verify. Raises
+        InvoAuthError if every path fails. Secrets stay in memory only.
+        """
+        if self.access_token:
+            return
+        if self.refresh_token and self._refresh():
+            logger.info("Invo session rotated silently.")
+            return
+        if not email or not app_password:
+            raise InvoAuthError("no session: provide email + Gmail app password for OTP self-login")
+        from src.invo.mailbox import MailboxReader
+        self.start_email_login(email)
+        import time as _time
+        deadline = _time.time() + otp_wait_s
+        code = None
+        while _time.time() < deadline and not code:
+            code = MailboxReader(email, app_password).latest_otp(since_minutes=10)
+            if not code:
+                _time.sleep(10)
+        if not code:
+            raise InvoAuthError("no OTP code arrived in the inbox within the wait window")
+        self.verify_email_code(email, code, device_id=device_id)
 
     # ── paper share (no real money) ───────────────────────────────────
     @staticmethod

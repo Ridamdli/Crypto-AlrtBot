@@ -167,8 +167,56 @@ def test_paper_share_uses_sim_dollar_size():
     assert p["ticker"] == "BTC"
 
 
+def test_otp_self_login_flow(monkeypatch):
+    from src.invo.client import InvoClient
+    c = InvoClient(email="u@gmail.com")
+
+    class R:
+        def __init__(self, status, body):
+            self.status_code = status
+            self.text = body
+        def json(self):
+            import json as _j
+            return _j.loads(self.text)
+
+    calls = []
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls.append(url)
+        if url.endswith("/auth/login/email/start"):
+            assert json == {"email": "u@gmail.com"}
+            return R(200, '{"success": true}')
+        if url.endswith("/auth/login/email"):
+            assert json == {"email": "u@gmail.com", "code": "123456",
+                            "deviceId": "dev-1", "deviceType": None, "deviceInfo": None}
+            return R(200, '{"accessToken": "A", "refreshToken": "R", "userId": "U"}')
+        raise AssertionError(url)
+    monkeypatch.setattr(c.session, "post", fake_post)
+
+    import src.invo.mailbox as _mb
+    monkeypatch.setattr(_mb, "MailboxReader", lambda *a, **k: type(
+        "M", (), {"latest_otp": lambda self, **kk: "123456"})())
+    c.ensure_auth(email="u@gmail.com", app_password="xxxx", device_id="dev-1")
+    assert c.access_token == "A"
+    assert c.refresh_token == "R"
+    assert any(u.endswith("/auth/login/email/start") for u in calls)
+
+
+def test_ensure_auth_needs_creds():
+    from src.invo.client import InvoAuthError, InvoClient
+    import pytest as _pt
+    with _pt.raises(InvoAuthError):
+        InvoClient().ensure_auth()
+
+
+def test_password_login_is_dead():
+    from src.invo.client import InvoAuthError, InvoClient
+    import pytest as _pt
+    with _pt.raises(InvoAuthError):
+        InvoClient(email="u@gmail.com").login()
+
+
 def test_live_share_posts_exact_path(monkeypatch):
-    c = InvoClient(email="u@x.com", password="pw")
+    c = InvoClient(email="u@x.com")
     c.access_token = "tok"
     seen = {}
     def fake_post(path, payload, retry=True):

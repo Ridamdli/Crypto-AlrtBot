@@ -162,27 +162,36 @@ class BotScheduler:
 
         Mapping verified live: entrySim = position size in sim dollars
         (INVO_SIM_SIZE, default 10.0); priceTarget/stopLoss = absolute prices.
-        Gate: INVO_PAPER_ENABLED=true. Needs INVO_TOKEN + INVO_PORTFOLIO_ID.
+        Gate: INVO_PAPER_ENABLED=true. Auth is autonomous: the client reuses
+        its token, rotates silently, else OTP self-logins via Gmail IMAP.
+        Needs INVO_EMAIL + INVO_GMAIL_APP_PASSWORD + INVO_PORTFOLIO_ID.
         """
         if os.getenv("INVO_PAPER_ENABLED", "false").lower() != "true":
             return
         try:
             from src.invo.client import InvoClient
             dry = os.getenv("INVO_PAPER_DRY_RUN", "true").lower() != "false"
-            token = os.getenv("INVO_TOKEN", "")
+            email = os.getenv("INVO_EMAIL", "")
+            app_password = os.getenv("INVO_GMAIL_APP_PASSWORD", "")
             portfolio = os.getenv("INVO_PORTFOLIO_ID", "")
-            if not dry and (not token or not portfolio):
-                logger.warning("[Scheduler] Invo paper-share skipped: INVO_TOKEN/INVO_PORTFOLIO_ID missing")
+            if not dry and (not email or not app_password or not portfolio):
+                logger.warning("[Scheduler] Invo paper-share skipped: INVO_EMAIL/INVO_GMAIL_APP_PASSWORD/INVO_PORTFOLIO_ID missing")
                 return
             from src.invo.client import InvoConflictError, record_share
             try:
                 sim_size = float(os.getenv("INVO_SIM_SIZE", "10.0"))
             except ValueError:
                 sim_size = 10.0
-            client = InvoClient()
+            client = InvoClient(email=email)
+            if not dry:
+                client.ensure_auth(email=email, app_password=app_password,
+                                   device_id=os.getenv("INVO_DEVICE_ID", ""))
+                token = client.access_token or ""
+            else:
+                token = ""
             for sig in published:
                 try:
-                    client.share_paper_trade(
+                    out = client.share_paper_trade(
                         {"symbol": sig.symbol, "side": sig.side,
                          "leverage": sig.leverage, "stop_loss": sig.stop_loss},
                         token=token, portfolio_id=portfolio,
@@ -209,6 +218,10 @@ class BotScheduler:
                         "portfolioId": portfolio,
                     })
                 except Exception as e:
+                    # Auth death clears the token so the next cycle OTP
+                    # self-logins fresh instead of 401-looping forever.
+                    if "401" in str(e):
+                        client.access_token = None
                     logger.warning(f"[Scheduler] Invo paper share skipped for {sig.symbol}: {e}")
         except Exception as e:
             logger.warning(f"[Scheduler] Invo paper share skipped: {e}")
@@ -226,7 +239,6 @@ class BotScheduler:
             dry = os.getenv("INVO_DRY_RUN", "true").lower() != "false"
             client = InvoClient(
                 email=os.getenv("INVO_EMAIL", ""),
-                password=os.getenv("INVO_PASSWORD", ""),
             )
             for sig in published:
                 try:
