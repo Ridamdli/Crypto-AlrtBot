@@ -49,12 +49,18 @@ def load_share_ledger(storage_dir: str = "data_store"):
         return {}
 
 
+SHARE_STALE_AFTER_S = 24 * 3600
+
+
 def record_share(storage_dir: str, signal_id: str, entry: dict) -> None:
     import json as _json
     import os as _os
+    import time as _time
 
     _os.makedirs(storage_dir, exist_ok=True)
     ledger = load_share_ledger(storage_dir)
+    entry = dict(entry)
+    entry.setdefault("shared_at", int(_time.time()))
     ledger[signal_id] = entry
     try:
         with open(_os.path.join(storage_dir, SHARE_LEDGER_NAME), "w", encoding="utf-8") as f:
@@ -304,22 +310,34 @@ class InvoClient:
         }
 
     def already_shared_open(self, symbol: str, portfolio_id: str,
-                            outcomes: Optional[Dict[str, Dict[str, Any]]] = None) -> bool:
+                            outcomes: Optional[Dict[str, Dict[str, Any]]] = None,
+                            max_age_s: int = SHARE_STALE_AFTER_S) -> bool:
         """True if we already shared this coin and its outcome isn't final.
 
         Purely local (share ledger + outcome ledger) — ZERO requests, so a
         repeat setup never even touches the platform, let alone conflicts.
+        Ledger entries older than max_age_s without a final outcome are
+        treated as stale (server is the backstop via its conflict response).
         """
+        import time as _time
         shares = load_share_ledger()
         outcomes = outcomes or {}
+        now = _time.time()
         for sid, rec in shares.items():
             if not isinstance(rec, dict):
                 continue
             if rec.get("symbol") != symbol or rec.get("portfolioId") != portfolio_id:
                 continue
             oc = outcomes.get(sid, {})
-            if not oc.get("final", False):
-                return True
+            if oc.get("final", False):
+                continue
+            try:
+                age = now - float(rec.get("shared_at", 0) or 0)
+            except (TypeError, ValueError):
+                age = 0
+            if age > max_age_s:
+                continue
+            return True
         return False
 
     def share_paper_trade(

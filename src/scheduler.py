@@ -207,7 +207,8 @@ class BotScheduler:
                         continue
                     out = client.share_paper_trade(
                         {"symbol": sig.symbol, "side": sig.side,
-                         "leverage": sig.leverage, "stop_loss": sig.stop_loss},
+                         "leverage": sig.leverage, "stop_loss": sig.stop_loss,
+                         "entry": sig.entry},
                         token=token, portfolio_id=portfolio,
                         entry_sim=sim_size,
                         price_target=float(sig.tp1),

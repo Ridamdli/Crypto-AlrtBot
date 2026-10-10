@@ -254,6 +254,63 @@ def test_conflict_precheck_is_local_only(tmp_path, monkeypatch):
     assert c.already_shared_open("BTCUSDT", "OTHER", {}) is False
 
 
+def test_scheduler_mapping_matches_manual_test(monkeypatch, tmp_path):
+    """The bot's scheduler path must build the identical payload shape as the
+    manually verified live post (entry present so liquidationPrice computes)."""
+    import os as _os
+    from types import SimpleNamespace
+    from src.scheduler import BotScheduler
+    monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
+    monkeypatch.setenv("INVO_PAPER_DRY_RUN", "true")
+    monkeypatch.setenv("INVO_PORTFOLIO_ID", "pid")
+    monkeypatch.setenv("INVO_SIM_SIZE", "10.0")
+    monkeypatch.chdir(tmp_path)
+    seen = {}
+
+    from src.invo import client as _mod
+    orig = _mod.InvoClient.share_paper_trade
+
+    def spy(self, signal, **kw):
+        seen["signal"] = dict(signal)
+        seen["kw"] = {k: v for k, v in kw.items() if k != "token"}
+        return orig(self, signal, token="tok", **kw)
+    monkeypatch.setattr(_mod.InvoClient, "share_paper_trade", spy)
+
+    sched = BotScheduler.__new__(BotScheduler)
+    sig = SimpleNamespace(signal_id="SIG-X", symbol="ETHUSDT", side="SHORT",
+                          leverage=10, stop_loss=2600.0, tp1=2500.0, entry=2577.04)
+    sched._share_paper_to_invo([sig])
+    assert seen["signal"]["entry"] == 2577.04
+    assert seen["kw"]["price_target"] == 2500.0
+    assert seen["kw"]["entry_sim"] == 10.0
+    assert seen["kw"]["dry_run"] is True
+
+
+def test_precheck_stale_entries_do_not_block_forever(tmp_path, monkeypatch):
+    import time as _t
+    from src.invo.client import InvoClient
+    now = int(_t.time())
+    shares = {
+        "FRESH": {"symbol": "BTCUSDT", "portfolioId": "P", "baseIds": ["b1"],
+                  "shared_at": now - 3600},
+        "STALE": {"symbol": "ETHUSDT", "portfolioId": "P", "baseIds": ["b2"],
+                  "shared_at": now - 100000},
+    }
+    import src.invo.client as _mod
+    monkeypatch.setattr(_mod, "load_share_ledger", lambda *a, **k: shares)
+    c = InvoClient(storage_dir=str(tmp_path))
+    assert c.already_shared_open("BTCUSDT", "P", {}) is True
+    assert c.already_shared_open("ETHUSDT", "P", {}) is False
+    assert c.already_shared_open("BTCUSDT", "P", {"FRESH": {"final": True}}) is False
+
+
+def test_record_share_stamps_time(tmp_path):
+    from src.invo.client import load_share_ledger, record_share
+    record_share(str(tmp_path), "SIG-9", {"symbol": "X", "baseIds": []})
+    rec = load_share_ledger(str(tmp_path))["SIG-9"]
+    assert rec["shared_at"] > 0
+
+
 def test_live_share_posts_exact_path(monkeypatch):
     c = InvoClient(email="u@x.com")
     c.access_token = "tok"
