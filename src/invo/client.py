@@ -370,6 +370,15 @@ class InvoClient:
             PAPER_SHARE_URL, json=payload,
             headers=self._paper_headers(token), timeout=self.timeout,
         )
+        if resp.status_code == 401 and self.refresh_token and self._refresh():
+            # Stale token, rotation succeeded: retry once with the fresh one.
+            resp = self.session.post(
+                PAPER_SHARE_URL, json=payload,
+                headers=self._paper_headers(self.access_token or token),
+                timeout=self.timeout,
+            )
+        if resp.status_code == 401:
+            raise InvoAuthError("paper-share token rejected even after refresh; next cycle OTP self-logins")
         if resp.status_code not in (200, 201):
             raise InvoApiError(resp.status_code, resp.text)
         try:
