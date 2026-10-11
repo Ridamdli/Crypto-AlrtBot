@@ -99,3 +99,29 @@ def test_empty_scan_cycle_writes_heartbeat(tmp_path):
     assert history[-1]["status"] == "ok"
     assert history[-1]["candidates"] == 0
     assert history[-1]["published"] == 0
+
+
+def test_empty_cycle_still_runs_maintenance_hooks(tmp_path):
+    """Quiet cycles must still track outcomes, supervise exits, and sync.
+
+    Regression (found live 2026-10-11): run_scan_cycle returned early on
+    zero candidates, so supervision/Invo-sync went silent on every quiet
+    cycle while open paper positions still needed management.
+    """
+    state_file = str(tmp_path / "sched_state.json")
+
+    class EmptyPipeline:
+        def run_pipeline(self):
+            return []
+
+    sched = BotScheduler(pipeline=EmptyPipeline(), state_file=state_file)
+    calls = []
+    sched._track_outcomes = lambda: calls.append("track")
+    sched._share_paper_to_invo = lambda published: calls.append(("share", list(published)))
+    sched._supervise_exits = lambda: calls.append("supervise")
+    sched._sync_exits_to_invo = lambda: calls.append("sync")
+    assert sched.run_scan_cycle() == []
+    assert "track" in calls
+    assert "supervise" in calls
+    assert "sync" in calls
+    assert ("share", []) not in calls  # nothing published: nothing to share

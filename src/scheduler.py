@@ -111,6 +111,12 @@ class BotScheduler:
         if not candidates:
             logger.info(f"[Scheduler] {scan_type} yielded 0 signals. Quality over quantity.")
             self._record_scan(scan_type, status="ok", candidates=0, published=0)
+            # Maintenance still runs on quiet cycles: open positions need
+            # outcome tracking, supervision, and Invo sync even when nothing
+            # new publishes. (Nothing to share — share hook takes published.)
+            self._track_outcomes()
+            self._supervise_exits()
+            self._sync_exits_to_invo()
             return []
 
         state = self._load_state()
