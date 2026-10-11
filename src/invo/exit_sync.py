@@ -67,6 +67,8 @@ def compute_sync_actions(
         if not isinstance(plan, dict):
             continue
         sid = plan.get("signal_id", "?")
+        if sid in closed:
+            continue  # reconciled as gone: no modifies, no closes
         try:
             version = int(plan.get("version", 0) or 0)
         except (TypeError, ValueError):

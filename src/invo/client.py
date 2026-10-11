@@ -119,6 +119,30 @@ class InvoApiError(Exception):
         self.body = body
 
 
+def err_message(err: Any) -> str:
+    """Extract a human message from an API error payload that may be either
+    an object ({"msg": ..., "data": ...}) or a bare string.
+
+    Verified live: ticker/modify rejects dead positions with a plain-string
+    error, which used to crash parsing with AttributeError. Both shapes now
+    parse; callers match on the returned text.
+    """
+    if isinstance(err, dict):
+        return str(err.get("msg") or err.get("message") or err)
+    return str(err or "")
+
+
+# Substrings indicating the target investment is already gone (closed,
+# settled, or unknown): sync should stop retrying instead of warning hourly.
+GONE_HINTS = ("clos", "not found", "no longer", "does not exist",
+              "invalid investment", "unknown investment")
+
+
+def err_is_gone(err: Any) -> bool:
+    text = err_message(err).lower()
+    return any(h in text for h in GONE_HINTS)
+
+
 class InvoConflictError(Exception):
     """Same-coin position already open in this portfolio (server rule).
 
@@ -425,8 +449,8 @@ class InvoClient:
         #   "data": {"conflicting_base_ids": [...]}}}
         if not result.get("success", False):
             err = result.get("error") or {}
-            data = err.get("data") or {}
-            if "already exists" in str(err.get("msg", "")):
+            data = err.get("data") or {} if isinstance(err, dict) else {}
+            if "already exists" in err_message(err):
                 self._log("share_conflict", {"symbol": signal.get("symbol"),
                                              "baseIds": data.get("conflicting_base_ids", [])})
                 raise InvoConflictError(data.get("conflicting_base_ids", []), result)
@@ -526,10 +550,10 @@ class InvoClient:
             return {"dry_run": True, "payload": payload}
         result = self._paper_post(PAPER_MODIFY_URL, payload, token)
         if not result.get("success", False):
-            err = result.get("error") or {}
+            err = result.get("error")
             self._log("modify_failed", {"baseId": base_id,
                                         "response": str(result)[:200]})
-            raise InvoApiError(200, str(err.get("msg") or result)[:300])
+            raise InvoApiError(200, (err_message(err) or str(result))[:300])
         self._log("modify_posted", {"baseId": base_id,
                                     "priceTarget": price_target,
                                     "stopLoss": stop_loss,
@@ -556,10 +580,10 @@ class InvoClient:
             return {"dry_run": True, "payload": payload}
         result = self._paper_post(PAPER_SELL_URL, payload, token)
         if not result.get("success", False):
-            err = result.get("error") or {}
+            err = result.get("error")
             self._log("close_failed", {"baseId": base_id,
                                        "response": str(result)[:200]})
-            raise InvoApiError(200, str(err.get("msg") or result)[:300])
+            raise InvoApiError(200, (err_message(err) or str(result))[:300])
         self._log("close_posted", {"baseId": base_id,
                                    "closingPrice": result.get("closingPrice"),
                                    "remainingSim": result.get("remainingSim")})

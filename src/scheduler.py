@@ -329,6 +329,17 @@ class BotScheduler:
                 except Exception as e:
                     if "401" in str(e):
                         client.access_token = None
+                    from src.invo.client import InvoApiError, err_is_gone
+                    if isinstance(e, InvoApiError) and err_is_gone(e.body):
+                        # Position already closed/settled server-side: nothing
+                        # left to manage. Record it so we stop retrying, info
+                        # level — this is reconciliation, not a failure.
+                        if a.get("signal_id") not in state["closed"]:
+                            state["closed"].append(a.get("signal_id"))
+                        logger.info(f"[Scheduler] Invo exit-sync {a.get('kind')} "
+                                    f"for {a.get('signal_id')}: already gone server-side, "
+                                    f"stop retrying ({e.body[:120]})")
+                        continue
                     import traceback as _tb
                     logger.warning(f"[Scheduler] Invo exit-sync {a.get('kind')} "
                                    f"skipped for {a.get('signal_id')}: {type(e).__name__}: {e}\n"

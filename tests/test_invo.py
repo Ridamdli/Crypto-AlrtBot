@@ -470,6 +470,66 @@ def test_sync_state_roundtrip(tmp_path):
     assert _sync.load_sync_state(str(tmp_path)) == blank
 
 
+def test_string_shaped_errors_parse_without_crashing(monkeypatch, tmp_path):
+    # Verified live 2026-10-11: ticker/modify rejects dead positions with a
+    # BARE STRING error (not {"msg": ...}). Parsing must not AttributeError.
+    from src.invo.client import InvoApiError, err_is_gone, err_message
+    assert err_message({"msg": "boo"}) == "boo"
+    assert err_message("Investment is closed") == "Investment is closed"
+    assert err_is_gone("Investment is closed") is True
+    assert err_is_gone("An open investment in this asset already exists.") is False
+    c = InvoClient(storage_dir=str(tmp_path))
+    monkeypatch.setattr(c.session, "post", lambda *a, **k: _Resp(200, (
+        '{"success": false, "postId": null, "remainingSim": null, '
+        '"error": "Investment is closed"}'
+    )))
+    import pytest as _pt
+    with _pt.raises(InvoApiError) as exc:
+        c.update_paper_trade("base-1", price_target=1.0, stop_loss=2.0,
+                             token="tok", dry_run=False)
+    assert "closed" in str(exc.value).lower()
+
+
+def test_scheduler_marks_gone_positions_closed(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    import src.invo.client as _mod
+    from src.invo import exit_sync as _sync
+    monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
+    monkeypatch.setenv("INVO_PAPER_DRY_RUN", "false")
+    monkeypatch.setenv("EXITS_APPLY", "true")
+    monkeypatch.setenv("INVO_PORTFOLIO_ID", "pid")
+    monkeypatch.setenv("INVO_EMAIL", "e@x.com")
+    monkeypatch.setenv("INVO_GMAIL_APP_PASSWORD", "pw")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_mod.InvoClient, "ensure_auth", lambda self, **k: None)
+    monkeypatch.setattr(_mod.InvoClient, "update_paper_trade",
+                        lambda self, *a, **k: (_ for _ in ()).throw(
+                            _mod.InvoApiError(200, "Investment is closed")))
+    import os as _os
+    import src.exits.ledger as _led
+    # Mirror production layout: the scheduler uses relative "data_store",
+    # which resolves under chdir to tmp_path/data_store.
+    store = _os.path.join(str(tmp_path), "data_store")
+    led = _led.ExitDecisionLedger(storage_dir=store)
+    led._state["plans"]["S1"] = {"signal_id": "S1", "version": 1,
+                                 "stop_loss": 1.0, "tp1": 2.0,
+                                 "tp2": 3.0, "tp3": 4.0}
+    led._save()
+    import src.invo.client as _cmod
+    monkeypatch.setattr(_cmod, "load_share_ledger",
+                        lambda *a, **k: {"S1": {"baseIds": ["b1"]}})
+    sched = BotScheduler.__new__(BotScheduler)
+    sched._sync_exits_to_invo()
+    state = _sync.load_sync_state(store)
+    assert "S1" in state["closed"]  # stop retrying; reconciled, not failed
+    # second run: no API calls at all (idempotent)
+    calls = []
+    monkeypatch.setattr(_mod.InvoClient, "update_paper_trade",
+                        lambda self, *a, **k: calls.append(1))
+    sched._sync_exits_to_invo()
+    assert calls == []
+
+
 def test_scheduler_sync_gated_by_dry_run_and_apply(monkeypatch, tmp_path):
     from src.scheduler import BotScheduler
     import src.invo.client as _mod
