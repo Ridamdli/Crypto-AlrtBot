@@ -1,0 +1,156 @@
+"""ExitDecisionLedger — auditable, restart-safe persistence.
+
+Stored as data_store/exit_decisions.json (same JSON-ledger convention as
+outcomes.json / paper_portfolio.json / invo_shares.json):
+
+{
+  "version": 1,
+  "decisions": [SupervisorDecision.to_dict(), ...],   # capped, newest last
+  "plans":     {signal_id: ExitPlan.to_dict()},       # active plan per signal
+  "events":    {signal_id: [overlay events]},         # reduce/close overlays
+  "invalidated": [signal_ids],                        # pending setups killed
+  "last_eval": {signal_id: {"data_ts": ms, "at": ms}} # freshness/monotonicity
+}
+
+Writes are atomic (tmp file + os.replace). The ledger is reloaded from disk
+on construction, so a process restart loses nothing but in-memory caches.
+If the file is corrupt or unwritable, the ledger degrades to an empty
+in-memory store and reports unhealthy — the monitor then refuses to apply
+changes (fail safe) while still allowing record-only decisions.
+"""
+import json
+import os
+from typing import Any, Dict, List, Optional
+
+from src.exits.models import ExitPlan, SupervisorDecision
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+LEDGER_VERSION = 1
+
+
+class ExitDecisionLedger:
+    def __init__(self, storage_dir: str = "data_store",
+                 ledger_name: str = "exit_decisions.json",
+                 max_decisions: int = 2000):
+        self.storage_dir = storage_dir
+        self.ledger_path = os.path.join(storage_dir, ledger_name)
+        self.tmp_path = self.ledger_path + ".tmp"
+        self.max_decisions = max_decisions
+        self.healthy = True
+        self._state = self._load()
+
+    # ── load / save ───────────────────────────────────────────────
+    def _blank(self) -> Dict[str, Any]:
+        return {"version": LEDGER_VERSION, "decisions": [], "plans": {},
+                "events": {}, "invalidated": [], "last_eval": {}}
+
+    def _load(self) -> Dict[str, Any]:
+        try:
+            with open(self.ledger_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict) or data.get("version") != LEDGER_VERSION:
+                logger.warning("[Exits] Ledger version mismatch/empty — starting blank.")
+                return self._blank()
+            for k in ("decisions", "plans", "events", "invalidated", "last_eval"):
+                if k not in data or not isinstance(data[k], (list, dict)):
+                    data[k] = [] if k in ("decisions", "invalidated") else {}
+            return data
+        except FileNotFoundError:
+            return self._blank()
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"[Exits] Ledger unreadable ({e}) — in-memory only, apply disabled.")
+            self.healthy = False
+            return self._blank()
+
+    def _save(self) -> bool:
+        try:
+            os.makedirs(self.storage_dir, exist_ok=True)
+            with open(self.tmp_path, "w", encoding="utf-8") as f:
+                json.dump(self._state, f, indent=2)
+            os.replace(self.tmp_path, self.ledger_path)
+            return True
+        except OSError as e:
+            logger.error(f"[Exits] Ledger write failed ({e}) — in-memory only, apply disabled.")
+            self.healthy = False
+            return False
+
+    # ── queries ───────────────────────────────────────────────────
+    def has_key(self, decision_key: str) -> bool:
+        return any(d.get("decision_key") == decision_key
+                   for d in self._state["decisions"])
+
+    def seen_keys(self) -> frozenset:
+        return frozenset(d.get("decision_key", "")
+                         for d in self._state["decisions"] if d.get("decision_key"))
+
+    def active_plan(self, signal: Dict[str, Any]) -> ExitPlan:
+        rec = self._state["plans"].get(signal["signal_id"])
+        if rec:
+            try:
+                return ExitPlan.from_dict(rec)
+            except (TypeError, ValueError, KeyError):
+                pass
+        return ExitPlan.genesis(signal)
+
+    def is_invalidated(self, signal_id: str) -> bool:
+        return signal_id in self._state["invalidated"]
+
+    def last_eval(self, signal_id: str) -> Dict[str, int]:
+        rec = self._state["last_eval"].get(signal_id, {})
+        return {"data_ts": int(rec.get("data_ts", 0)), "at": int(rec.get("at", 0))}
+
+    def decisions_for(self, signal_id: str) -> List[Dict[str, Any]]:
+        return [d for d in self._state["decisions"] if d.get("signal_id") == signal_id]
+
+    # ── record ────────────────────────────────────────────────────
+    def record(self, decision: SupervisorDecision, apply: bool) -> bool:
+        """Append the decision; optionally apply plan/events/invalidation.
+
+        apply=False (monitor-only): the decision is recorded for audit, the
+        active plan is untouched. apply=True additionally stores plan_after,
+        overlay events, and invalidation flags — all still paper-side only.
+        Returns True if the ledger write succeeded.
+        """
+        self._state["decisions"].append(decision.to_dict())
+        self._state["decisions"] = self._state["decisions"][-self.max_decisions:]
+        if apply:
+            if decision.plan_after:
+                self._state["plans"][decision.signal_id] = decision.plan_after
+            for ev in decision.events_applied:
+                self._state["events"].setdefault(decision.signal_id, []).append({
+                    **ev, "decision_key": decision.decision_key,
+                    "data_ts_ms": decision.data_ts_ms,
+                    "decided_at_ms": decision.decided_at_ms,
+                })
+            if decision.action == "INVALIDATE_PENDING_SETUP":
+                if decision.signal_id not in self._state["invalidated"]:
+                    self._state["invalidated"].append(decision.signal_id)
+        self._state["last_eval"][decision.signal_id] = {
+            "data_ts": decision.data_ts_ms, "at": decision.decided_at_ms}
+        return self._save()
+
+    def mark_evaluated(self, signal_id: str, data_ts_ms: int, at_ms: int) -> None:
+        self._state["last_eval"][signal_id] = {"data_ts": data_ts_ms, "at": at_ms}
+        self._save()
+
+    def outcome_link(self, signal_id: str, outcome: Dict[str, Any]) -> None:
+        """Attach the eventual trade outcome to past decisions (audit trail)."""
+        for d in self._state["decisions"]:
+            if d.get("signal_id") == signal_id:
+                d["linked_outcome"] = {
+                    "status": outcome.get("status"),
+                    "net_realized_r": outcome.get("net_realized_r"),
+                    "final": bool(outcome.get("final")),
+                }
+        self._save()
+
+    def get_events(self, signal_id: str) -> List[Dict[str, Any]]:
+        return list(self._state["events"].get(signal_id, []))
+
+    def summary(self) -> Dict[str, Any]:
+        return {"healthy": self.healthy, "path": self.ledger_path,
+                "decisions": len(self._state["decisions"]),
+                "plans": len(self._state["plans"]),
+                "invalidated": len(self._state["invalidated"])}

@@ -155,6 +155,7 @@ class BotScheduler:
         )
         self._track_outcomes()
         self._share_paper_to_invo(published_signals)
+        self._supervise_exits()
         return published_signals
 
     def _share_paper_to_invo(self, published: list) -> None:  # noqa: C901 (gated bridge)
@@ -240,6 +241,25 @@ class BotScheduler:
                     logger.warning(f"[Scheduler] Invo paper share skipped for {sig.symbol}: {e}")
         except Exception as e:
             logger.warning(f"[Scheduler] Invo paper share skipped: {e}")
+
+    def _supervise_exits(self) -> None:
+        """Run Exit Orchestrator supervision over open/pending setups.
+
+        Paper-only and monitor-first: with EXITS_APPLY=false (default)
+        decisions are recorded to the exit-decision ledger without changing
+        any plan. Must never break scans.
+        """
+        if os.getenv("EXITS_ENABLED", "true").lower() != "true":
+            return
+        try:
+            from src.exits.monitor import ExitMonitor
+            # Reuse the pipeline's public-data fetcher: the exits package
+            # never constructs network/trading clients itself (paper-only).
+            monitor = ExitMonitor(fetcher=getattr(self.pipeline, "fetcher", None))
+            summary = monitor.run_cycle()
+            logger.info(f"[Scheduler] Exit supervision: {summary}")
+        except Exception as e:
+            logger.warning(f"[Scheduler] Exit supervision skipped: {e}")
 
     def _track_outcomes(self) -> None:
         """Update live outcome ledger + paper portfolio. Must never break scans."""

@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, timezone
 import hashlib
+import os
 
 from src.data.binance_client import BinanceFuturesClient
 from src.data.universe_filter import UniverseFilter
@@ -126,6 +127,24 @@ class SignalPipeline:
             self._strategy_cache[cache_key] = create_strategy(strategy_family, config, symbol)
         return self._strategy_cache[cache_key]
 
+    def _live_scan_symbols(self, all_symbols: List[str]) -> List[str]:
+        """Intersect the volume-filtered universe with the live scan set.
+
+        LIVE_REQUIRE_VALIDATED (default true): admit only coins with
+        validated history (the AVAILABLE set). Coins without backtest
+        evidence (DATA_MISSING) are excluded from live alerts unless the
+        operator explicitly opts back into the full 14-coin universe with
+        LIVE_REQUIRE_VALIDATED=false.
+        """
+        tradable = self.symbol_registry.get_tradable_symbols()
+        if os.getenv("LIVE_REQUIRE_VALIDATED", "true").lower() == "true":
+            validated = set(self.symbol_registry.get_available_symbols())
+            gated = sorted(s for s in tradable if s not in validated)
+            if gated:
+                logger.info(f"Live gate: {len(gated)} unvalidated coins excluded: {gated}")
+            tradable = [s for s in tradable if s in validated]
+        return [s for s in all_symbols if s in tradable]
+
     def _get_strategies_for_symbol(self, symbol: str) -> List[str]:
         """Get the list of strategy families to test for a symbol."""
         symbol_cfg = self.symbol_registry.get_symbol_config(symbol)
@@ -190,16 +209,16 @@ class SignalPipeline:
         logger.info(f"Global BTC Regime: {global_regime.upper()}")
 
         # ── Step 2: Universe ────────────────────────────────────────────────
-        # Live scans cover every enabled coin (all 14), BTC included.
+        # Live scans cover enabled coins, BTC included.
         # BTC still feeds Step 1 regime detection independently.
+        # Explicit `symbols=` callers (research, eval harness, tests) bypass
+        # the live-validated gate below. See _live_scan_symbols.
         if symbols is not None:
             active_symbols = [s for s in symbols if self.symbol_registry.is_tradable(s)]
         else:
             logger.info("Step 2: Fetching eligible symbols...")
             all_symbols = self.universe_filter.get_eligible_symbols()
-            # Filter by tradable set (enabled coins), not by validated-history availability
-            tradable = self.symbol_registry.get_tradable_symbols()
-            active_symbols = [s for s in all_symbols if s in tradable]
+            active_symbols = self._live_scan_symbols(all_symbols)
 
         logger.info(f"Scanning {len(active_symbols)} eligible symbols")
 

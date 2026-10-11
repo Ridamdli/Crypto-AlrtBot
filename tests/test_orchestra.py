@@ -43,3 +43,21 @@ def test_pipeline_covers_btc_with_its_picks():
     pipe = SignalPipeline(config=CONFIG)
     assert pipe._get_strategies_for_symbol("BTCUSDT") == ["momentum", "ema_trend", "rsi_mean_reversion"]
     assert pipe.symbol_registry.is_tradable("BTCUSDT")
+
+
+def test_live_gate_excludes_unvalidated_by_default(monkeypatch):
+    monkeypatch.delenv("LIVE_REQUIRE_VALIDATED", raising=False)
+    pipe = SignalPipeline(config=CONFIG)
+    universe = CONFIG.get_tradable_symbols()  # all 14 pass the volume filter here
+    live = pipe._live_scan_symbols(universe)
+    assert sorted(live) == sorted(CONFIG.get_available_symbols())
+    assert len(live) == 8
+    for sym in ["ZECUSDT", "HYPEUSDT", "UNIUSDT", "NEARUSDT", "LINKUSDT", "DOTUSDT"]:
+        assert sym not in live
+
+
+def test_live_gate_opt_out_restores_full_universe(monkeypatch):
+    monkeypatch.setenv("LIVE_REQUIRE_VALIDATED", "false")
+    pipe = SignalPipeline(config=CONFIG)
+    live = pipe._live_scan_symbols(CONFIG.get_tradable_symbols())
+    assert len(live) == 14
