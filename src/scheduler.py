@@ -329,8 +329,10 @@ class BotScheduler:
                 except Exception as e:
                     if "401" in str(e):
                         client.access_token = None
+                    import traceback as _tb
                     logger.warning(f"[Scheduler] Invo exit-sync {a.get('kind')} "
-                                   f"skipped for {a.get('signal_id')}: {type(e).__name__}: {e}")
+                                   f"skipped for {a.get('signal_id')}: {type(e).__name__}: {e}\n"
+                                   f"{_tb.format_exc(limit=5)}")
             _sync.save_sync_state("data_store", state)
             logger.info(f"[Scheduler] Invo exit-sync: {done_modify} modified, {done_close} closed.")
         except Exception as e:

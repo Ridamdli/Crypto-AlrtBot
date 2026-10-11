@@ -61,6 +61,8 @@ def compute_sync_actions(
     synced_levels = sync_state.get("synced_levels", {}) or {}
     closed = set(sync_state.get("closed", []) or [])
 
+    if not isinstance(share_ledger, dict):
+        return actions
     for plan in plans:
         if not isinstance(plan, dict):
             continue
@@ -72,6 +74,8 @@ def compute_sync_actions(
         if version <= 0:
             continue  # genesis == create-time levels; nothing new to send
         rec = share_ledger.get(sid) or {}
+        if not isinstance(rec, dict):
+            continue  # legacy/malformed share record: no safe target
         base_ids = [b for b in (rec.get("baseIds") or []) if b]
         if not base_ids:
             continue  # no live investment to target (test/manual shares)
@@ -86,13 +90,16 @@ def compute_sync_actions(
                 "stop_loss": plan.get("stop_loss"),
             })
 
-    for sid in close_signal_ids:
-        if sid in closed:
-            continue
-        rec = share_ledger.get(sid) or {}
-        base_ids = [b for b in (rec.get("baseIds") or []) if b]
-        if not base_ids:
-            continue
-        actions.append({"kind": "close", "signal_id": sid, "base_ids": base_ids})
+    if isinstance(close_signal_ids, (list, tuple)):
+        for sid in close_signal_ids:
+            if sid in closed:
+                continue
+            rec = share_ledger.get(sid) or {}
+            if not isinstance(rec, dict):
+                continue
+            base_ids = [b for b in (rec.get("baseIds") or []) if b]
+            if not base_ids:
+                continue
+            actions.append({"kind": "close", "signal_id": sid, "base_ids": base_ids})
 
     return actions
