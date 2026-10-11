@@ -495,9 +495,14 @@ class InvoClient:
         if resp.status_code not in (200, 201):
             raise InvoApiError(resp.status_code, resp.text)
         try:
-            return resp.json()
+            result = resp.json()
         except ValueError:
             raise InvoApiError(resp.status_code, resp.text)
+        if not isinstance(result, dict):
+            # Defensive: never let an unexpected body shape surface as a
+            # bare AttributeError downstream — fail loudly with context.
+            raise InvoApiError(resp.status_code, str(result)[:300])
+        return result
 
     def update_paper_trade(
         self,
