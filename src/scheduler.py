@@ -154,7 +154,7 @@ class BotScheduler:
             published=len(published_signals),
         )
         self._track_outcomes()
-        self._share_to_invo(published_signals)
+        self._share_paper_to_invo(published_signals)
         return published_signals
 
     def _share_paper_to_invo(self, published: list) -> None:  # noqa: C901 (gated bridge)
@@ -240,34 +240,6 @@ class BotScheduler:
                     logger.warning(f"[Scheduler] Invo paper share skipped for {sig.symbol}: {e}")
         except Exception as e:
             logger.warning(f"[Scheduler] Invo paper share skipped: {e}")
-
-    def _share_to_invo(self, published: list) -> None:
-        """Auto-share published signals to Invo. Disabled unless explicitly enabled.
-
-        INVO_ENABLED=true + INVO_DRY_RUN=false + credentials required for any
-        real post. Sharing opens REAL positions with REAL money. Never breaks scans.
-        """
-        if os.getenv("INVO_ENABLED", "false").lower() != "true":
-            return
-        try:
-            from src.invo.client import InvoClient
-            dry = os.getenv("INVO_DRY_RUN", "true").lower() != "false"
-            client = InvoClient(
-                email=os.getenv("INVO_EMAIL", ""),
-            )
-            for sig in published:
-                try:
-                    client.share_position(
-                        {"symbol": sig.symbol, "side": sig.side,
-                         "leverage": sig.leverage, "tp1": sig.tp1,
-                         "stop_loss": sig.stop_loss},
-                        dry_run=dry,
-                        portfolio_id=os.getenv("INVO_PORTFOLIO_ID") or None,
-                    )
-                except Exception as e:
-                    logger.warning(f"[Scheduler] Invo share skipped for {sig.symbol}: {e}")
-        except Exception as e:
-            logger.warning(f"[Scheduler] Invo share skipped: {e}")
 
     def _track_outcomes(self) -> None:
         """Update live outcome ledger + paper portfolio. Must never break scans."""
