@@ -76,6 +76,18 @@ DEFAULT_BASE_URL = "https://api.involio.com/v1_0"
 # nonce (random base64), timestamp (ms epoch), x-app-build-number,
 # x-app-release, x-app-version, x-platform.
 PAPER_SHARE_URL = "https://api.invoapp.com/v1_0/investments/ticker/create"
+# Reverse-engineered from app.invoapp.com main.dart.js (faG serializer =
+# modify body, sellInvestment() body, get_investments reader):
+#   modify request faG: {baseId, name:null, willAutoClose:true,
+#     simDifference, simIncrease, directionLong:null, priceTarget,
+#     priceTargetCurrency:null, stopLoss, liquidationPrice, holdTimeUnit:null,
+#     minHoldTime:null, maxHoldTime:null, notes:null}
+#     -> {success, error, postId, remainingSim}
+#   sell request: {baseId, customClosingPrice or null for market}
+#     -> {success, error, postId, closingPrice, remainingSim}
+PAPER_MODIFY_URL = "https://api.invoapp.com/v1_0/investments/ticker/modify"
+PAPER_SELL_URL = "https://api.invoapp.com/v1_0/investments/sell"
+PAPER_LIST_URL = "https://api.invoapp.com/v1_0/investments/get_investments"
 APP_HEADERS = {
     "x-app-build-number": "83",
     "x-app-release": "1.0.59",
@@ -426,6 +438,145 @@ class InvoClient:
             f"baseIds={result.get('baseIds')} remainingSim={result.get('remainingSim')}"
         )
         return {"dry_run": False, "payload": payload, "response": result}
+
+    # ── paper trade management: TP1 + SL only ─────────────────────────
+    # The investments API carries ONE priceTarget and ONE stopLoss per
+    # position. TP2/TP3 do not exist server-side and are never sent here:
+    # callers pass the active plan's tp1 as price_target. Same rule for
+    # modify and create (see share_paper_trade: price_target=sig.tp1).
+    @staticmethod
+    def build_paper_modify_payload(
+        base_id: str,
+        price_target: Optional[float],
+        stop_loss: Optional[float],
+        liquidation_price: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Modify body, field-for-field per the app's faG serializer.
+
+        simDifference=0 / simIncrease=True: a TP/SL-only edit moves no sim
+        (matches the app's own edit flow, where n = new-old = 0 when only
+        targets change). Nulls are app-normal: the app itself sends ~10 null
+        fields on every edit (name, currency, hold times, notes, ...).
+        """
+        return {
+            "baseId": base_id,
+            "name": None,
+            "willAutoClose": True,
+            "simDifference": 0,
+            "simIncrease": True,
+            "directionLong": None,
+            "priceTarget": price_target,
+            "priceTargetCurrency": None,
+            "stopLoss": stop_loss,
+            "liquidationPrice": liquidation_price,
+            "holdTimeUnit": None,
+            "minHoldTime": None,
+            "maxHoldTime": None,
+            "notes": None,
+        }
+
+    def _paper_post(self, url: str, payload: Dict[str, Any], token: str) -> Dict[str, Any]:
+        """POST to a paper endpoint with the 401-refresh-and-retry dance."""
+        resp = self.session.post(url, json=payload,
+                                 headers=self._paper_headers(token),
+                                 timeout=self.timeout)
+        if resp.status_code == 401 and self.refresh_token and self._refresh():
+            resp = self.session.post(
+                url, json=payload,
+                headers=self._paper_headers(self.access_token or token),
+                timeout=self.timeout,
+            )
+        if resp.status_code == 401:
+            raise InvoAuthError("paper token rejected even after refresh; next cycle OTP self-logins")
+        if resp.status_code not in (200, 201):
+            raise InvoApiError(resp.status_code, resp.text)
+        try:
+            return resp.json()
+        except ValueError:
+            raise InvoApiError(resp.status_code, resp.text)
+
+    def update_paper_trade(
+        self,
+        base_id: str,
+        price_target: Optional[float],
+        stop_loss: Optional[float],
+        token: str,
+        liquidation_price: Optional[float] = None,
+        dry_run: bool = True,
+    ) -> Dict[str, Any]:
+        """Move TP1/SL on one paper investment. No real money.
+
+        dry_run=True (default): build + validate payload, POST nothing.
+        """
+        payload = self.build_paper_modify_payload(
+            base_id, price_target, stop_loss, liquidation_price)
+        if dry_run:
+            logger.info(f"[Invo PAPER DRY-RUN] would modify {base_id}: "
+                        f"priceTarget={price_target} stopLoss={stop_loss}")
+            self._log("modify_dry_run", {"baseId": base_id})
+            return {"dry_run": True, "payload": payload}
+        result = self._paper_post(PAPER_MODIFY_URL, payload, token)
+        if not result.get("success", False):
+            err = result.get("error") or {}
+            self._log("modify_failed", {"baseId": base_id,
+                                        "response": str(result)[:200]})
+            raise InvoApiError(200, str(err.get("msg") or result)[:300])
+        self._log("modify_posted", {"baseId": base_id,
+                                    "priceTarget": price_target,
+                                    "stopLoss": stop_loss,
+                                    "remainingSim": result.get("remainingSim")})
+        logger.info(
+            f"[Invo PAPER] modified {base_id}: priceTarget={price_target} "
+            f"stopLoss={stop_loss} remainingSim={result.get('remainingSim')}"
+        )
+        return {"dry_run": False, "payload": payload, "response": result}
+
+    def close_paper_trade(
+        self,
+        base_id: str,
+        token: str,
+        dry_run: bool = True,
+    ) -> Dict[str, Any]:
+        """Market-close one paper investment (customClosingPrice=null).
+        No real money. dry_run=True (default): build + validate, POST nothing.
+        """
+        payload = {"baseId": base_id, "customClosingPrice": None}
+        if dry_run:
+            logger.info(f"[Invo PAPER DRY-RUN] would close {base_id}")
+            self._log("close_dry_run", {"baseId": base_id})
+            return {"dry_run": True, "payload": payload}
+        result = self._paper_post(PAPER_SELL_URL, payload, token)
+        if not result.get("success", False):
+            err = result.get("error") or {}
+            self._log("close_failed", {"baseId": base_id,
+                                       "response": str(result)[:200]})
+            raise InvoApiError(200, str(err.get("msg") or result)[:300])
+        self._log("close_posted", {"baseId": base_id,
+                                   "closingPrice": result.get("closingPrice"),
+                                   "remainingSim": result.get("remainingSim")})
+        logger.info(
+            f"[Invo PAPER] closed {base_id}: closingPrice={result.get('closingPrice')} "
+            f"remainingSim={result.get('remainingSim')}"
+        )
+        return {"dry_run": False, "payload": payload, "response": result}
+
+    def list_paper_investments(self, token: str) -> Dict[str, Any]:
+        """Read-only: list paper investments + remaining sim. Never writes."""
+        resp = self.session.get(PAPER_LIST_URL, headers=self._paper_headers(token),
+                                timeout=self.timeout)
+        if resp.status_code == 401 and self.refresh_token and self._refresh():
+            resp = self.session.get(
+                PAPER_LIST_URL,
+                headers=self._paper_headers(self.access_token or token),
+                timeout=self.timeout)
+        if resp.status_code == 401:
+            raise InvoAuthError("paper token rejected even after refresh; next cycle OTP self-logins")
+        if resp.status_code not in (200, 201):
+            raise InvoApiError(resp.status_code, resp.text)
+        try:
+            return resp.json()
+        except ValueError:
+            raise InvoApiError(resp.status_code, resp.text)
 
     # ── share ───────────────────────────────────────────────────────────
     @staticmethod

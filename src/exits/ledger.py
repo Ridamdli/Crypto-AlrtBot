@@ -104,6 +104,19 @@ class ExitDecisionLedger:
     def decisions_for(self, signal_id: str) -> List[Dict[str, Any]]:
         return [d for d in self._state["decisions"] if d.get("signal_id") == signal_id]
 
+    def active_plans(self) -> List[Dict[str, Any]]:
+        """All stored (applied) exit plans as plain dicts, for sync readers."""
+        return [dict(p) for p in self._state["plans"].values()
+                if isinstance(p, dict) and p.get("signal_id")]
+
+    def close_signal_ids(self) -> List[str]:
+        """Signals with an applied supervisor-close event."""
+        out = []
+        for sid, evs in (self._state.get("events") or {}).items():
+            if any(isinstance(e, dict) and e.get("kind") == "close" for e in evs or []):
+                out.append(sid)
+        return out
+
     # ── record ────────────────────────────────────────────────────
     def record(self, decision: SupervisorDecision, apply: bool) -> bool:
         """Append the decision; optionally apply plan/events/invalidation.

@@ -325,3 +325,171 @@ def test_live_share_posts_exact_path(monkeypatch):
     assert out["dry_run"] is False
     assert seen["path"] == "/dex/position/create"
     assert seen["payload"]["coin"] == "BTC"
+
+
+# ── exit-sync: TP1 + SL only (never TP2/TP3) ──────────────────────
+def test_modify_payload_matches_app_faG_shape_and_tp1_only():
+    c = InvoClient()
+    p = c.build_paper_modify_payload("base-1", price_target=112.40, stop_loss=108.55,
+                                     liquidation_price=99.9)
+    assert p["baseId"] == "base-1"
+    assert p["willAutoClose"] is True
+    assert p["simDifference"] == 0 and p["simIncrease"] is True
+    assert p["priceTarget"] == 112.40
+    assert p["stopLoss"] == 108.55
+    assert p["liquidationPrice"] == 99.9
+    import json as _json
+    blob = _json.dumps(p).lower()
+    assert "tp2" not in blob and "tp3" not in blob  # TP2/TP3 do not exist here
+
+
+def test_modify_dry_run_posts_nothing(monkeypatch):
+    c = InvoClient()
+    calls = []
+    monkeypatch.setattr(c.session, "post",
+                        lambda *a, **k: calls.append((a, k)) or None)
+    out = c.update_paper_trade("base-1", price_target=1.0, stop_loss=2.0,
+                               token="tok", dry_run=True)
+    assert out["dry_run"] is True and calls == []
+
+
+def test_modify_success_parses_remaining_sim(monkeypatch, tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
+    seen = {}
+    def fake_post(url, json=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["payload"] = json
+        return _Resp(200, '{"success": true, "postId": "p1", '
+                          '"remainingSim": 42.5, "error": null}')
+    monkeypatch.setattr(c.session, "post", fake_post)
+    out = c.update_paper_trade("base-1", price_target=1.0, stop_loss=2.0,
+                               token="tok", dry_run=False)
+    assert out["dry_run"] is False
+    assert seen["url"].endswith("/investments/ticker/modify")
+    assert seen["payload"]["baseId"] == "base-1"
+    assert "tp2" not in str(seen["payload"]) and "tp3" not in str(seen["payload"])
+    assert out["response"]["remainingSim"] == 42.5
+
+
+def test_modify_failure_raises(monkeypatch, tmp_path):
+    import pytest as _pt
+    from src.invo.client import InvoApiError
+    c = InvoClient(storage_dir=str(tmp_path))
+    monkeypatch.setattr(c.session, "post", lambda *a, **k: _Resp(200, (
+        '{"success": false, "postId": null, "remainingSim": null, '
+        '"error": {"msg": "nope"}}'
+    )))
+    with _pt.raises(InvoApiError):
+        c.update_paper_trade("base-1", price_target=1.0, stop_loss=2.0,
+                             token="tok", dry_run=False)
+
+
+def test_close_posts_sell_shape_and_parses(monkeypatch, tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
+    seen = {}
+    def fake_post(url, json=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["payload"] = json
+        return _Resp(200, '{"success": true, "postId": "p2", '
+                          '"closingPrice": 7.7, "remainingSim": 50.0, "error": null}')
+    monkeypatch.setattr(c.session, "post", fake_post)
+    out = c.close_paper_trade("base-9", token="tok", dry_run=False)
+    assert seen["url"].endswith("/investments/sell")
+    assert seen["payload"] == {"baseId": "base-9", "customClosingPrice": None}
+    assert out["response"]["closingPrice"] == 7.7
+    out2 = c.close_paper_trade("base-9", token="tok", dry_run=True)
+    assert out2["dry_run"] is True
+
+
+def test_list_reads_investments_without_posting(monkeypatch, tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
+    seen = {}
+    class _GetResp(_Resp):
+        pass
+    def fake_get(url, headers=None, timeout=None):
+        seen["url"] = url
+        return _Resp(200, '{"success": true, "portfolioRemainingSim": 33.0, '
+                          '"investments": [{"baseId": "b1"}]}')
+    monkeypatch.setattr(c.session, "get", fake_get)
+    monkeypatch.setattr(c.session, "post",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not POST")))
+    out = c.list_paper_investments(token="tok")
+    assert seen["url"].endswith("/investments/get_investments")
+    assert out["portfolioRemainingSim"] == 33.0
+    assert out["investments"] == [{"baseId": "b1"}]
+
+
+# ── exit-sync planner: state-based, idempotent ────────────────────
+def _plan(sid, version, sl, tp1):
+    return {"signal_id": sid, "version": version, "stop_loss": sl,
+            "tp1": tp1, "tp2": tp1 + 1.0, "tp3": tp1 + 2.0}
+
+
+def test_sync_emits_modify_only_on_real_differences():
+    from src.invo import exit_sync as _sync
+    shares = {"S1": {"baseIds": ["b1"]}, "S2": {"baseIds": ["b2"]}}
+    state = {"synced_levels": {"S1": {"stop_loss": 1.0, "tp1": 2.0}}, "closed": []}
+    plans = [_plan("S1", 3, 1.0, 2.0),   # identical to synced -> silent
+             _plan("S2", 1, 1.5, 2.5),   # new levels -> modify
+             _plan("S3", 2, 9.0, 9.0)]   # no baseIds -> skipped
+    actions = _sync.compute_sync_actions(plans, [], shares, state)
+    assert len(actions) == 1
+    a = actions[0]
+    assert (a["kind"], a["signal_id"], a["base_ids"]) == ("modify", "S2", ["b2"])
+    assert a["price_target"] == 2.5 and a["stop_loss"] == 1.5
+    assert "tp2" not in a and "tp3" not in a
+
+
+def test_sync_close_once_then_idempotent():
+    from src.invo import exit_sync as _sync
+    shares = {"S9": {"baseIds": ["b9"]}}
+    state = {"synced_levels": {}, "closed": []}
+    first = _sync.compute_sync_actions([], ["S9"], shares, state)
+    assert len(first) == 1 and first[0]["kind"] == "close"
+    state["closed"].append("S9")
+    assert _sync.compute_sync_actions([], ["S9"], shares, state) == []
+
+
+def test_sync_skips_genesis_and_baseid_less_plans():
+    from src.invo import exit_sync as _sync
+    shares = {"S1": {"baseIds": []}}
+    actions = _sync.compute_sync_actions(
+        [_plan("S1", 0, 1.0, 2.0), _plan("S2", 4, 1.0, 2.0)],
+        [], shares, {"synced_levels": {}, "closed": []})
+    assert actions == []
+
+
+def test_sync_state_roundtrip(tmp_path):
+    from src.invo import exit_sync as _sync
+    blank = _sync.load_sync_state(str(tmp_path))
+    assert blank == {"synced_levels": {}, "closed": []}
+    blank["synced_levels"]["S1"] = {"stop_loss": 1.0, "tp1": 2.0}
+    _sync.save_sync_state(str(tmp_path), blank)
+    assert _sync.load_sync_state(str(tmp_path)) == blank
+
+
+def test_scheduler_sync_gated_by_dry_run_and_apply(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    import src.invo.client as _mod
+    monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
+    monkeypatch.setenv("INVO_PORTFOLIO_ID", "pid")
+    monkeypatch.setenv("INVO_EMAIL", "e@x.com")
+    monkeypatch.setenv("INVO_GMAIL_APP_PASSWORD", "pw")
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(_mod.InvoClient, "update_paper_trade",
+                        lambda self, *a, **k: calls.append(1) or {"dry_run": False})
+    monkeypatch.setattr(_mod.InvoClient, "close_paper_trade",
+                        lambda self, *a, **k: calls.append(1) or {"dry_run": False})
+    monkeypatch.setattr(_mod.InvoClient, "ensure_auth", lambda self, **k: None)
+    sched = BotScheduler.__new__(BotScheduler)
+    # dry-run: nothing posted even with decisions present
+    monkeypatch.setenv("INVO_PAPER_DRY_RUN", "true")
+    monkeypatch.setenv("EXITS_APPLY", "true")
+    sched._sync_exits_to_invo()
+    assert calls == []
+    # apply off: nothing posted
+    monkeypatch.setenv("INVO_PAPER_DRY_RUN", "false")
+    monkeypatch.setenv("EXITS_APPLY", "false")
+    sched._sync_exits_to_invo()
+    assert calls == []

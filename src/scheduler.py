@@ -156,6 +156,7 @@ class BotScheduler:
         self._track_outcomes()
         self._share_paper_to_invo(published_signals)
         self._supervise_exits()
+        self._sync_exits_to_invo()
         return published_signals
 
     def _share_paper_to_invo(self, published: list) -> None:  # noqa: C901 (gated bridge)
@@ -260,6 +261,73 @@ class BotScheduler:
             logger.info(f"[Scheduler] Exit supervision: {summary}")
         except Exception as e:
             logger.warning(f"[Scheduler] Exit supervision skipped: {e}")
+
+    def _sync_exits_to_invo(self) -> None:
+        """Propagate APPLIED ExitOrchestrator decisions to Invo paper positions.
+
+        TP1 + SL only: the modify payload carries the active plan's tp1 as
+        priceTarget — TP2/TP3 are never read, let alone sent. CLOSE fires on
+        applied supervisor-close events. REDUCE / FLAG / INVALIDATE have no
+        investment-level representation and are logged, never posted.
+        Gated on INVO_PAPER_ENABLED + live (not dry-run) + EXITS_APPLY, so
+        only risk-validated, actually-applied plans move paper state.
+        State-based and idempotent via data_store/invo_exit_sync.json:
+        a repeat run with no new applied decisions posts nothing.
+        Must never break scans.
+        """
+        if os.getenv("INVO_PAPER_ENABLED", "false").lower() != "true":
+            return
+        try:
+            from src.exits.ledger import ExitDecisionLedger
+            from src.invo import exit_sync as _sync
+            from src.invo.client import InvoClient, load_share_ledger
+            dry = os.getenv("INVO_PAPER_DRY_RUN", "true").lower() != "false"
+            apply = os.getenv("EXITS_APPLY", "false").lower() == "true"
+            if dry or not apply:
+                return
+            email = os.getenv("INVO_EMAIL", "")
+            app_password = os.getenv("INVO_GMAIL_APP_PASSWORD", "")
+            portfolio = os.getenv("INVO_PORTFOLIO_ID", "")
+            if not (email and app_password and portfolio):
+                logger.warning("[Scheduler] Invo exit-sync skipped: INVO_EMAIL/INVO_GMAIL_APP_PASSWORD/INVO_PORTFOLIO_ID missing")
+                return
+            client = InvoClient(email=email)
+            client.ensure_auth(email=email, app_password=app_password,
+                               device_id=os.getenv("INVO_DEVICE_ID", ""))
+            token = client.access_token or ""
+            ledger = ExitDecisionLedger()
+            actions = _sync.compute_sync_actions(
+                ledger.active_plans(), ledger.close_signal_ids(),
+                load_share_ledger(), _sync.load_sync_state())
+            if not actions:
+                return
+            state = _sync.load_sync_state()
+            done_modify, done_close = 0, 0
+            for a in actions:
+                try:
+                    if a["kind"] == "modify":
+                        for bid in a["base_ids"]:
+                            client.update_paper_trade(
+                                bid, price_target=a["price_target"],
+                                stop_loss=a["stop_loss"], token=token,
+                                dry_run=False)
+                        state["synced_levels"][a["signal_id"]] = {
+                            "stop_loss": a["stop_loss"], "tp1": a["price_target"]}
+                        done_modify += 1
+                    else:
+                        for bid in a["base_ids"]:
+                            client.close_paper_trade(bid, token=token, dry_run=False)
+                        if a["signal_id"] not in state["closed"]:
+                            state["closed"].append(a["signal_id"])
+                        done_close += 1
+                except Exception as e:
+                    if "401" in str(e):
+                        client.access_token = None
+                    logger.warning(f"[Scheduler] Invo exit-sync skipped for {a.get('signal_id')}: {e}")
+            _sync.save_sync_state(state)
+            logger.info(f"[Scheduler] Invo exit-sync: {done_modify} modified, {done_close} closed.")
+        except Exception as e:
+            logger.warning(f"[Scheduler] Invo exit-sync skipped: {e}")
 
     def _track_outcomes(self) -> None:
         """Update live outcome ledger + paper portfolio. Must never break scans."""
