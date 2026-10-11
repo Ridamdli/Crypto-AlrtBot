@@ -87,7 +87,11 @@ PAPER_SHARE_URL = "https://api.invoapp.com/v1_0/investments/ticker/create"
 #     -> {success, error, postId, closingPrice, remainingSim}
 PAPER_MODIFY_URL = "https://api.invoapp.com/v1_0/investments/ticker/modify"
 PAPER_SELL_URL = "https://api.invoapp.com/v1_0/investments/sell"
-PAPER_LIST_URL = "https://api.invoapp.com/v1_0/investments/get_investments"
+# Paper-portfolio reader (per the app's cBf flow): POST {portfolioId} ->
+# {success, error, portfolioRemainingSim, portfolioTotalFeeSim, investments}.
+# (The sibling /investments/get_investments takes a filter object and is not
+# the portfolio reader — verified live: it returns empty buckets.)
+PAPER_SIMS_URL = "https://api.invoapp.com/v1_0/investments/get_investments_sims"
 APP_HEADERS = {
     "x-app-build-number": "83",
     "x-app-release": "1.0.59",
@@ -560,13 +564,17 @@ class InvoClient:
         )
         return {"dry_run": False, "payload": payload, "response": result}
 
-    def list_paper_investments(self, token: str) -> Dict[str, Any]:
-        """Read-only: list paper investments + remaining sim. Never writes."""
-        resp = self.session.get(PAPER_LIST_URL, headers=self._paper_headers(token),
-                                timeout=self.timeout)
+    def list_paper_investments(self, token: str, portfolio_id: str) -> Dict[str, Any]:
+        """Read-only: paper investments + remaining sim for one portfolio.
+
+        Never writes. Per the app's cBf flow this is POST {portfolioId}.
+        """
+        resp = self.session.post(PAPER_SIMS_URL, json={"portfolioId": portfolio_id},
+                                 headers=self._paper_headers(token),
+                                 timeout=self.timeout)
         if resp.status_code == 401 and self.refresh_token and self._refresh():
-            resp = self.session.get(
-                PAPER_LIST_URL,
+            resp = self.session.post(
+                PAPER_SIMS_URL, json={"portfolioId": portfolio_id},
                 headers=self._paper_headers(self.access_token or token),
                 timeout=self.timeout)
         if resp.status_code == 401:

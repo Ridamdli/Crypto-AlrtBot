@@ -401,20 +401,22 @@ def test_close_posts_sell_shape_and_parses(monkeypatch, tmp_path):
     assert out2["dry_run"] is True
 
 
-def test_list_reads_investments_without_posting(monkeypatch, tmp_path):
+def test_list_reads_portfolio_sims_via_post(monkeypatch, tmp_path):
+    # Verified live against the app's cBf flow: POST {portfolioId} ->
+    # {success, portfolioRemainingSim, investments}. Read-only.
     c = InvoClient(storage_dir=str(tmp_path))
     seen = {}
-    class _GetResp(_Resp):
-        pass
-    def fake_get(url, headers=None, timeout=None):
+    def fake_post(url, json=None, headers=None, timeout=None):
         seen["url"] = url
+        seen["body"] = json
         return _Resp(200, '{"success": true, "portfolioRemainingSim": 33.0, '
                           '"investments": [{"baseId": "b1"}]}')
-    monkeypatch.setattr(c.session, "get", fake_get)
-    monkeypatch.setattr(c.session, "post",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not POST")))
-    out = c.list_paper_investments(token="tok")
-    assert seen["url"].endswith("/investments/get_investments")
+    monkeypatch.setattr(c.session, "post", fake_post)
+    monkeypatch.setattr(c.session, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not GET")))
+    out = c.list_paper_investments(token="tok", portfolio_id="pid")
+    assert seen["url"].endswith("/investments/get_investments_sims")
+    assert seen["body"] == {"portfolioId": "pid"}
     assert out["portfolioRemainingSim"] == 33.0
     assert out["investments"] == [{"baseId": "b1"}]
 
