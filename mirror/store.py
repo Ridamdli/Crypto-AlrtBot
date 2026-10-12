@@ -1,11 +1,11 @@
-"""Mirror ledgers: seen source ids + mirrored copies + audit. Own dir only.
+"""Mirror ledgers: seen source ids + close reports + audit. Own dir only.
 
 File layout inside data_dir (default mirror_data/):
   mirrored.json  {"seen": [pariston_baseIds...],
-                  "positions": {source_baseId: {...}}}
+                  "reported_closed": [pariston_baseIds...]}
   mirror_audit.jsonl  append-only event log, capped
-Writes are atomic (tmp + os.replace). Never touches the main bot's
-data_store/ — the two services share nothing on disk.
+Writes are atomic (tmp + os.replace). The watcher holds no positions and
+never touches the main bot's data_store/ — nothing shared on disk.
 """
 import json
 import os
@@ -31,11 +31,11 @@ class MirrorStore:
                 data = json.load(f)
                 if isinstance(data, dict):
                     data.setdefault("seen", [])
-                    data.setdefault("positions", {})
+                    data.setdefault("reported_closed", [])
                     return data
         except (FileNotFoundError, ValueError, OSError):
             pass
-        return {"seen": [], "positions": {}}
+        return {"seen": [], "reported_closed": []}
 
     def _save(self, data: Dict[str, Any]) -> None:
         tmp = self.ledger_path + ".tmp"
@@ -52,32 +52,15 @@ class MirrorStore:
             data["seen"].append(source_base_id)
             self._save(data)
 
-    def record_mirror(self, source_base_id: str, rec: Dict[str, Any]) -> None:
+    def reported_closed_ids(self) -> set:
+        return set(self.load().get("reported_closed", []))
+
+    def mark_reported_closed(self, source_base_id: str) -> None:
         data = self.load()
-        if source_base_id not in data["seen"]:
-            data["seen"].append(source_base_id)
-        data["positions"][source_base_id] = {
-            "symbol": rec.get("symbol"),
-            "side": rec.get("side"),
-            "mirrorBaseIds": rec.get("mirrorBaseIds", []),
-            "size": rec.get("size"),
-            "already_open": bool(rec.get("already_open", False)),
-            "mirrored_at": int(time.time()),
-            "closed": False,
-        }
+        reported = set(data.get("reported_closed", []))
+        reported.add(source_base_id)
+        data["reported_closed"] = sorted(reported)
         self._save(data)
-
-    def open_positions(self) -> Dict[str, Dict[str, Any]]:
-        return {sid: p for sid, p in self.load()["positions"].items()
-                if isinstance(p, dict) and not p.get("closed")}
-
-    def mark_closed(self, source_base_id: str) -> None:
-        data = self.load()
-        pos = data["positions"].get(source_base_id)
-        if isinstance(pos, dict):
-            pos["closed"] = True
-            pos["closed_at"] = int(time.time())
-            self._save(data)
 
     # ── audit ──
     def audit(self, event: str, detail: Optional[Dict[str, Any]] = None) -> None:
