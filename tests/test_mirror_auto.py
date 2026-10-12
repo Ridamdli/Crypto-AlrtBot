@@ -88,7 +88,8 @@ class FakeHl:
     def __init__(self, holdings=None):
         self.opens = []
         self.closes = []
-        self.flat = False
+        self.orders = []
+        self.cancels = []
         self.holdings = set(holdings or [])
 
     def equity(self):
@@ -98,7 +99,19 @@ class FakeHl:
         return {"HYPE": {"assetIndex": 10, "szDecimals": 2, "maxLeverage": 10}}
 
     def position(self, coin):
-        return {"szi": "-1.0"} if coin in self.holdings else None
+        if coin in self.holdings or any(c == coin for c, _, _, _ in self.opens):
+            return {"szi": "-1.5", "entryPx": "85.0"}
+        return None
+
+    def cancel_tpsl(self, coin, cloids):
+        self.cancels.append((coin, list(cloids or [])))
+        return len(cloids or [])
+
+    def place_tpsl(self, coin, side, size, tp, sl):
+        self.orders.append((coin, side, size, tp, sl))
+        n = len(self.orders)
+        return {"tp_oid": 1000 + n, "sl_oid": 2000 + n,
+                "tp_cloid": f"0xtp{n:03d}", "sl_cloid": f"0xsl{n:03d}"}
 
     def market_open(self, coin, side, margin_usd, leverage):
         assert margin_usd > 0 and leverage >= 1
@@ -118,7 +131,7 @@ class FakeSession:
 
     def record_open(self, payload):
         assert payload["mimicMeta"]["sourcePaperTradeBaseId"] == "SRC-1"
-        assert payload["mimicMeta"]["initialSourcePaperUpdateId"] == "post-2"
+        assert payload["mimicMeta"]["initialSourcePaperUpdateId"].startswith("post")
         self.opens.append(payload)
         return {"success": True}
 
@@ -374,6 +387,77 @@ def test_reconcile_heals_manually_closed(tmp_path):
     assert bot.reconcile_ledger() == 1
     assert bot.open_count() == 0 and bot.committed_usd() == 0.0
     assert bot.reconcile_ledger() == 0  # idempotent
+
+
+def test_tpsl_attached_on_open_with_source_levels(tmp_path):
+    got = []
+    feed = PostFeed([POST_OPEN])  # carries priceTarget 79.8 / stopLoss 87.8
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=feed),
+                  notify_fn=got.append)
+    bot.run_once("tok")
+    feed.posts.append(dict(POST_OPEN, id="post-2"))
+    out = bot.run_once("tok")
+    assert out["mimicked"] == 1
+    assert hl.orders == [("HYPE", "SHORT", 1.5, 79.8, 87.8)]
+    assert any("TP/SL set HYPE" in n for n in got)
+
+
+def test_tpsl_update_replaces_resting_triggers(tmp_path):
+    got = []
+    feed = PostFeed([POST_OPEN])
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=feed),
+                  notify_fn=got.append)
+    bot.run_once("tok")
+    feed.posts.append(dict(POST_OPEN, id="post-2"))
+    bot.run_once("tok")
+    assert len(hl.orders) == 1
+    upd = {"id": "post-5", "update": {
+        "ticker": "HYPE", "directionLong": False, "leverage": 4,
+        "priceTarget": 78.0, "stopLoss": 88.0, "verifiedTrade": True,
+        "baseId": "SRC-1", "baseShortId": "SH-1",
+        "changes": {"isAdded": False},
+        "owner": {"id": "7fd09aef-d45f-47dd-aa7f-72143e7d5a05",
+                  "username": "paristoon"},
+        "portfolio": {"id": "17cc19aa-d854-4857-9cca-7f05f21ec2da"}}}
+    feed.posts.append(upd)
+    out = bot.run_once("tok")
+    assert out["alerts"] == 1
+    assert len(hl.orders) == 2  # replaced
+    assert hl.cancels[-1] == ("HYPE", ["0xtp001", "0xsl001"])
+    assert any("TP/SL synced HYPE" in n for n in got)
+
+
+def test_hl_minimum_bump_and_skip(tmp_path):
+    from mirror import auto as _auto
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    # 3x leverage: $4.59 margin -> $13.77 ok, no bump. Force small account.
+    hl = FakeHl()
+    bot = AutoBot(mc, _cfg(live=True, account_usd=6.0, max_usd_per_mimic=5.0,
+                           max_pct_per_mimic=25.0, min_remaining_usd=3.0),
+                  hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    ev = {"action": "open", "post_id": "p1", "base_id": "B1",
+          "ticker": "DOGE", "side": "SHORT", "leverage": 3,
+          "owner_id": _auto.PARISTON_OWNER_ID,
+          "portfolio_id": _auto.PARISTON_PORTFOLIO_ID}
+    summary = {"mimicked": 0, "closed": 0, "skipped": 0, "alerts": 0,
+               "errors": 0}
+    # $6 acct: target min(5, 1.5)=1.5, room 3.0 -> $1.5*3=$4.5 < $10.5,
+    # need $3.5 > min(cap 1.5, room 3.0) -> skip
+    bot._mimic_open(ev, summary)
+    assert summary["skipped"] == 1 and hl.opens == []
+    assert any("under-hl-minimum" in n for n in got)
 
 
 def test_stranger_posts_never_mimicked(tmp_path):

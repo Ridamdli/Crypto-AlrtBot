@@ -56,7 +56,7 @@ class MimicConfig:
     account_usd: float = 18.38
     max_usd_per_mimic: float = 5.0
     max_pct_per_mimic: float = 25.0
-    max_concurrent: int = 2
+    max_concurrent: int = 5
     min_remaining_usd: float = 3.0
     feed_size: int = 20
 
@@ -214,7 +214,8 @@ class AutoBot:
             d = e.get("detail") or {}
             if e.get("event") == "mimicked" and d.get("coin"):
                 out[d["coin"]] = {"margin_usd": d.get("margin_usd", 0),
-                                  "source": d.get("source")}
+                                  "source": d.get("source"),
+                                  "side": d.get("side")}
             elif e.get("event") == "mimic_closed" and d.get("coin") in out:
                 del out[d["coin"]]
         return out
@@ -332,6 +333,21 @@ class AutoBot:
             summary["skipped"] += 1
             self._notify(f"SKIP {coin}: {reason}")
             return
+        # HL $10 order minimum: meet it within caps+floor, else skip loudly.
+        import math as _math
+        if margin * leverage < 10.5:
+            need = _math.ceil(10.5 / leverage * 100) / 100
+            room = self._account_usd() - self.committed_usd() - \
+                self.cfg.min_remaining_usd
+            cap = min(self.cfg.max_usd_per_mimic,
+                      self._account_usd() * self.cfg.max_pct_per_mimic / 100.0)
+            if need <= min(cap, room):
+                margin, reason = round(need, 2), "bumped-to-hl-min"
+            else:
+                summary["skipped"] += 1
+                self._notify(f"SKIP {coin}: under-hl-minimum "
+                             f"(${margin * leverage:.2f} notional)")
+                return
         self._notify(f"Pariston {coin} {side} {leverage}x -> mimic ${margin} "
                      f"(acct ${self._account_usd():.2f}) "
                      f"[{reason}] {'LIVE' if self.cfg.live else 'DRY-RUN'}")
@@ -353,6 +369,7 @@ class AutoBot:
         self.store.audit("mimicked", detail)
         self._notify(f"MIMICKED {coin} {side} ${margin} @ {fill.get('avg_px')} "
                      f"oid={fill.get('oid')}")
+        self._attach_tpsl(coin, side, ev)
         if self.session is not None:
             try:
                 meta = self.hl.meta().get(coin, {})
@@ -367,6 +384,43 @@ class AutoBot:
                 self._notify(f"RECORD FAILED {coin} (fill stands): {e}")
                 logger.warning(f"[Auto] record failed: {e}")
 
+    def _tpsl_of(self, coin: str) -> List[str]:
+        """Latest resting trigger cloids for a coin (empty when none)."""
+        cloids: List[str] = []
+        for e in self.store.recent_audit(5000):
+            if e.get("event") == "tpsl_placed" and \
+                    (e.get("detail") or {}).get("coin") == coin:
+                cloids = (e.get("detail") or {}).get("cloids", []) or []
+            elif e.get("event") in ("tpsl_cleared", "mimic_closed") and \
+                    (e.get("detail") or {}).get("coin") == coin:
+                cloids = []
+        return cloids
+
+    def _attach_tpsl(self, coin: str, side: str, ev: Dict[str, Any]) -> None:
+        """Rest Pariston's TP/SL as native triggers. Best-effort: a failure
+        alerts but never unwinds the fill. Skipped silently without TP+SL."""
+        if ev.get("tp") is None or ev.get("sl") is None:
+            return
+        try:
+            from mirror.hl import HlBridge
+            pos = self.hl.position(coin) if self.hl else None
+            if pos is None:
+                return
+            size = abs(float(pos.get("szi", 0) or 0))
+            if size <= 0:
+                return
+            entry = float(pos.get("entryPx", 0) or 0)
+            tp, sl = HlBridge.sane_tpsl(side, entry, ev.get("tp"), ev.get("sl"))
+            self.hl.cancel_tpsl(coin, self._tpsl_of(coin))
+            out = self.hl.place_tpsl(coin, side, size, tp, sl)
+            self.store.audit("tpsl_placed", {
+                "coin": coin, "tp": tp, "sl": sl,
+                "cloids": [out["tp_cloid"], out["sl_cloid"]]})
+            self._notify(f"TP/SL set {coin}: tp={tp} sl={sl}")
+        except Exception as e:
+            self._notify(f"TPSL FAILED {coin} (position stands): {e}")
+            logger.warning(f"[Auto] tpsl failed: {e}")
+
     def _follow_update(self, ev: Dict[str, Any], summary: Dict[str, Any]) -> None:
         coin = (ev.get("ticker") or "").replace("USDT", "").replace("USDC", "")
         if not coin:
@@ -380,6 +434,8 @@ class AutoBot:
                 self._notify(f"Pariston closed {coin} — close your copy "
                              f"(dry-run: no action taken).")
                 return
+            if self.hl is not None:
+                self.hl.cancel_tpsl(coin, self._tpsl_of(coin))
             fill = self.hl.close(coin)
             summary["closed"] += 1
             self.store.audit("mimic_closed",
@@ -400,8 +456,23 @@ class AutoBot:
                 except Exception as e:
                     logger.warning(f"[Auto] close-record failed: {e}")
             return
-        # TP/SL edits and size adds on the source: logged + alerted.
-        # Doctrine: no independent TP/SL on live copies; entries+closes only.
+        # Source TP/SL edit on a mirrored coin: replace our resting
+        # triggers immediately. Anything without usable TP+SL (or on a
+        # coin we don't hold) is logged + alerted, never traded blind.
+        copies = self.mirrored_coins()
+        if coin in copies and ev.get("tp") is not None \
+                and ev.get("sl") is not None:
+            if not self.cfg.live or self.hl is None:
+                summary["alerts"] += 1
+                self._notify(f"Pariston moved TP/SL on {coin} "
+                             f"(dry-run: no action taken).")
+                return
+            before_n = len(self._tpsl_of(coin))
+            self._attach_tpsl(coin, str(copies[coin].get("side") or
+                                        ev.get("side") or "LONG"), ev)
+            summary["alerts"] += 1
+            self._notify(f"TP/SL synced {coin} (replaced {before_n} triggers).")
+            return
         summary["alerts"] += 1
         self._notify(f"Pariston updated {coin} ({ev.get('action')} "
                      f"tp={ev.get('tp')} sl={ev.get('sl')}) — logged, no action.")

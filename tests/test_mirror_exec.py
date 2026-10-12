@@ -112,3 +112,66 @@ def test_session_lazy_loads_dropped_in_file(tmp_path, monkeypatch):
     s.refresh_token = ""
     assert s.ensure() is True
     assert s.refresh_token == "r-late"
+
+
+class _FakeTriggerEx:
+    def __init__(self):
+        self.orders = []
+        self.cancels = []
+
+    def order(self, coin, is_buy, sz, limit_px, order_type, reduce_only,
+              cloid=None, builder=None):
+        assert reduce_only is True
+        assert order_type["trigger"]["isMarket"] is True
+        self.orders.append((coin, is_buy, sz, order_type["trigger"]["tpsl"],
+                            cloid))
+        n = len(self.orders)
+        return {"response": {"data": {"statuses": [
+            {"resting": {"oid": 5000 + n}}]}}}
+
+    def cancel_by_cloid(self, coin, cloid):
+        self.cancels.append((coin, cloid))
+        return {"status": "ok"}
+
+
+def _tpsl_bridge():
+    ex = _FakeTriggerEx()
+    b = HlBridge(agent_key="k", wallet_address="w",
+                 client_factory=lambda: ex)
+    return b, ex
+
+
+def test_sane_tpsl_accepts_good_geometry():
+    assert HlBridge.sane_tpsl("SHORT", 85.0, 79.8, 87.8) == (79.8, 87.8)
+    assert HlBridge.sane_tpsl("LONG", 100.0, 103.0, 97.0) == (103.0, 97.0)
+
+
+def test_sane_tpsl_rejects_inverted_and_garbage():
+    with pytest.raises(RuntimeError):
+        HlBridge.sane_tpsl("SHORT", 85.0, 87.8, 79.8)  # flipped
+    with pytest.raises(RuntimeError):
+        HlBridge.sane_tpsl("LONG", 100.0, 97.0, 103.0)  # flipped
+    with pytest.raises(RuntimeError):
+        HlBridge.sane_tpsl("SHORT", 85.0, None, 87.8)
+
+
+def test_place_tpsl_rests_both_triggers_short():
+    b, ex = _tpsl_bridge()
+    out = b.place_tpsl("HYPE", "SHORT", 1.5, 79.8, 87.8)
+    assert [o[3] for o in ex.orders] == ["tp", "sl"]
+    assert all(o[1] is True for o in ex.orders)  # SHORT closes via buys
+    assert all(o[2] == 1.5 for o in ex.orders)
+    assert out["tp_oid"] == 5001 and out["sl_oid"] == 5002
+    assert out["tp_cloid"].startswith("0x")
+
+
+def test_place_tpsl_long_sells():
+    b, ex = _tpsl_bridge()
+    b.place_tpsl("BTC", "LONG", 0.01, 90000.0, 80000.0)
+    assert all(o[1] is False for o in ex.orders)
+
+
+def test_cancel_tpsl_best_effort():
+    b, ex = _tpsl_bridge()
+    assert b.cancel_tpsl("HYPE", ["0xaaa", "0xbbb"]) == 2
+    assert b.cancel_tpsl("HYPE", []) == 0

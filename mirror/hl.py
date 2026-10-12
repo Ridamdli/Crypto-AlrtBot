@@ -171,3 +171,60 @@ class HlBridge:
                     "raw": raw}
         except (AttributeError, ValueError, TypeError, IndexError) as e:
             raise RuntimeError(f"unparseable fill envelope: {e}")
+
+    @staticmethod
+    def sane_tpsl(side: str, entry_px: float, tp: Any, sl: Any) -> tuple:
+        """Validate TP/SL sit on the profit/loss sides. Returns floats or
+        raises. Garbage in never becomes resting orders."""
+        try:
+            tp_f, sl_f = float(tp), float(sl)
+        except (TypeError, ValueError):
+            raise RuntimeError("tp/sl missing or non-numeric")
+        if not all(x > 0 and x == x and abs(x) != float("inf")
+                   for x in (tp_f, sl_f, entry_px)):
+            raise RuntimeError("tp/sl/entry not finite positive")
+        if side.upper() == "LONG":
+            if not (sl_f < entry_px < tp_f):
+                raise RuntimeError("LONG needs sl < entry < tp")
+        else:
+            if not (tp_f < entry_px < sl_f):
+                raise RuntimeError("SHORT needs tp < entry < sl")
+        return tp_f, sl_f
+
+    def place_tpsl(self, coin: str, side: str, size: float,
+                   tp_px: float, sl_px: float) -> Dict[str, Any]:
+        """Resting reduce-only TP + SL triggers for the full size. Returns
+        {tp_oid, sl_oid, tp_cloid, sl_cloid}. Raises on failure."""
+        import secrets as _secrets
+        ex = self._client_or_throw()
+        is_buy = side.upper() == "SHORT"  # triggers close against the position
+        out = {}
+        for kind, px in (("tp", float(tp_px)), ("sl", float(sl_px))):
+            cloid = "0x" + _secrets.token_hex(16)
+            raw = ex.order(coin, is_buy, float(size), float(px),
+                           {"trigger": {"triggerPx": str(px), "isMarket": True,
+                                        "tpsl": kind}},
+                           True, cloid, INVO_BUILDER)
+            data = raw.get("response", {}).get("data", {}) \
+                if isinstance(raw, dict) else {}
+            statuses = data.get("statuses", [])
+            resting = (statuses[0].get("resting", {}) if statuses else {})
+            oid = resting.get("oid")
+            if oid is None:
+                raise RuntimeError(f"{kind} trigger not resting: "
+                                   f"{str(raw)[:160]}")
+            out[f"{kind}_oid"], out[f"{kind}_cloid"] = oid, cloid
+        logger.info(f"[HL] tpsl resting {coin} {side} tp={tp_px} sl={sl_px}")
+        return out
+
+    def cancel_tpsl(self, coin: str, cloids: List[str]) -> int:
+        """Best-effort cancel of resting triggers by cloid. Returns count."""
+        ex = self._client_or_throw()
+        n = 0
+        for cl in cloids or []:
+            try:
+                ex.cancel_by_cloid(coin, cl)
+                n += 1
+            except Exception as e:
+                logger.warning(f"[HL] cancel {coin} {cl[:10]}… failed: {e}")
+        return n
