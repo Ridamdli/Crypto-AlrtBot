@@ -3,10 +3,11 @@
 Modes (MIRROR_MODE):
 - watch (default): detect-only notifier. Cannot trade (package safety
   test enforces it for the watch path).
-- auto: full auto-mimic — watcher + capital brain + CDP executor that
-  taps confirm in the operator's signed-in Chrome. Live money moves
-  only with MIMIC_LIVE=true; default is dry-run (navigate + read,
-  never confirm). Needs Chrome with --remote-debugging-port=9222.
+- auto: headless auto-mimic — feed detection + capital brain + HL agent
+  execution + Invo recording. Live money moves only with MIMIC_LIVE=true;
+  default is dry-run (detect + size + audit, zero orders). Needs
+  HL_AGENT_KEY + HL_WALLET_ADDRESS; INVO_TRADING_REFRESH enables recording
+  (session persists rotations under the data dir, gitignored).
 """
 import os
 
@@ -29,7 +30,8 @@ def main() -> None:
                       os.getenv("HL_WALLET_ADDRESS", ""))
         sess = TradingSession(
             refresh_token=os.getenv("INVO_TRADING_REFRESH", ""),
-            access_token=os.getenv("INVO_TRADING_TOKEN", ""))
+            access_token=os.getenv("INVO_TRADING_TOKEN", ""),
+            state_path=os.path.join(cfg.data_dir, "trading_session.json"))
         AutoBot(cfg, mg, hl=hl, session=sess,
                 watcher=FeedWatcher()).run_forever()
         return
@@ -38,10 +40,6 @@ def main() -> None:
     bot.set_telegram(os.getenv("MIRROR_TELEGRAM_BOT_TOKEN", ""),
                      os.getenv("MIRROR_TELEGRAM_CHAT_ID", ""))
     bot.run_forever()
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":

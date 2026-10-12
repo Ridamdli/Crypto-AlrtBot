@@ -30,9 +30,41 @@ def decode_exp(token: str) -> Optional[int]:
 
 
 class TradingSession:
-    def __init__(self, refresh_token: str = "", access_token: str = ""):
+    def __init__(self, refresh_token: str = "", access_token: str = "",
+                 state_path: str = ""):
         self.refresh_token = refresh_token
         self.access_token = access_token
+        self.state_path = state_path
+        if state_path:
+            self._load()
+
+    def _load(self) -> None:
+        try:
+            import json as _json
+            with open(self.state_path, encoding="utf-8") as f:
+                data = _json.load(f)
+            if isinstance(data, dict):
+                self.refresh_token = data.get("refresh_token") or self.refresh_token
+                self.access_token = data.get("access_token") or self.access_token
+        except (FileNotFoundError, ValueError, OSError):
+            pass
+
+    def _save(self) -> None:
+        if not self.state_path:
+            return
+        try:
+            import json as _json
+            import os as _os
+            _os.makedirs(_os.path.dirname(self.state_path) or ".", exist_ok=True)
+            with open(self.state_path, "w", encoding="utf-8") as f:
+                _json.dump({"refresh_token": self.refresh_token,
+                            "access_token": self.access_token}, f)
+            try:
+                _os.chmod(self.state_path, 0o600)
+            except OSError:
+                pass
+        except OSError as e:
+            logger.warning(f"[Recorder] session persist failed: {e}")
 
     def _headers(self) -> Dict[str, str]:
         return {"authorization": f"Bearer {self.access_token}",
@@ -55,6 +87,10 @@ class TradingSession:
                 data = _json.loads(resp.read().decode("utf-8"))
             if data.get("accessToken"):
                 self.access_token = data["accessToken"]
+                if data.get("refreshToken"):
+                    # Server rotates: persist immediately, the old token dies.
+                    self.refresh_token = data["refreshToken"]
+                self._save()
                 return True
             return False
         except Exception as e:

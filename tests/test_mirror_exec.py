@@ -65,6 +65,36 @@ def test_session_ensure_expired_refreshes(monkeypatch):
     assert s.ensure() is True
 
 
+def test_session_persists_rotated_refresh(tmp_path, monkeypatch):
+    import json as _json
+    state = str(tmp_path / "trading_session.json")
+    s = TradingSession(refresh_token="r-old", state_path=state)
+
+    class _Resp:
+        status = 200
+
+        def read(self):
+            return _json.dumps({"accessToken": "a-new",
+                                "refreshToken": "r-new"}).encode()
+
+    class _CM:
+        def __enter__(self):
+            return _Resp()
+
+        def __exit__(self, *a):
+            return False
+
+    import urllib.request as _req
+    monkeypatch.setattr(_req, "urlopen", lambda *a, **k: _CM())
+    assert s.refresh() is True
+    assert s.access_token == "a-new" and s.refresh_token == "r-new"
+    saved = _json.loads(open(state, encoding="utf-8").read())
+    assert saved["refresh_token"] == "r-new"
+    # reload resumes
+    s2 = TradingSession(state_path=state)
+    assert s2.refresh_token == "r-new" and s2.access_token == "a-new"
+
+
 def test_session_post_without_session_raises():
     s = TradingSession()
     with pytest.raises(RuntimeError, match="no trading session"):
