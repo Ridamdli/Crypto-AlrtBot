@@ -98,7 +98,11 @@ class TradingSession:
             return False
 
     def ensure(self) -> bool:
-        """True when a usable access token is in hand."""
+        """True when a usable access token is in hand. Lazily (re)loads
+        persisted state first, so a session file dropped in later (or
+        rotated by a sibling run) is picked up without restart."""
+        if not self.access_token and not self.refresh_token:
+            self._load()
         exp = decode_exp(self.access_token) if self.access_token else 0
         if exp and exp - time.time() > 60:
             return True

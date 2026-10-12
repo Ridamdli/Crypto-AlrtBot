@@ -159,15 +159,22 @@ class AutoBot:
                 pass
         return self.cfg.account_usd
 
+    def _client(self):
+        from src.invo.client import InvoClient
+        client = InvoClient(email=self.mirror_cfg.email,
+                            storage_dir=self.mirror_cfg.data_dir)
+        client.ensure_auth(email=self.mirror_cfg.email,
+                           app_password=self.mirror_cfg.app_password,
+                           device_id=self.mirror_cfg.device_id)
+        return client
+
     def _token(self) -> str:
         if self.mirror_cfg.email and self.mirror_cfg.app_password:
-            from src.invo.client import InvoClient
-            client = InvoClient(email=self.mirror_cfg.email,
-                                storage_dir=self.mirror_cfg.data_dir)
-            client.ensure_auth(email=self.mirror_cfg.email,
-                               app_password=self.mirror_cfg.app_password,
-                               device_id=self.mirror_cfg.device_id)
-            return client.access_token or ""
+            try:
+                return self._client().access_token or ""
+            except Exception as e:
+                logger.warning(f"[Auto] feed login failed: {e}")
+                return ""
         return os.getenv("MIMIC_FEED_TOKEN", "")
 
     def committed_usd(self) -> float:
@@ -199,6 +206,56 @@ class AutoBot:
             elif e.get("event") == "mimic_closed" and d.get("coin") in out:
                 del out[d["coin"]]
         return out
+
+    def bootstrap_from_sims(self, client, token: str) -> Dict[str, Any]:
+        """One-shot: mimic Pariston's ALREADY-open positions (feed only
+        emits new posts, so startup would otherwise miss them). Each open
+        not already mirrored becomes one capped mimic; seen-marked so a
+        restart never re-fires. Returns a summary."""
+        from mirror.feed import fetch_open_positions
+        summary: Dict[str, Any] = {"mimicked": 0, "skipped": 0, "errors": 0}
+        try:
+            positions = fetch_open_positions(
+                client, token, PARISTON_PORTFOLIO_ID)
+        except Exception as e:
+            logger.warning(f"[Auto] bootstrap unreadable: {e}")
+            summary["errors"] = 1
+            return summary
+        mirrored = self.mirrored_coins()
+        for pos in positions:
+            base = str(pos.get("baseId") or "")
+            if not base or f"sims-{base}" in self.store.seen_ids():
+                continue
+            ticker = str(pos.get("ticker") or "")
+            if ticker in mirrored:
+                self.store.mark_seen(f"sims-{base}")
+                continue
+            if self.hl is not None:
+                try:
+                    if self.hl.position(ticker) is not None:
+                        # Wallet already exposed (manual or older copy):
+                        # never blind-add, alert instead.
+                        self.store.mark_seen(f"sims-{base}")
+                        self._notify(f"SKIP bootstrap {ticker}: wallet "
+                                     f"already holds it (manual review).")
+                        summary["skipped"] += 1
+                        continue
+                except Exception as e:
+                    logger.warning(f"[Auto] position check failed: {e}")
+            self.store.mark_seen(f"sims-{base}")
+            ev = {"action": "open", "post_id": f"sims-{base}",
+                  "base_id": base, "base_short_id": "",
+                  "ticker": ticker, "side": pos.get("side", "SHORT"),
+                  "leverage": pos.get("leverage", 10),
+                  "owner_id": PARISTON_OWNER_ID,
+                  "portfolio_id": PARISTON_PORTFOLIO_ID}
+            try:
+                self._mimic_open(ev, summary)
+            except Exception as e:
+                summary["errors"] += 1
+                logger.warning(f"[Auto] bootstrap mimic failed: {e}")
+        logger.info(f"[Auto] bootstrap: {summary}")
+        return summary
 
     def run_once(self, token: str = "") -> Dict[str, Any]:
         summary: Dict[str, Any] = {"mimicked": 0, "closed": 0,
@@ -322,6 +379,11 @@ class AutoBot:
     def run_forever(self, token: str = "") -> None:
         logger.info("[Auto] started "
                     f"(live={self.cfg.live}, poll={self.mirror_cfg.poll_s}s)")
+        try:
+            client = self._client()
+            self.bootstrap_from_sims(client, client.access_token or "")
+        except Exception as e:
+            logger.warning(f"[Auto] startup bootstrap skipped: {e}")
         while True:
             try:
                 self.run_once(token)

@@ -99,3 +99,16 @@ def test_session_post_without_session_raises():
     s = TradingSession()
     with pytest.raises(RuntimeError, match="no trading session"):
         s.post("/dex/trade", {})
+
+
+def test_session_lazy_loads_dropped_in_file(tmp_path, monkeypatch):
+    import json as _json
+    state = str(tmp_path / "trading_session.json")
+    _json.dump({"refresh_token": "r-late",
+                "access_token": ""}, open(state, "w"))
+    s = TradingSession(state_path=state)
+    monkeypatch.setattr(s, "refresh", lambda: True)
+    s.access_token = ""
+    s.refresh_token = ""
+    assert s.ensure() is True
+    assert s.refresh_token == "r-late"

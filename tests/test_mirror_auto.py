@@ -85,16 +85,20 @@ def test_watcher_indexes_first_poll():
 
 
 class FakeHl:
-    def __init__(self):
+    def __init__(self, holdings=None):
         self.opens = []
         self.closes = []
         self.flat = False
+        self.holdings = set(holdings or [])
+
+    def equity(self):
+        return None
 
     def meta(self):
         return {"HYPE": {"assetIndex": 10, "szDecimals": 2, "maxLeverage": 10}}
 
     def position(self, coin):
-        return None if self.flat else None
+        return {"szi": "-1.0"} if coin in self.holdings else None
 
     def market_open(self, coin, side, margin_usd, leverage):
         assert margin_usd > 0 and leverage >= 1
@@ -303,6 +307,57 @@ STRANGER_CLOSE = {"id": "post-XC", "update": {
     "owner": {"id": "b3f0f13f-d3e5-4255-bd5c-d012fa287b57",
               "username": "somebody-else"},
     "portfolio": {"id": "ac454e11-4834-4d79-943b-f070c9b45ec7"}}}
+
+
+def test_bootstrap_mimics_unmirrored_opens_once(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl, sess = FakeHl(), FakeSession()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=sess,
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+
+    class _Client:
+        pass
+
+    import mirror.auto as _auto
+    import mirror.feed as _feed
+    _feed_orig = _feed.fetch_open_positions
+    _feed.fetch_open_positions = lambda *a, **k: [
+        {"baseId": "B-HYPE", "ticker": "HYPE", "side": "SHORT", "leverage": 4},
+        {"baseId": "B-LINK", "ticker": "LINK", "side": "SHORT", "leverage": 5}]
+    try:
+        out = bot.bootstrap_from_sims(_Client(), "tok")
+        assert out["mimicked"] == 2
+        assert [c for c, _, _, _ in hl.opens] == ["HYPE", "LINK"]
+        out2 = bot.bootstrap_from_sims(_Client(), "tok")
+        assert out2["mimicked"] == 0  # restart-safe
+        assert bot.open_count() == 2
+    finally:
+        _feed.fetch_open_positions = _feed_orig
+
+
+def test_bootstrap_skips_wallet_held_coin(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl(holdings={"HYPE"})
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    import mirror.auto as _auto
+    import mirror.feed as _feed
+    _feed_orig = _feed.fetch_open_positions
+    _feed.fetch_open_positions = lambda *a, **k: [
+        {"baseId": "B-HYPE", "ticker": "HYPE", "side": "SHORT", "leverage": 4}]
+    try:
+        out = bot.bootstrap_from_sims(object(), "tok")
+        assert out["mimicked"] == 0 and out["skipped"] == 1
+        assert hl.opens == []
+        assert any("already holds" in n for n in got)
+    finally:
+        _feed.fetch_open_positions = _feed_orig
 
 
 def test_stranger_posts_never_mimicked(tmp_path):
