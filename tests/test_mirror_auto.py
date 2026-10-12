@@ -236,3 +236,69 @@ def test_record_builder_shape():
                             "leverage": 4, "tpPx": None, "slPx": None}
     assert rec["mimicMeta"]["sourcePaperTradeBaseId"] == "SRC-1"
     assert rec["summary"]["intendedLeverage"] == 4
+
+
+STRANGER = {"id": "post-X", "update": {
+    "ticker": "BTC", "directionLong": True, "leverage": 20,
+    "entryPrice": 82000.0, "isOpen": True, "verifiedTrade": True,
+    "baseId": "SRC-X", "baseShortId": "SH-X",
+    "changes": {"isAdded": True},
+    "owner": {"id": "b3f0f13f-d3e5-4255-bd5c-d012fa287b57",
+              "username": "somebody-else"},
+    "portfolio": {"id": "ac454e11-4834-4d79-943b-f070c9b45ec7"}}}
+
+STRANGER_CLOSE = {"id": "post-XC", "update": {
+    "ticker": "BTC", "directionLong": True, "leverage": 20,
+    "isOpen": False, "closingPrice": 81000.0, "verifiedTrade": True,
+    "baseId": "SRC-X", "baseShortId": "SH-X",
+    "owner": {"id": "b3f0f13f-d3e5-4255-bd5c-d012fa287b57",
+              "username": "somebody-else"},
+    "portfolio": {"id": "ac454e11-4834-4d79-943b-f070c9b45ec7"}}}
+
+
+def test_stranger_posts_never_mimicked(tmp_path):
+    """Pariston-only guarantee: other traders' opens, closes and updates
+    are ignored entirely — no orders, no records, no close attempts."""
+    got = []
+    feed = PostFeed([POST_OPEN, STRANGER])
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl, sess = FakeHl(), FakeSession()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=sess,
+                  watcher=FeedWatcher(fetch_fn=feed),
+                  notify_fn=got.append)
+    bot.run_once("tok")  # index both
+    feed.posts.append(dict(POST_OPEN, id="post-2"))
+    feed.posts.append(dict(STRANGER, id="post-X2"))
+    feed.posts.append(dict(STRANGER_CLOSE, id="post-XC"))
+    out = bot.run_once("tok")
+    assert out["mimicked"] == 1
+    assert hl.opens == [("HYPE", "SHORT", round(18.38 * 0.25, 2), 4)]
+    assert hl.closes == []
+    assert all("BTC" not in n for n in got)
+    assert bot.open_count() == 1
+
+
+def test_pariston_increase_adds_capped_position(tmp_path):
+    """Pariston adds to a mirrored setup -> second capped mimic (HL nets
+    same-coin size automatically)."""
+    got = []
+    feed = PostFeed([POST_OPEN])
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl, sess = FakeHl(), FakeSession()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=sess,
+                  watcher=FeedWatcher(fetch_fn=feed),
+                  notify_fn=got.append)
+    bot.run_once("tok")
+    feed.posts.append(dict(POST_OPEN, id="post-2"))
+    bot.run_once("tok")
+    assert bot.open_count() == 1
+    increase = {"id": "post-4", "update": dict(
+        POST_OPEN["update"], changes={"isAdded": False})}
+    feed.posts.append(increase)
+    out = bot.run_once("tok")
+    assert out["mimicked"] == 1
+    assert len(hl.opens) == 2
+    assert bot.open_count() == 2
+    assert bot.committed_usd() == round(round(18.38 * 0.25, 2) * 2, 2)
