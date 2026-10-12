@@ -19,6 +19,7 @@ venv/
 
 # Data & Cache
 data_store/
+mirror_data/
 *.db
 *.sqlite
 *.sqlite3

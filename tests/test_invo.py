@@ -938,3 +938,64 @@ def test_locked_sync_applies_and_is_idempotent(monkeypatch, tmp_path):
     client2 = _FakeSyncClient()
     sched._run_exit_sync_locked(client2, "tok", "pid", "worker-1")
     assert client2.updates == [] and client2.closes == []
+
+
+def test_refresh_sends_refresh_token_as_bearer(monkeypatch, tmp_path):
+    """Rotation must authenticate with the refresh token, not the (expired)
+    access token — otherwise every rotation after access-expiry fails and
+    the session dies until the next OTP login."""
+    from src.invo.client import InvoClient
+    c = InvoClient(storage_dir=str(tmp_path))
+    c.access_token = "STALE-ACCESS"
+    c.refresh_token = "GOOD-REFRESH"
+    seen = {}
+
+    def fake_get(url, headers=None, timeout=None):
+        seen["auth"] = (headers or {}).get("Authorization")
+        return _Resp(200, '{"accessToken": "FRESH-ACCESS"}')
+
+    monkeypatch.setattr(c.session, "get", fake_get)
+    assert c._refresh() is True
+    assert seen["auth"] == "Bearer GOOD-REFRESH"
+    assert c.access_token == "FRESH-ACCESS"
+
+
+def test_refresh_without_refresh_token_posts_nothing(monkeypatch, tmp_path):
+    from src.invo.client import InvoClient
+    c = InvoClient(storage_dir=str(tmp_path))
+    c.access_token = "STALE-ACCESS"
+    c.refresh_token = None
+    calls = []
+    monkeypatch.setattr(c.session, "get",
+                        lambda *a, **k: calls.append(1) or _Resp(200, "{}"))
+    assert c._refresh() is False
+    assert calls == []
+
+
+def test_fetch_position_history_returns_newest_item(monkeypatch, tmp_path):
+    from src.invo.client import InvoClient
+    c = InvoClient(storage_dir=str(tmp_path))
+    c.access_token = "TOK"
+    seen = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["body"] = json
+        return _Resp(200, '{"success": true, "items": ['
+                          '{"baseId": "b1", "ticker": "ZEC", "priceTarget": 1.0},'
+                          '{"baseId": "b1", "ticker": "ZEC", "priceTarget": 2.0}]}')
+
+    monkeypatch.setattr(c.session, "post", fake_post)
+    item = c.fetch_position_history("b1", "TOK")
+    assert seen["url"].endswith("/posts/get_investment_history")
+    assert seen["body"]["investmentBaseId"] == "b1"
+    assert item == {"baseId": "b1", "ticker": "ZEC", "priceTarget": 1.0}
+
+
+def test_fetch_position_history_empty_items_returns_empty(monkeypatch, tmp_path):
+    from src.invo.client import InvoClient
+    c = InvoClient(storage_dir=str(tmp_path))
+    c.access_token = "TOK"
+    monkeypatch.setattr(c.session, "post",
+                        lambda *a, **k: _Resp(200, '{"success": true, "items": []}'))
+    assert c.fetch_position_history("b9", "TOK") == {}

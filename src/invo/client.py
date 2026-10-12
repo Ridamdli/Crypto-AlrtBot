@@ -100,6 +100,12 @@ PAPER_SELL_URL = "https://api.invoapp.com/v1_0/investments/sell"
 # (The sibling /investments/get_investments takes a filter object and is not
 # the portfolio reader — verified live: it returns empty buckets.)
 PAPER_SIMS_URL = "https://api.invoapp.com/v1_0/investments/get_investments_sims"
+# Position-detail reader (per app.invoapp.com network flow): POST
+# {investmentBaseId, params:{page:1,size:1,shadowInvestmentsOnly:true}} ->
+# {success, error, items:[newest-first history post with priceTarget,
+# stopLoss, entryPrice, leverage, directionLong, isOpen, ...]}.
+# Read-only and cross-account for viewable portfolios.
+HISTORY_URL = "https://api.invoapp.com/v1_0/posts/get_investment_history"
 APP_HEADERS = {
     "x-app-build-number": "83",
     "x-app-release": "1.0.59",
@@ -258,11 +264,21 @@ class InvoClient:
             return {"raw": resp.text}
 
     def _refresh(self) -> bool:
-        """Silent rotation: GET /auth/refresh_token (per app bundle: GET, no body)."""
+        """Silent rotation: GET /auth/refresh_token (per app bundle: GET, no body).
+
+        The endpoint authenticates with the REFRESH token as Bearer — not
+        the (possibly expired) access token. Sending the access token made
+        every rotation after access-expiry fail, killing sessions until the
+        next OTP login.
+        """
+        if not self.refresh_token:
+            return False
         try:
+            headers = dict(self._headers())
+            headers["Authorization"] = f"Bearer {self.refresh_token}"
             resp = self.session.get(
                 f"{self.base_url}/auth/refresh_token",
-                headers=self._headers(),
+                headers=headers,
                 timeout=self.timeout,
             )
             if resp.status_code != 200:
@@ -622,6 +638,44 @@ class InvoClient:
             return resp.json()
         except ValueError:
             raise InvoApiError(resp.status_code, resp.text)
+
+    def fetch_position_history(self, base_id: str, token: str) -> Dict[str, Any]:
+        """Read-only: full detail of one investment via its history post.
+
+        Returns the newest history item (carries priceTarget, stopLoss,
+        entryPrice, leverage, directionLong, isOpen, owner, ...) or {}
+        when the position has no history. Works cross-account for
+        viewable portfolios — this is how a follower inspects a setup.
+        Never writes.
+        """
+        resp = self.session.post(
+            HISTORY_URL,
+            json={"investmentBaseId": base_id,
+                  "params": {"page": 1, "size": 1,
+                             "shadowInvestmentsOnly": True}},
+            headers=self._paper_headers(token),
+            timeout=self.timeout,
+        )
+        if resp.status_code == 401 and self.refresh_token and self._refresh():
+            resp = self.session.post(
+                HISTORY_URL,
+                json={"investmentBaseId": base_id,
+                      "params": {"page": 1, "size": 1,
+                                 "shadowInvestmentsOnly": True}},
+                headers=self._paper_headers(self.access_token or token),
+                timeout=self.timeout)
+        if resp.status_code == 401:
+            raise InvoAuthError("paper token rejected even after refresh; next cycle OTP self-logins")
+        if resp.status_code not in (200, 201):
+            raise InvoApiError(resp.status_code, resp.text)
+        try:
+            data = resp.json()
+        except ValueError:
+            raise InvoApiError(resp.status_code, resp.text)
+        items = data.get("items") if isinstance(data, dict) else None
+        if isinstance(items, list) and items and isinstance(items[0], dict):
+            return items[0]
+        return {}
 
     # ── share ───────────────────────────────────────────────────────────
     @staticmethod
