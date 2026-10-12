@@ -171,7 +171,19 @@ class AutoBot:
     def _token(self) -> str:
         if self.mirror_cfg.email and self.mirror_cfg.app_password:
             try:
-                return self._client().access_token or ""
+                import time
+                from mirror.recorder import decode_exp
+                client = self._client()
+                # Invo answers some endpoints with 403 (not 401) on expired
+                # tokens — and nothing clears those. So validate proactively:
+                # near-expiry forces the refresh/OTP chain instead of reuse.
+                exp = decode_exp(client.access_token or "") or 0
+                if exp - time.time() < 180:
+                    client.access_token = None
+                client.ensure_auth(email=self.mirror_cfg.email,
+                                   app_password=self.mirror_cfg.app_password,
+                                   device_id=self.mirror_cfg.device_id)
+                return client.access_token or ""
             except Exception as e:
                 logger.warning(f"[Auto] feed login failed: {e}")
                 return ""
