@@ -305,6 +305,36 @@ def test_precheck_stale_entries_do_not_block_forever(tmp_path, monkeypatch):
     assert c.already_shared_open("BTCUSDT", "P", {"FRESH": {"final": True}}) is False
 
 
+def test_record_share_preserves_base_ids_on_failed_write(tmp_path, monkeypatch):
+    import json as _json
+    import os as _os
+    from src.invo.client import load_share_ledger, record_share
+    record_share(str(tmp_path), "SIG-1", {"symbol": "X", "baseIds": ["b1"]})
+
+    def _boom(src, dst):
+        raise OSError("disk full")
+    monkeypatch.setattr(_os, "replace", _boom)
+    # Must not raise; previously recorded baseIds must survive intact.
+    record_share(str(tmp_path), "SIG-2", {"symbol": "Y", "baseIds": ["b2"]})
+    assert load_share_ledger(str(tmp_path))["SIG-1"]["baseIds"] == ["b1"]
+    assert "SIG-2" not in load_share_ledger(str(tmp_path))
+    assert not _os.path.exists(
+        _os.path.join(str(tmp_path), "invo_shares.json.tmp"))
+
+
+def test_record_share_writes_atomically(tmp_path):
+    import json as _json
+    import os as _os
+    from src.invo.client import load_share_ledger, record_share
+    record_share(str(tmp_path), "SIG-1", {"symbol": "X", "baseIds": ["b1"]})
+    record_share(str(tmp_path), "SIG-2", {"symbol": "Y", "baseIds": ["b2"]})
+    ledger = load_share_ledger(str(tmp_path))
+    assert ledger["SIG-1"]["baseIds"] == ["b1"]
+    assert ledger["SIG-2"]["baseIds"] == ["b2"]
+    assert not _os.path.exists(
+        _os.path.join(str(tmp_path), "invo_shares.json.tmp"))
+
+
 def test_record_share_stamps_time(tmp_path):
     from src.invo.client import load_share_ledger, record_share
     record_share(str(tmp_path), "SIG-9", {"symbol": "X", "baseIds": []})
@@ -325,6 +355,20 @@ def test_live_share_posts_exact_path(monkeypatch):
     assert out["dry_run"] is False
     assert seen["path"] == "/dex/position/create"
     assert seen["payload"]["coin"] == "BTC"
+
+
+def test_share_and_modify_payloads_never_carry_tp2_tp3():
+    import json as _json
+    c = InvoClient()
+    share = c.build_paper_share_payload(
+        symbol="BTCUSDT", long=True, leverage=10, entry_sim=10.0,
+        price_target=95000.0, stop_loss=89000.0, liquidation_price=None,
+        portfolio_id="pid")
+    modify = c.build_paper_modify_payload("b1", 95000.0, 89000.0)
+    for payload in (share, modify):
+        blob = _json.dumps(payload).lower()
+        assert '"tp2"' not in blob and '"tp3"' not in blob
+    assert share["priceTarget"] == 95000.0 and share["stopLoss"] == 89000.0
 
 
 # ── exit-sync: TP1 + SL only (never TP2/TP3) ──────────────────────
@@ -555,3 +599,238 @@ def test_scheduler_sync_gated_by_dry_run_and_apply(monkeypatch, tmp_path):
     monkeypatch.setenv("EXITS_APPLY", "false")
     sched._sync_exits_to_invo()
     assert calls == []
+
+
+def test_share_success_records_sim_reservation(monkeypatch, tmp_path):
+    """A posted share must mirror its sim commitment locally (observational).
+    A failed share must leave no reservation behind."""
+    from types import SimpleNamespace
+    from src.scheduler import BotScheduler
+    import src.invo.client as _mod
+    from src.invo.sim_ledger import SimLedger
+    monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
+    monkeypatch.setenv("INVO_PAPER_DRY_RUN", "false")
+    monkeypatch.setenv("INVO_PORTFOLIO_ID", "pid")
+    monkeypatch.setenv("INVO_EMAIL", "e@x.com")
+    monkeypatch.setenv("INVO_GMAIL_APP_PASSWORD", "pw")
+    monkeypatch.setenv("INVO_SIM_SIZE", "10.0")
+    monkeypatch.setenv("INVO_DEVICE_ID", "dev")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_mod.InvoClient, "ensure_auth", lambda self, **k: None)
+
+    def fake_share(self, signal, **kw):
+        return {"dry_run": False,
+                "response": {"baseIds": ["b1"], "remainingSim": 90.0}}
+    monkeypatch.setattr(_mod.InvoClient, "share_paper_trade", fake_share)
+    sched = BotScheduler.__new__(BotScheduler)
+    sig = SimpleNamespace(signal_id="SIG-R1", symbol="BTCUSDT", side="LONG",
+                          leverage=10, stop_loss=89000.0, tp1=95000.0,
+                          entry=92000.0)
+    sched._share_paper_to_invo([sig])
+    snap = SimLedger(storage_dir="data_store").snapshot()
+    assert snap["reserved_total"] == 10.0
+    assert snap["reserved_count"] == 1
+
+
+def test_share_conflict_records_remote_commitment(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from src.scheduler import BotScheduler
+    import src.invo.client as _mod
+    from src.invo.client import InvoConflictError
+    from src.invo.sim_ledger import SimLedger
+    monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
+    monkeypatch.setenv("INVO_PAPER_DRY_RUN", "false")
+    monkeypatch.setenv("INVO_PORTFOLIO_ID", "pid")
+    monkeypatch.setenv("INVO_EMAIL", "e@x.com")
+    monkeypatch.setenv("INVO_GMAIL_APP_PASSWORD", "pw")
+    monkeypatch.setenv("INVO_SIM_SIZE", "10.0")
+    monkeypatch.setenv("INVO_DEVICE_ID", "dev")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_mod.InvoClient, "ensure_auth", lambda self, **k: None)
+
+    def fake_conflict(self, signal, **kw):
+        raise InvoConflictError(["b9"], {})
+    monkeypatch.setattr(_mod.InvoClient, "share_paper_trade", fake_conflict)
+    sched = BotScheduler.__new__(BotScheduler)
+    sig = SimpleNamespace(signal_id="SIG-C1", symbol="ETHUSDT", side="LONG",
+                          leverage=10, stop_loss=2500.0, tp1=2600.0,
+                          entry=2550.0)
+    sched._share_paper_to_invo([sig])  # must not raise
+    snap = SimLedger(storage_dir="data_store").snapshot()
+    assert snap["reserved_total"] == 10.0  # committed remotely, mirrored
+
+
+def test_audit_event_carries_prev_levels(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    from src.invo.sync_audit import read_audit
+    monkeypatch.chdir(tmp_path)
+    BotScheduler._audit("SIG-P", "modify", "confirmed",
+                        {"proceed": True, "idempotency_key": "key1234567890",
+                         "attempt": 2},
+                        "worker-1", 1234567890000,
+                        confirmer="authoritative-response",
+                        action={"price_target": 101.0, "stop_loss": 96.0,
+                                "plan_version": 3},
+                        prev={"tp1": 100.0, "stop_loss": 95.0})
+    events, gaps, _ = read_audit("data_store")
+    assert gaps == []
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["prev_tp1"] == 100.0 and ev["prev_sl"] == 95.0
+    assert ev["desired_tp1"] == 101.0 and ev["desired_sl"] == 96.0
+    assert ev["attempt"] == 2 and ev["plan_version"] == 3
+    assert ev["confirmation"] == "authoritative-response"
+    assert ev["correlation_id"].startswith("SIG-P:modify:")
+
+
+class _FakeSyncClient:
+    def __init__(self, live_base_ids=("b1",)):
+        self.updates = []
+        self.closes = []
+        self.lists = 0
+        self._live = set(live_base_ids)
+        self.fail_lists = False
+
+    def update_paper_trade(self, base_id, price_target=None, stop_loss=None,
+                           token="", dry_run=True, **kw):
+        self.updates.append({"base_id": base_id, "price_target": price_target,
+                             "stop_loss": stop_loss})
+        return {"dry_run": False, "response": {"success": True}}
+
+    def close_paper_trade(self, base_id, token="", dry_run=True, **kw):
+        self.closes.append(base_id)
+        return {"dry_run": False, "response": {"success": True}}
+
+    def list_paper_investments(self, token, portfolio_id):
+        self.lists += 1
+        if self.fail_lists:
+            raise ConnectionError("feed down")
+        return {"investments": [{"baseId": b} for b in sorted(self._live)]}
+
+
+def _seed_sync_close(tmp_path, sid="SIG-C1", base_ids=("b9",)):
+    """Applied supervisor-close event + share record."""
+    import json as _json
+    import os as _os
+    ds = _os.path.join(str(tmp_path), "data_store")
+    _os.makedirs(ds, exist_ok=True)
+    with open(_os.path.join(ds, "exit_decisions.json"), "w", encoding="utf-8") as f:
+        _json.dump({"version": 1, "decisions": [], "plans": {},
+                    "events": {sid: [{"kind": "close",
+                                      "decision_key": "k1",
+                                      "data_ts_ms": 1,
+                                      "decided_at_ms": 2}]},
+                    "invalidated": [], "last_eval": {}}, f)
+    with open(_os.path.join(ds, "invo_shares.json"), "w", encoding="utf-8") as f:
+        _json.dump({sid: {"baseIds": list(base_ids), "symbol": "BTCUSDT",
+                          "side": "LONG", "portfolioId": "pid"}}, f)
+
+
+def test_close_absent_remotely_never_reposts(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    monkeypatch.chdir(tmp_path)
+    _seed_sync_close(tmp_path)
+    sched = BotScheduler.__new__(BotScheduler)
+    client = _FakeSyncClient(live_base_ids=())  # b9 already gone server-side
+    sched._run_exit_sync_locked(client, "tok", "pid", "worker-1")
+    assert client.closes == []
+    # Exactly two bounded reads: one close-presence check + the per-run
+    # reconcile heartbeat. Both are capped (no per-position reads).
+    assert client.lists == 2
+    from src.invo import exit_sync as _sync
+    assert "SIG-C1" in _sync.load_sync_state("data_store")["closed"]
+    from src.invo.sync_audit import read_audit
+    events, _, _ = read_audit("data_store")
+    rec = [e for e in events if e["signal_id"] == "SIG-C1"]
+    assert rec and rec[0]["confirmation"] == "remote-readback"
+
+
+def test_close_present_remotely_sells_once(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    monkeypatch.chdir(tmp_path)
+    _seed_sync_close(tmp_path)
+    sched = BotScheduler.__new__(BotScheduler)
+    client = _FakeSyncClient(live_base_ids=("b9",))
+    sched._run_exit_sync_locked(client, "tok", "pid", "worker-1")
+    assert client.closes == ["b9"]
+    assert client.lists == 2  # close-presence check + reconcile heartbeat
+
+
+def test_close_list_unavailable_preserves_existing_behavior(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    monkeypatch.chdir(tmp_path)
+    _seed_sync_close(tmp_path)
+    sched = BotScheduler.__new__(BotScheduler)
+    client = _FakeSyncClient(live_base_ids=("b9",))
+    client.fail_lists = True
+    sched._run_exit_sync_locked(client, "tok", "pid", "worker-1")
+    assert client.closes == ["b9"]  # ambiguous read -> proceed, never assume gone
+
+
+def _seed_sync_state(tmp_path):
+    """Exit plan v2 + share record, as the live scheduler would see them."""
+    import json as _json
+    import os as _os
+    ds = _os.path.join(str(tmp_path), "data_store")
+    _os.makedirs(ds, exist_ok=True)
+    with open(_os.path.join(ds, "exit_decisions.json"), "w", encoding="utf-8") as f:
+        _json.dump({"version": 1, "decisions": [], "plans": {
+            "SIG-S1": {"signal_id": "SIG-S1", "version": 2,
+                       "stop_loss": 96.0, "tp1": 101.0,
+                       "tp2": 102.0, "tp3": 103.0,
+                       "decided_at_ms": 1000, "basis_decision_key": "k"}},
+            "events": {}, "invalidated": [], "last_eval": {}}, f)
+    with open(_os.path.join(ds, "invo_shares.json"), "w", encoding="utf-8") as f:
+        _json.dump({"SIG-S1": {"baseIds": ["b1"], "symbol": "BTCUSDT",
+                               "side": "LONG", "portfolioId": "pid"}}, f)
+
+
+def test_429_retry_after_honored_end_to_end(monkeypatch, tmp_path):
+    import requests
+    from src.scheduler import BotScheduler
+    from src.invo import exit_sync as _sync
+    monkeypatch.chdir(tmp_path)
+    _seed_sync_state(tmp_path)
+    sched = BotScheduler.__new__(BotScheduler)
+
+    def _raise_429(self, base_id, price_target=None, stop_loss=None,
+                   token="", dry_run=True, **kw):
+        resp = requests.Response()
+        resp.status_code = 429
+        resp.headers["Retry-After"] = "120"
+        raise requests.exceptions.HTTPError("429", response=resp)
+
+    monkeypatch.setattr(_FakeSyncClient, "update_paper_trade", _raise_429)
+    client = _FakeSyncClient()
+    sched._run_exit_sync_locked(client, "tok", "pid", "worker-1")
+    state = _sync.load_sync_state("data_store")
+    rec = state["records"]["SIG-S1:modify"]
+    assert rec["status"] == "retryable"
+    # Server demanded 120s although computed backoff would be ~60-89s.
+    import time as _time
+    remaining_ms = rec["next_retry_at_ms"] - int(_time.time() * 1000)
+    assert 110_000 <= remaining_ms <= 125_000
+
+
+def test_locked_sync_applies_and_is_idempotent(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    from src.invo import exit_sync as _sync
+    from src.invo.sync_audit import read_audit
+    monkeypatch.chdir(tmp_path)
+    _seed_sync_state(tmp_path)
+    sched = BotScheduler.__new__(BotScheduler)
+    client = _FakeSyncClient()
+    sched._run_exit_sync_locked(client, "tok", "pid", "worker-1")
+    assert client.updates == [{"base_id": "b1", "price_target": 101.0,
+                               "stop_loss": 96.0}]
+    assert client.closes == []
+    state = _sync.load_sync_state("data_store")
+    assert state["synced_levels"]["SIG-S1"] == {"stop_loss": 96.0, "tp1": 101.0}
+    events, gaps, _ = read_audit("data_store")
+    assert gaps == []
+    assert any(e["event"] == "confirmed" and e["signal_id"] == "SIG-S1"
+               for e in events)
+    # Second run: levels unchanged -> zero POSTs (idempotent).
+    client2 = _FakeSyncClient()
+    sched._run_exit_sync_locked(client2, "tok", "pid", "worker-1")
+    assert client2.updates == [] and client2.closes == []

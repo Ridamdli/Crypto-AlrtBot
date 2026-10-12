@@ -230,6 +230,16 @@ class BotScheduler:
                             "side": sig.side,
                             "portfolioId": portfolio,
                         })
+                        # Observational mirror only: record the sim commitment
+                        # for reconciliation. Never gates sharing (server is
+                        # the enforcer); failures here must not break shares.
+                        try:
+                            from src.invo.sim_ledger import SimLedger
+                            SimLedger(storage_dir="data_store").reserve(
+                                getattr(sig, "signal_id", "?"), sig.symbol,
+                                sim_size)
+                        except Exception as re:
+                            logger.warning(f"[Scheduler] Sim reserve skipped: {re}")
                 except InvoConflictError as e:
                     # Setup already shared (same coin open) — not an error.
                     logger.info(f"[Scheduler] Invo share skipped (already open): {e}")
@@ -240,6 +250,15 @@ class BotScheduler:
                         "side": sig.side,
                         "portfolioId": portfolio,
                     })
+                    # The sim is committed remotely (by whoever opened it):
+                    # mirror it so reconcile() doesn't cry wolf. Advisory.
+                    try:
+                        from src.invo.sim_ledger import SimLedger
+                        SimLedger(storage_dir="data_store").reserve(
+                            getattr(sig, "signal_id", "?"), sig.symbol,
+                            sim_size, note="already-open-remote")
+                    except Exception as re:
+                        logger.warning(f"[Scheduler] Sim reserve skipped: {re}")
                 except Exception as e:
                     # Auth death clears the token so the next cycle OTP
                     # self-logins fresh instead of 401-looping forever.
@@ -301,51 +320,232 @@ class BotScheduler:
             client.ensure_auth(email=email, app_password=app_password,
                                device_id=os.getenv("INVO_DEVICE_ID", ""))
             token = client.access_token or ""
-            ledger = ExitDecisionLedger()
-            actions = _sync.compute_sync_actions(
-                ledger.active_plans(), ledger.close_signal_ids(),
-                load_share_ledger(), _sync.load_sync_state())
-            if not actions:
+            # Single-flight across overlapping deployments: fail OPEN (skip
+            # this cycle with an info line), never deadlock the scan loop.
+            from src.invo.volume_lock import acquire_lock, release_lock
+            _owner = os.getenv("RAILWAY_DEPLOYMENT_ID", f"pid-{os.getpid()}")
+            _lock = acquire_lock("data_store", "invo-exit-sync", _owner,
+                                 stale_after_s=300)
+            if _lock is None:
+                logger.info("[Scheduler] Invo exit-sync skipped: contended lock "
+                            "(sibling worker active?)")
                 return
-            state = _sync.load_sync_state()
-            done_modify, done_close = 0, 0
-            for a in actions:
-                try:
-                    if a["kind"] == "modify":
-                        for bid in a["base_ids"]:
-                            client.update_paper_trade(
-                                bid, price_target=a["price_target"],
-                                stop_loss=a["stop_loss"], token=token,
-                                dry_run=False)
-                        state["synced_levels"][a["signal_id"]] = {
-                            "stop_loss": a["stop_loss"], "tp1": a["price_target"]}
-                        done_modify += 1
-                    else:
-                        for bid in a["base_ids"]:
-                            client.close_paper_trade(bid, token=token, dry_run=False)
-                        if a["signal_id"] not in state["closed"]:
-                            state["closed"].append(a["signal_id"])
-                        done_close += 1
-                except Exception as e:
-                    if "401" in str(e):
-                        client.access_token = None
-                    from src.invo.client import InvoApiError, err_is_gone
-                    if isinstance(e, InvoApiError) and err_is_gone(e.body):
-                        # Position already closed/settled server-side: nothing
-                        # left to manage. Record it so we stop retrying, info
-                        # level — this is reconciliation, not a failure.
-                        if a.get("signal_id") not in state["closed"]:
-                            state["closed"].append(a.get("signal_id"))
-                        logger.info(f"[Scheduler] Invo exit-sync {a.get('kind')} "
-                                    f"for {a.get('signal_id')}: already gone server-side, "
-                                    f"stop retrying ({e.body[:120]})")
-                        continue
-                    import traceback as _tb
-                    logger.warning(f"[Scheduler] Invo exit-sync {a.get('kind')} "
-                                   f"skipped for {a.get('signal_id')}: {type(e).__name__}: {e}\n"
-                                   f"{_tb.format_exc(limit=5)}")
-            _sync.save_sync_state("data_store", state)
-            logger.info(f"[Scheduler] Invo exit-sync: {done_modify} modified, {done_close} closed.")
+            try:
+                self._run_exit_sync_locked(client, token, portfolio, _owner)
+            finally:
+                release_lock("data_store", "invo-exit-sync", _lock)
+        except Exception as e:
+            logger.warning(f"[Scheduler] Invo exit-sync skipped: {e}")
+
+    def _run_exit_sync_locked(self, client, token: str, portfolio: str,
+                              worker: str) -> None:
+        """Sync body: runs only while holding the volume lock. See
+        _sync_exits_to_invo for the contract (TP1+SL only, idempotent)."""
+        import time as _time
+        from src.exits.ledger import ExitDecisionLedger
+        from src.invo import exit_sync as _sync
+        from src.invo.client import load_share_ledger
+        from src.invo.sim_ledger import SimLedger
+        now_ms = lambda: int(_time.time() * 1000)
+        ledger = ExitDecisionLedger()
+        state = _sync.load_sync_state()
+        tracker = _sync.SyncTracker(
+            state, now_ms_fn=now_ms,
+            save_fn=lambda s: _sync.save_sync_state("data_store", s))
+        tracker.prune()  # bounded record growth; terminal-only, 30d TTL
+        sim = SimLedger(storage_dir="data_store")
+        shares = load_share_ledger()
+        actions = _sync.compute_sync_actions(
+            ledger.active_plans(), ledger.close_signal_ids(),
+            shares, state)
+        summary = _sync.summarize_sync(
+            ledger.active_plans(), shares, state)
+        logger.info(f"[Scheduler] Invo exit-sync reconcile: "
+                    f"{summary['in_sync']} in-sync, {summary['unsynced']} pending, "
+                    f"{summary['missing_base']} untargetable, "
+                    f"{summary['closed_skipped']} closed-skipped.")
+        if not actions:
+            self._report_sim_reconcile(client, token, portfolio, sim)
+            return
+        done_modify, done_close = 0, 0
+        _presence = {}  # one bounded remote read per cycle, shared by closes
+        for a in actions:
+            sid, kind = a["signal_id"], a["kind"]
+            prev = state["synced_levels"].get(sid, {}) or {}
+            gate = tracker.gate(sid, kind,
+                                plan_version=a.get("plan_version"),
+                                levels={"tp1": a.get("price_target"),
+                                        "stop_loss": a.get("stop_loss")}
+                                if kind == "modify" else None)
+            if not gate["proceed"]:
+                self._audit(sid, kind, "suppressed", gate, worker, now_ms(),
+                            prev=prev)
+                continue
+            tracker.note_attempt(sid, kind)
+            try:
+                if kind == "modify":
+                    for bid in a["base_ids"]:
+                        client.update_paper_trade(
+                            bid, price_target=a["price_target"],
+                            stop_loss=a["stop_loss"], token=token,
+                            dry_run=False)
+                    state["synced_levels"][sid] = {
+                        "stop_loss": a["stop_loss"], "tp1": a["price_target"]}
+                    tracker.note_result(sid, kind, "confirmed", {
+                        "plan_version": a.get("plan_version"),
+                        "levels": gate["levels"]})
+                    done_modify += 1
+                    self._audit(sid, kind, "confirmed", gate, worker, now_ms(),
+                                confirmer="authoritative-response", action=a,
+                                prev=prev)
+                else:
+                    # Reconcile-before-retry: a timed-out earlier sell may
+                    # already have closed the position. One bounded list read
+                    # per cycle (cached); absent legs are never re-sold.
+                    present = self._close_presence(
+                        client, token, portfolio, a["base_ids"], _presence)
+                    if present is not None:
+                        _presence["checked"] = True
+                        gone_legs = [b for b in a["base_ids"] if b not in present]
+                        live_legs = [b for b in a["base_ids"] if b in present]
+                        if gone_legs and not live_legs:
+                            if sid not in state["closed"]:
+                                state["closed"].append(sid)
+                            sim.mark_gone(sid, "remote-absence-on-reconcile")
+                            tracker.note_result(sid, kind, "confirmed", {
+                                "converged": "already-gone"})
+                            logger.info(f"[Scheduler] Invo exit-sync close for {sid}: "
+                                        f"already gone server-side, stop retrying.")
+                            self._audit(sid, kind, "reconciled", gate, worker, now_ms(),
+                                        confirmer="remote-readback", action=a,
+                                        prev=prev)
+                            continue
+                        a = {**a, "base_ids": live_legs}
+                    for bid in a["base_ids"]:
+                        client.close_paper_trade(bid, token=token, dry_run=False)
+                    if sid not in state["closed"]:
+                        state["closed"].append(sid)
+                    sim.release(sid, credit=None, note="sync-close")
+                    tracker.note_result(sid, kind, "confirmed", {})
+                    done_close += 1
+                    self._audit(sid, kind, "confirmed", gate, worker, now_ms(),
+                                confirmer="authoritative-response", action=a,
+                                prev=prev)
+            except Exception as e:
+                if "401" in str(e):
+                    client.access_token = None
+                cls = _sync.classify_sync_error(e)
+                if cls["kind"] in ("already-gone", "already-applied"):
+                    if sid not in state["closed"] and cls["kind"] == "already-gone":
+                        state["closed"].append(sid)
+                    if cls["kind"] == "already-gone":
+                        sim.mark_gone(sid, str(e)[:200])
+                    tracker.note_result(sid, kind, "confirmed", {
+                        "converged": cls["kind"]})
+                    logger.info(f"[Scheduler] Invo exit-sync {kind} for {sid}: "
+                                f"{cls['kind']} — reconciled, stop retrying.")
+                    self._audit(sid, kind, "reconciled", gate, worker, now_ms(),
+                                confirmer="authoritative-response", action=a,
+                                error=str(e)[:200], prev=prev)
+                    continue
+                if not cls["retryable"]:
+                    tracker.note_result(sid, kind, "permanent",
+                                        {"error": f"{cls['kind']}: {e}"})
+                    logger.warning(f"[Scheduler] Invo exit-sync {kind} for {sid}: "
+                                   f"permanent ({cls['kind']}), stop retrying: {e}")
+                    self._audit(sid, kind, "failed", gate, worker, now_ms(),
+                                action=a, error=f"{cls['kind']}: {e}", prev=prev)
+                    continue
+                tracker.note_result(sid, kind, "retryable",
+                                    {"error": f"{cls['kind']}: {e}",
+                                     "retry_after_s": cls.get("retry_after_s")})
+                logger.warning(f"[Scheduler] Invo exit-sync {kind} for {sid}: "
+                               f"retryable ({cls['kind']}), backing off: {e}")
+                self._audit(sid, kind, "retry_scheduled", gate, worker, now_ms(),
+                            action=a, error=f"{cls['kind']}: {e}", prev=prev)
+        _sync.save_sync_state("data_store", state)
+        if tracker.audit_gap:
+            logger.warning("[Scheduler] Invo exit-sync: tracker persistence degraded.")
+        logger.info(f"[Scheduler] Invo exit-sync: {done_modify} modified, {done_close} closed.")
+        self._report_sim_reconcile(client, token, portfolio, sim)
+
+    @staticmethod
+    def _close_presence(client, token, portfolio, base_ids, cache):
+        """Set of baseIds the server still shows as open, or None when the
+        read fails/is ambiguous (caller then proceeds as before — a duplicate
+        sell reconciles via the gone path, never silently assumed)."""
+        if "present" not in cache:
+            try:
+                snap = client.list_paper_investments(token, portfolio)
+                invs = snap.get("investments") or []
+                cache["present"] = {i.get("baseId") for i in invs
+                                    if isinstance(i, dict) and i.get("baseId")}
+            except Exception as e:
+                logger.warning(f"[Scheduler] Invo close-presence check skipped: {e}")
+                cache["present"] = None
+        return cache["present"]
+
+    @staticmethod
+    def _audit(sid, kind, event, gate, worker, now_ms, confirmer="unverified",
+               action=None, error="", prev=None):
+        """Best-effort audit emission. A failed append is surfaced and
+        counted by the caller summary — never raised into accounting."""
+        try:
+            from src.invo.sync_audit import append_audit, build_event
+            action = action or {}
+            prev = prev or {}
+            ev = build_event(
+                correlation_id=f"{sid}:{kind}:"
+                               f"{(gate.get('idempotency_key') or '')[:8]}",
+                signal_id=sid, event=event,
+                prev_tp1=prev.get("tp1"), prev_sl=prev.get("stop_loss"),
+                desired_tp1=action.get("price_target"),
+                desired_sl=action.get("stop_loss"),
+                attempt=gate.get("attempt", 1), budget=5,
+                worker=worker, req_ts_ms=now_ms,
+                error_category=error[:200] if error else None,
+                response_summary=(error or "")[:300] or None,
+                confirmation=confirmer,
+                plan_version=action.get("plan_version"),
+                final_state=None)
+            ok, _ = append_audit("data_store", ev)
+            if not ok:
+                logger.warning("[Scheduler] Invo exit-sync audit gap: append failed.")
+        except Exception as e:
+            logger.warning(f"[Scheduler] Invo exit-sync audit gap: {e}")
+
+    def _report_sim_reconcile(self, client, token, portfolio, sim) -> None:
+        """Observational reconcile vs the authoritative remote snapshot."""
+        try:
+            snap = client.list_paper_investments(token, portfolio)
+            investments = snap.get("investments") or []
+            from src.invo.client import load_share_ledger
+            shares = load_share_ledger()
+            by_base = {}
+            for inv in investments:
+                if isinstance(inv, dict) and inv.get("baseId"):
+                    by_base[inv["baseId"]] = inv
+            remote_open = {}
+            for sid, rec in (shares.items() if isinstance(shares, dict) else []):
+                if not isinstance(rec, dict):
+                    continue
+                for bid in rec.get("baseIds") or []:
+                    inv = by_base.get(bid)
+                    if inv is not None:
+                        try:
+                            remote_open[sid] = remote_open.get(sid, 0.0) + float(
+                                inv.get("entrySim", 0.0) or 0.0)
+                        except (TypeError, ValueError):
+                            pass
+            rep = sim.reconcile(snap.get("portfolioRemainingSim"), remote_open)
+            if rep["status"] == "divergent":
+                logger.warning(f"[Scheduler] Sim reconcile DIVERGENT: {rep}")
+            else:
+                logger.info(f"[Scheduler] Sim reconcile {rep['status']}: "
+                            f"reserved={rep.get('reserved_total')} "
+                            f"drift={rep.get('bank_drift')}")
+        except Exception as e:
+            logger.warning(f"[Scheduler] Sim reconcile skipped (remote unknown): {e}")
         except Exception as e:
             logger.warning(f"[Scheduler] Invo exit-sync skipped: {e}")
 

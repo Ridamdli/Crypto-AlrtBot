@@ -62,11 +62,19 @@ def record_share(storage_dir: str, signal_id: str, entry: dict) -> None:
     entry = dict(entry)
     entry.setdefault("shared_at", int(_time.time()))
     ledger[signal_id] = entry
+    # Atomic publish so overlapping writers/readers never see torn JSON.
+    path = _os.path.join(storage_dir, SHARE_LEDGER_NAME)
+    tmp_path = path + ".tmp"
     try:
-        with open(_os.path.join(storage_dir, SHARE_LEDGER_NAME), "w", encoding="utf-8") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             _json.dump(ledger, f, indent=2)
+        _os.replace(tmp_path, path)
     except OSError as e:
         logger.error(f"[Invo] Failed to save share ledger: {e}")
+        try:
+            _os.unlink(tmp_path)
+        except OSError:
+            pass
 
 DEFAULT_BASE_URL = "https://api.involio.com/v1_0"
 
