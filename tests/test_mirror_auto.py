@@ -123,6 +123,55 @@ class FakeSession:
         return {"success": True}
 
 
+def test_account_prefers_live_equity(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+
+    class _Hl(FakeHl):
+        def equity(self):
+            return 25.0
+
+    bot = AutoBot(mc, _cfg(live=False, account_usd=18.38), hl=_Hl(),
+                  session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    assert bot._account_usd() == 25.0
+
+
+def test_account_falls_back_to_env_without_wallet(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+
+    class _Hl(FakeHl):
+        def equity(self):
+            return None
+
+    bot = AutoBot(mc, _cfg(live=False, account_usd=18.38), hl=_Hl(),
+                  session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    assert bot._account_usd() == 18.38
+
+
+def test_decrypt_layout_roundtrip(tmp_path):
+    import importlib.util
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    spec = importlib.util.spec_from_file_location(
+        "decrypt_refresh", "scripts/decrypt_refresh.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    import os as _os
+    key = AESGCM.generate_key(bit_length=128)
+    nonce = _os.urandom(12)
+    ct = AESGCM(key).encrypt(nonce, b"jwt.test.sig", None)
+    import base64 as _b64
+    enc = _b64.b64encode(nonce + ct).decode()
+    out = mod.decrypt(enc, _b64.b64encode(key).decode())
+    assert out == "jwt.test.sig"
+
+
 def test_cycle_dry_run_detects_sizes_no_orders(tmp_path):
     got = []
     mc = MirrorConfig(email="", app_password="", device_id="d",

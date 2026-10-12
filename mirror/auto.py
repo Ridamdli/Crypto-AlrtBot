@@ -147,6 +147,18 @@ class AutoBot:
         except Exception as e:
             logger.warning(f"[Auto] notify sink failed: {e}")
 
+    def _account_usd(self) -> float:
+        """Live HL equity first (dynamic — tracks deposits/PnL by itself);
+        env value only as fallback before the wallet is configured."""
+        if self.hl is not None:
+            try:
+                live = self.hl.equity()
+                if live is not None and live > 0:
+                    return live
+            except Exception:
+                pass
+        return self.cfg.account_usd
+
     def _token(self) -> str:
         if self.mirror_cfg.email and self.mirror_cfg.app_password:
             from src.invo.client import InvoClient
@@ -227,13 +239,14 @@ class AutoBot:
             summary["skipped"] += 1
             self._notify(f"SKIP {coin}: max-concurrent-{self.cfg.max_concurrent}")
             return
-        margin, reason = decide_live_size(self.cfg.account_usd,
+        margin, reason = decide_live_size(self._account_usd(),
                                           self.committed_usd(), self.cfg)
         if margin is None:
             summary["skipped"] += 1
             self._notify(f"SKIP {coin}: {reason}")
             return
         self._notify(f"Pariston {coin} {side} {leverage}x -> mimic ${margin} "
+                     f"(acct ${self._account_usd():.2f}) "
                      f"[{reason}] {'LIVE' if self.cfg.live else 'DRY-RUN'}")
         if not self.cfg.live or self.hl is None:
             summary["skipped"] += 1

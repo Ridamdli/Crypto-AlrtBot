@@ -92,6 +92,18 @@ class HlBridge:
                 return pos
         return None
 
+    def equity(self) -> Optional[float]:
+        """Live account value (None when wallet unset/unreadable). Keyless."""
+        if not self.wallet_address:
+            return None
+        try:
+            data = self.public_post("/info", {"type": "clearinghouseState",
+                                              "user": self.wallet_address})
+            return float((data.get("marginSummary") or {}).get("accountValue", 0) or 0)
+        except Exception as e:
+            logger.warning(f"[HL] equity unreadable: {e}")
+            return None
+
     # ── execution (signed) ──
     def set_leverage(self, coin: str, leverage: int) -> Any:
         ex = self._client_or_throw()
