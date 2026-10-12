@@ -1,43 +1,39 @@
-"""Auto-mimic executor: the hands that tap confirm in the signed session.
+"""Auto-mimic: feed detection -> capital brain -> HL execution -> record.
 
-Why this exists: Pariston entries/updates/closes are readable from any
-login, but the confirm signature is device-bound (turnkey key lives in
-the operator's signed-in browser). So execution drives THAT browser via
-CDP — nothing here can sign on its own, which is also the safety story.
+Loop per cycle (loop never dies; money moves only when live=True AND
+every guard passes AND the HL fill verifies):
+  1. FeedWatcher.poll: new OPEN/increase posts by Pariston -> candidates;
+     CLOSE posts on mirrored coins -> closes; anything else -> alerts.
+  2. Brain (decide_live_size): flat cap + floor + concurrency guards.
+  3. HL bridge: set leverage, IOC open, parse fill (raises on error).
+  4. Recorder (best-effort): record the copy on Invo with real mimicMeta
+     from the feed post. A failed record alerts but never unwinds the fill.
 
-Loop (per new Pariston setup):
-  watcher detects -> brain sizes -> driver opens the mimic dialog ->
-  sets size -> verifies the dialog actually opened -> confirms (live
-  only) -> captures POST /dex/position/create and audits the payload.
+Exit doctrine (adopted from the proven reference build): no independent
+TP/SL on live copies — we trust Pariston's entries AND exits. Source TP/SL
+edits arrive as feed update posts and are logged/alerted, not traded.
 
-Safety (all hard, all env-tunable):
-  MIMIC_LIVE=false default (dry-run: navigate + screenshot, never swipe).
-  MAX_USD_PER_MIMIC / MAX_PCT_PER_MIMIC / MAX_CONCURRENT / MIN_REMAINING_USD.
-  Post-confirm the recorded payload is audited; a non-success response
-  raises and alerts instead of silently passing.
-  Updates/closes of source setups are ALERTS in v1 (adapters stubbed);
-  their dialogs get mapped in a supervised session before enabling.
-
-Requires on this machine: Chrome running with
-  --remote-debugging-port=9222  (same profile the operator trades in),
-plus `pip install playwright` (attach only — no browser download needed).
+MIMIC_LIVE=false (default) runs the full loop with a fake-or-read-only
+posture: detection + sizing + audit, zero orders. Flip only with caps set.
 """
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from src.utils.logger import get_logger
 
-from mirror.brain import decide_size
 from mirror.config import MirrorConfig
-from mirror.feed import fetch_open_positions, fetch_setup_detail
+from mirror.feedmon import FeedWatcher, classify_post
+from mirror.hl import HlBridge
+from mirror.recorder import TradingSession
 from mirror.store import MirrorStore
 
 logger = get_logger(__name__)
 
-MIMIC_URL = ("https://app.invoapp.com/portfolio/{portfolio}/investment/"
-             "{base_id}/mimic_position")
+PARISTON_OWNER_ID = "7fd09aef-d45f-47dd-aa7f-72143e7d5a05"
+PARISTON_PORTFOLIO_ID = "17cc19aa-d854-4857-9cca-7f05f21ec2da"
 
 
 def _f(name: str, default: float) -> float:
@@ -56,26 +52,24 @@ def _i(name: str, default: int) -> int:
 
 @dataclass
 class MimicConfig:
-    cdp_url: str = "http://localhost:9222"
     live: bool = False
     account_usd: float = 18.38
     max_usd_per_mimic: float = 5.0
     max_pct_per_mimic: float = 25.0
     max_concurrent: int = 2
     min_remaining_usd: float = 3.0
-    dialog_timeout_s: int = 30
+    feed_size: int = 20
 
     @classmethod
     def from_env(cls) -> "MimicConfig":
         return cls(
-            cdp_url=os.getenv("MIMIC_CDP_URL", "http://localhost:9222"),
             live=os.getenv("MIMIC_LIVE", "false").lower() == "true",
             account_usd=_f("MIMIC_ACCOUNT_USD", 18.38),
             max_usd_per_mimic=_f("MIMIC_MAX_USD", 5.0),
             max_pct_per_mimic=_f("MIMIC_MAX_PCT", 25.0),
             max_concurrent=_i("MIMIC_MAX_CONCURRENT", 2),
             min_remaining_usd=_f("MIMIC_MIN_REMAINING_USD", 3.0),
-            dialog_timeout_s=_i("MIMIC_DIALOG_TIMEOUT_S", 30),
+            feed_size=_i("MIMIC_FEED_SIZE", 20),
         )
 
 
@@ -84,8 +78,7 @@ def decide_live_size(account_usd: float, committed_usd: float,
     """(margin_usd | None, reason). Real-money brain: flat cap + guards.
 
     Never risks more than max_pct of the account or max_usd flat, never
-    drops remaining below the floor, never exceeds max concurrent
-    (checked by caller via open count).
+    drops remaining below the floor (concurrency checked by caller).
     """
     if account_usd is None or account_usd <= 0:
         return None, "skip:bank-unknown"
@@ -104,119 +97,48 @@ def decide_live_size(account_usd: float, committed_usd: float,
     return target, "full-mimic"
 
 
-def size_pct(margin_usd: float, account_usd: float) -> float:
-    """Dialog slider percent for a margin target."""
-    if account_usd <= 0:
-        return 0.0
-    return round(min(100.0, margin_usd / account_usd * 100.0), 1)
+def is_pariston(ev: Dict[str, Any]) -> bool:
+    return ev.get("owner_id") == PARISTON_OWNER_ID or \
+        ev.get("portfolio_id") == PARISTON_PORTFOLIO_ID
 
 
-class ChromeDriver:
-    """CDP-attached driver for the operator's signed-in Chrome.
-
-    page_factory is injectable (tests pass a fake page; live uses
-    playwright's sync API attached to MIMIC_CDP_URL). Coordinates are
-    viewport fractions, calibrated in a supervised session.
-    """
-
-    # Calibrated against the 1280-wide mimic dialog (supervised pass may
-    # adjust via env MIMIC_SIZE_X/Y, MIMIC_SWIPE_*).
-    SIZE_XY = (0.83, 0.633)
-    SWIPE_FROM = (0.68, 0.895)
-    SWIPE_TO = (0.965, 0.895)
-
-    def __init__(self, cdp_url: str, page_factory=None):
-        self.cdp_url = cdp_url
-        self._page_factory = page_factory or self._live_page
-        self._pw = None
-
-    def _live_page(self, url: str):
-        from playwright.sync_api import sync_playwright
-        self._pw = sync_playwright().start()
-        browser = self._pw.chromium.connect_over_cdp(self.cdp_url)
-        ctx = browser.contexts[0]
-        page = ctx.new_page()
-        page.goto(url)
-        return page
-
-    def close(self):
-        try:
-            if self._pw is not None:
-                self._pw.stop()
-        except Exception:
-            pass
-
-    def mimic_once(self, portfolio_id: str, base_id: str, pct: float,
-                   live: bool, timeout_s: int = 30) -> Dict[str, Any]:
-        """Open the mimic dialog, set size, confirm iff live.
-
-        Returns {"confirmed": bool, "shots": {...}, "record": {...}} where
-        record is the captured /dex/position/create payload+result.
-        Raises on dialog failure or non-success confirm.
-        """
-        url = MIMIC_URL.format(portfolio=portfolio_id, base_id=base_id)
-        page = self._page_factory(url)
-        try:
-            page.wait_for_timeout(4000)
-            before = page.screenshot()
-            vw, vh = page.viewport_size["width"], page.viewport_size["height"]
-            sx, sy = self.SIZE_XY
-            page.mouse.click(int(vw * sx), int(vh * sy))
-            page.keyboard.press("ControlOrMeta+a")
-            page.keyboard.type(str(pct))
-            page.wait_for_timeout(800)
-            after = page.screenshot()
-            if after == before:
-                raise RuntimeError("size field did not change (dialog missing?)")
-            if not live:
-                return {"confirmed": False, "shots": {"before": len(before),
-                                                       "after": len(after)},
-                        "record": {}}
-            fx, fy = self.SWIPE_FROM
-            tx, ty = self.SWIPE_TO
-            page.mouse.move(int(vw * fx), int(vh * fy))
-            page.mouse.down()
-            page.mouse.move(int(vw * tx), int(vh * ty), steps=25)
-            page.mouse.up()
-            try:
-                resp = page.expect_response("**/dex/position/create",
-                                            timeout=timeout_s * 1000)
-                result = resp.value.json()
-            except Exception as e:
-                raise RuntimeError(f"no position/create response: {e}")
-            if not result.get("success"):
-                raise RuntimeError(f"confirm rejected: {str(result)[:200]}")
-            return {"confirmed": True,
-                    "shots": {"before": len(before), "after": len(after)},
-                    "record": result.get("data", {})}
-        finally:
-            try:
-                page.close()
-            except Exception:
-                pass
+def build_record_open(ev: Dict[str, Any], coin: str, asset_index: int,
+                      side: str, leverage: int, qty_before: str,
+                      qty_after: str, hl_order: Any, hl_response: Any,
+                      nonce_ms: int) -> Dict[str, Any]:
+    """Invo copy record, field-for-field like the app's own confirm."""
+    return {
+        "clientTxId": f"entry:{uuid.uuid4().hex[:8]}",
+        "coin": coin,
+        "assetIndex": asset_index,
+        "entry": {"side": side.lower(), "marginMode": "isolated",
+                  "leverage": int(leverage), "tpPx": None, "slPx": None},
+        "submission": {"hlOrder": hl_order, "nonceMs": nonce_ms,
+                       "hlResponse": hl_response},
+        "summary": {"qtyBefore": str(qty_before), "qtyAfter": str(qty_after),
+                    "intendedLeverage": int(leverage)},
+        "mimicMeta": {
+            "portfolioId": ev.get("portfolio_id"),
+            "creatorInvoUserId": ev.get("owner_id"),
+            "initialSourcePaperUpdateId": ev.get("post_id"),
+            "sourcePaperTradeBaseId": ev.get("base_id"),
+        },
+    }
 
 
 class AutoBot:
-    """Watcher + brain + executor. Loop never dies; money moves only when
-    live=True AND every guard passes AND the dialog confirms."""
-
     def __init__(self, mirror_cfg: MirrorConfig, mimic_cfg: MimicConfig,
-                 driver: Optional[ChromeDriver] = None,
-                 fetch_positions_fn=None, fetch_detail_fn=None,
-                 client_factory=None, notify_fn=None):
+                 hl: Optional[HlBridge] = None,
+                 session: Optional[TradingSession] = None,
+                 watcher: Optional[FeedWatcher] = None,
+                 notify_fn=None):
         self.mirror_cfg = mirror_cfg
         self.cfg = mimic_cfg
         self.store = MirrorStore(mirror_cfg.data_dir)
-        self.driver = driver or ChromeDriver(mimic_cfg.cdp_url)
-        self._fetch_positions = fetch_positions_fn or fetch_open_positions
-        self._fetch_detail = fetch_detail_fn or fetch_setup_detail
-        self._client_factory = client_factory or self._default_client
+        self.hl = hl
+        self.session = session
+        self.watcher = watcher or FeedWatcher()
         self._notify_fn = notify_fn or (lambda t: logger.info(f"[Auto] {t}"))
-
-    def _default_client(self):
-        from src.invo.client import InvoClient
-        return InvoClient(email=self.mirror_cfg.email,
-                          storage_dir=self.mirror_cfg.data_dir)
 
     def _notify(self, text: str) -> None:
         self.store.audit("notify", {"text": text[:300]})
@@ -225,116 +147,171 @@ class AutoBot:
         except Exception as e:
             logger.warning(f"[Auto] notify sink failed: {e}")
 
-    def committed_usd(self) -> float:
-        """Sum of open mimicked margins from the audit ledger."""
-        total = 0.0
-        for e in self.store.recent_audit(5000):
-            if e.get("event") == "mimicked":
-                try:
-                    total += float((e.get("detail") or {}).get("margin_usd", 0))
-                except (TypeError, ValueError):
-                    continue
-            if e.get("event") == "mimic_closed":
-                try:
-                    total -= float((e.get("detail") or {}).get("margin_usd", 0))
-                except (TypeError, ValueError):
-                    continue
-        return max(0.0, round(total, 2))
-
-    def open_count(self) -> int:
-        return sum(1 for e in self.store.recent_audit(5000)
-                   if e.get("event") == "mimicked") - sum(
-                   1 for e in self.store.recent_audit(5000)
-                   if e.get("event") == "mimic_closed")
-
-    def run_once(self) -> Dict[str, Any]:
-        summary: Dict[str, Any] = {"mimicked": 0, "skipped": 0,
-                                   "alerts": 0, "errors": 0}
-        try:
-            client = self._client_factory()
+    def _token(self) -> str:
+        if self.mirror_cfg.email and self.mirror_cfg.app_password:
+            from src.invo.client import InvoClient
+            client = InvoClient(email=self.mirror_cfg.email,
+                                storage_dir=self.mirror_cfg.data_dir)
             client.ensure_auth(email=self.mirror_cfg.email,
                                app_password=self.mirror_cfg.app_password,
                                device_id=self.mirror_cfg.device_id)
-            token = client.access_token or ""
-            positions = self._fetch_positions(
-                client, token, self.mirror_cfg.pariston_portfolio_id)
-        except Exception as e:
-            logger.warning(f"[Auto] cycle skipped: {e}")
-            return {**summary, "errors": 1}
-        live_ids = set()
-        for pos in positions:
-            sid = str(pos.get("baseId") or "")
-            if not sid:
-                continue
-            live_ids.add(sid)
-            if sid in self.store.seen_ids():
-                continue
-            self.store.mark_seen(sid)
+            return client.access_token or ""
+        return os.getenv("MIMIC_FEED_TOKEN", "")
+
+    def committed_usd(self) -> float:
+        total = 0.0
+        for e in self.store.recent_audit(5000):
+            d = e.get("detail") or {}
             try:
-                self._mimic_one(client, token, pos, summary)
+                if e.get("event") == "mimicked":
+                    total += float(d.get("margin_usd", 0))
+                elif e.get("event") == "mimic_closed":
+                    total -= float(d.get("margin_usd", 0))
+            except (TypeError, ValueError):
+                continue
+        return max(0.0, round(total, 2))
+
+    def open_count(self) -> int:
+        events = self.store.recent_audit(5000)
+        return (sum(1 for e in events if e.get("event") == "mimicked") -
+                sum(1 for e in events if e.get("event") == "mimic_closed"))
+
+    def mirrored_coins(self) -> Dict[str, Dict[str, Any]]:
+        """coin -> {margin_usd, source} for open mimics."""
+        out: Dict[str, Dict[str, Any]] = {}
+        for e in self.store.recent_audit(5000):
+            d = e.get("detail") or {}
+            if e.get("event") == "mimicked" and d.get("coin"):
+                out[d["coin"]] = {"margin_usd": d.get("margin_usd", 0),
+                                  "source": d.get("source")}
+            elif e.get("event") == "mimic_closed" and d.get("coin") in out:
+                del out[d["coin"]]
+        return out
+
+    def run_once(self, token: str = "") -> Dict[str, Any]:
+        summary: Dict[str, Any] = {"mimicked": 0, "closed": 0,
+                                   "skipped": 0, "alerts": 0, "errors": 0}
+        try:
+            token = token or self._token()
+            news, updates = self.watcher.poll(token)
+        except Exception as e:
+            logger.warning(f"[Auto] feed unreachable, cycle skipped: {e}")
+            return {**summary, "errors": 1}
+        for ev in news:
+            if not is_pariston(ev):
+                continue
+            try:
+                self._mimic_open(ev, summary)
             except Exception as e:
                 summary["errors"] += 1
-                self._notify(f"MIMIC FAILED {pos.get('ticker')}: {e}")
+                self._notify(f"MIMIC FAILED {ev.get('ticker')}: {e}")
                 logger.warning(f"[Auto] mimic failed: {e}")
-        # Closes / updates of source setups: v1 alerts (adapters stubbed).
-        for sid in self.store.seen_ids() - live_ids - \
-                self.store.reported_closed_ids():
-            self.store.mark_reported_closed(sid)
-            summary["alerts"] += 1
-            self._notify(f"Pariston closed {sid} — close your copy in the app "
-                         f"(auto-close lands in v2).")
+        for ev in updates:
+            if not is_pariston(ev):
+                continue
+            try:
+                self._follow_update(ev, summary)
+            except Exception as e:
+                summary["errors"] += 1
+                logger.warning(f"[Auto] update follow failed: {e}")
         logger.info(f"[Auto] cycle: {summary}")
         return summary
 
-    def _mimic_one(self, client, token: str, pos: Dict[str, Any],
-                   summary: Dict[str, Any]) -> None:
-        sid = str(pos["baseId"])
-        ticker = str(pos.get("ticker") or "?")
-        try:
-            setup = self._fetch_detail(client, token, sid)
-        except Exception:
-            setup = {}
+    def _mimic_open(self, ev: Dict[str, Any], summary: Dict[str, Any]) -> None:
+        coin = (ev.get("ticker") or "").replace("USDT", "").replace("USDC", "")
+        side = str(ev.get("side") or "LONG").upper()
+        leverage = int(ev.get("leverage") or 10)
+        if not coin:
+            return
         if self.open_count() >= self.cfg.max_concurrent:
             summary["skipped"] += 1
-            self._notify(f"SKIP {ticker}: max-concurrent-{self.cfg.max_concurrent}")
+            self._notify(f"SKIP {coin}: max-concurrent-{self.cfg.max_concurrent}")
             return
         margin, reason = decide_live_size(self.cfg.account_usd,
                                           self.committed_usd(), self.cfg)
         if margin is None:
             summary["skipped"] += 1
-            self._notify(f"SKIP {ticker}: {reason}")
+            self._notify(f"SKIP {coin}: {reason}")
             return
-        pct = size_pct(margin, self.cfg.account_usd)
-        self._notify(f"Pariston {ticker} {pos.get('side')} {pos.get('leverage')}x "
-                     f"-> mimic ${margin} ({pct}%) [{reason}] "
-                     f"{'LIVE' if self.cfg.live else 'DRY-RUN'}")
-        try:
-            out = self.driver.mimic_once(
-                self.mirror_cfg.pariston_portfolio_id, sid, pct,
-                self.cfg.live, self.cfg.dialog_timeout_s)
-        except Exception as e:
-            summary["errors"] += 1
-            raise RuntimeError(f"dialog failed: {e}")
-        if out.get("confirmed"):
-            summary["mimicked"] += 1
-            self.store.audit("mimicked", {
-                "source": sid, "ticker": ticker,
-                "side": pos.get("side"), "leverage": pos.get("leverage"),
-                "margin_usd": margin, "pct": pct,
-                "tradeId": (out.get("record") or {}).get("tradeId")})
-            self._notify(f"MIMICKED {ticker} ${margin} "
-                         f"trade={(out.get('record') or {}).get('tradeId')}")
-        else:
+        self._notify(f"Pariston {coin} {side} {leverage}x -> mimic ${margin} "
+                     f"[{reason}] {'LIVE' if self.cfg.live else 'DRY-RUN'}")
+        if not self.cfg.live or self.hl is None:
             summary["skipped"] += 1
-            self.store.audit("mimic_dry_run", {"source": sid, "ticker": ticker,
-                                               "margin_usd": margin, "pct": pct})
+            self.store.audit("mimic_dry_run",
+                             {"source": ev.get("base_id"), "coin": coin,
+                              "side": side, "leverage": leverage,
+                              "margin_usd": margin})
+            return
+        before = self.hl.position(coin)
+        qty_before = before["szi"] if before else "0"
+        fill = self.hl.market_open(coin, side, margin, leverage)
+        summary["mimicked"] += 1
+        detail = {"source": ev.get("base_id"), "coin": coin, "side": side,
+                  "leverage": fill.get("leverage", leverage),
+                  "margin_usd": margin,
+                  "avg_px": fill.get("avg_px"), "oid": fill.get("oid")}
+        self.store.audit("mimicked", detail)
+        self._notify(f"MIMICKED {coin} {side} ${margin} @ {fill.get('avg_px')} "
+                     f"oid={fill.get('oid')}")
+        if self.session is not None:
+            try:
+                meta = self.hl.meta().get(coin, {})
+                rec = build_record_open(
+                    ev, coin, meta.get("assetIndex", 0), side, leverage,
+                    qty_before, fill.get("size", 0),
+                    fill.get("raw"), fill.get("raw"), int(time.time() * 1000))
+                res = self.session.record_open(rec)
+                self.store.audit("recorded",
+                                 {"coin": coin, "ok": bool(res.get("success"))})
+            except Exception as e:
+                self._notify(f"RECORD FAILED {coin} (fill stands): {e}")
+                logger.warning(f"[Auto] record failed: {e}")
 
-    def run_forever(self) -> None:
+    def _follow_update(self, ev: Dict[str, Any], summary: Dict[str, Any]) -> None:
+        coin = (ev.get("ticker") or "").replace("USDT", "").replace("USDC", "")
+        if not coin:
+            return
+        if ev.get("action") == "close":
+            copies = self.mirrored_coins()
+            if coin not in copies:
+                return
+            if not self.cfg.live or self.hl is None:
+                summary["alerts"] += 1
+                self._notify(f"Pariston closed {coin} — close your copy "
+                             f"(dry-run: no action taken).")
+                return
+            fill = self.hl.close(coin)
+            summary["closed"] += 1
+            self.store.audit("mimic_closed",
+                             {"coin": coin,
+                              "margin_usd": copies[coin]["margin_usd"]})
+            self._notify(f"CLOSED {coin} alongside Pariston.")
+            if self.session is not None:
+                try:
+                    meta = self.hl.meta().get(coin, {})
+                    self.session.record_close({
+                        "clientTxId": f"close:{uuid.uuid4().hex[:8]}",
+                        "baseShortId": copies[coin].get("source") or coin,
+                        "assetIndex": meta.get("assetIndex", 0),
+                        "submission": {"hlOrder": fill.get("raw"),
+                                       "nonceMs": int(time.time() * 1000),
+                                       "hlResponse": fill.get("raw")},
+                        "summary": {"qtyBefore": "?", "qtyAfter": "0"}})
+                except Exception as e:
+                    logger.warning(f"[Auto] close-record failed: {e}")
+            return
+        # TP/SL edits and size adds on the source: logged + alerted.
+        # Doctrine: no independent TP/SL on live copies; entries+closes only.
+        summary["alerts"] += 1
+        self._notify(f"Pariston updated {coin} ({ev.get('action')} "
+                     f"tp={ev.get('tp')} sl={ev.get('sl')}) — logged, no action.")
+
+    def run_forever(self, token: str = "") -> None:
         logger.info("[Auto] started "
                     f"(live={self.cfg.live}, poll={self.mirror_cfg.poll_s}s)")
         while True:
             try:
-                self.run_once()
+                self.run_once(token)
             except Exception as e:
                 logger.warning(f"[Auto] cycle crashed (contained): {e}")
             time.sleep(self.mirror_cfg.poll_s)

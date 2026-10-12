@@ -1,9 +1,14 @@
-"""Auto-mimic tests: brain math + driver flow + cycle. No browser."""
+"""Auto-mimic tests: brain + feed classification + full cycle. No network.
+
+HL bridge and trading session are faked; the cycle runs end to end
+against synthetic Pariston feed posts.
+"""
 import pytest
 
-from mirror.auto import (AutoBot, ChromeDriver, MimicConfig, decide_live_size,
-                         size_pct)
+from mirror.auto import (AutoBot, MimicConfig, build_record_open,
+                         decide_live_size, is_pariston)
 from mirror.config import MirrorConfig
+from mirror.feedmon import FeedWatcher, classify_post
 
 
 def _cfg(**kw):
@@ -34,190 +39,200 @@ def test_brain_blind_never():
     assert margin is None and "bank" in reason
 
 
-def test_size_pct_math():
-    assert size_pct(4.6, 18.38) == 25.0
-    assert size_pct(5.0, 100.0) == 5.0
-    assert size_pct(1.0, 0.0) == 0.0
+POST_OPEN = {
+    "id": "post-1",
+    "owner": {"id": "other", "username": "someone"},
+    "update": {
+        "ticker": "HYPE", "directionLong": False, "leverage": 4,
+        "entryPrice": 85.269, "priceTarget": 79.8, "stopLoss": 87.8,
+        "isOpen": True, "verifiedTrade": True,
+        "baseId": "SRC-1", "baseShortId": "SH-1",
+        "changes": {"isAdded": True},
+        "owner": {"id": "7fd09aef-d45f-47dd-aa7f-72143e7d5a05",
+                  "username": "paristoon"},
+        "portfolio": {"id": "17cc19aa-d854-4857-9cca-7f05f21ec2da"},
+    },
+}
 
 
-class FakeResp:
-    def __init__(self, payload):
-        self._payload = payload
-
-    @property
-    def value(self):
-        return self
-
-    def json(self):
-        return self._payload
+def test_classify_open_and_pariston_filter():
+    ev = classify_post(POST_OPEN)
+    assert ev["action"] == "open" and ev["ticker"] == "HYPE"
+    assert ev["side"] == "SHORT" and is_pariston(ev) is True
+    stranger = classify_post({"id": "x", "update": dict(
+        POST_OPEN["update"], owner={"id": "zzz", "username": "who"},
+        portfolio={"id": "qqq"})})
+    assert is_pariston(stranger) is False
 
 
-class FakePage:
-    def __init__(self, confirm_ok=True, shots_change=True):
-        self.viewport_size = {"width": 1280, "height": 720}
-        self.clicks = []
-        self.keys = []
-        self.confirm_ok = confirm_ok
-        self.shots_change = shots_change
-        self.n_shots = 0
-        self.closed = False
-
-    def wait_for_timeout(self, ms):
-        return None
-
-    def screenshot(self):
-        self.n_shots += 1
-        if not self.shots_change:
-            return b"shot-same"
-        return b"shot-%d-chg" % self.n_shots
-
-    @property
-    def mouse(self):
-        outer = self
-
-        class _M:
-            def click(self, x, y):
-                outer.clicks.append(("click", x, y))
-
-            def move(self, x, y, steps=1):
-                outer.clicks.append(("move", x, y))
-
-            def down(self):
-                outer.clicks.append(("down",))
-
-            def up(self):
-                outer.clicks.append(("up",))
-        return _M()
-
-    @property
-    def keyboard(self):
-        outer = self
-
-        class _K:
-            def press(self, k):
-                outer.keys.append(("press", k))
-
-            def type(self, s):
-                outer.keys.append(("type", s))
-        return _K()
-
-    def expect_response(self, pattern, timeout=None):
-        if self.confirm_ok:
-            return FakeResp({"success": True,
-                             "data": {"tradeId": "t-1", "positionRecordId": "p-1"}})
-        return FakeResp({"success": False, "error": "nope"})
-
-    def close(self):
-        self.closed = True
+def test_classify_close_and_non_trade():
+    close = {"id": "c1", "update": {"ticker": "HYPE", "isOpen": False,
+                                    "closingPrice": 80.0, "verifiedTrade": True,
+                                    "baseId": "SRC-1"}}
+    assert classify_post(close)["action"] == "close"
+    assert classify_post({"id": "n", "content": "hello"}) is None
+    assert classify_post({"id": "u", "update": {"ticker": "BTC"}}) is None
 
 
-def test_driver_dry_run_never_confirms():
-    page = FakePage()
-    d = ChromeDriver("http://x", page_factory=lambda url: page)
-    out = d.mimic_once("pf", "base-1", 25.0, live=False)
-    assert out["confirmed"] is False
-    assert any(k[0] == "type" and k[1] == "25.0" for k in page.keys)
-    assert not any(c[0] == "down" for c in page.clicks)
-    assert page.closed is True
+def test_watcher_indexes_first_poll():
+    seen = [[POST_OPEN]]
+    w = FeedWatcher(fetch_fn=lambda token: seen.pop(0) if seen else [])
+    news, updates = w.poll("tok")
+    assert news == [] and updates == []  # first poll only indexes
+    seen.append([dict(POST_OPEN, id="post-2")])
+    news, _ = w.poll("tok")
+    assert [e["post_id"] for e in news] == ["post-2"]
 
 
-def test_driver_live_confirms_and_audits_record():
-    page = FakePage()
-    d = ChromeDriver("http://x", page_factory=lambda url: page)
-    out = d.mimic_once("pf", "base-1", 25.0, live=True)
-    assert out["confirmed"] is True
-    assert out["record"]["tradeId"] == "t-1"
-    assert ("down",) in page.clicks
+class FakeHl:
+    def __init__(self):
+        self.opens = []
+        self.closes = []
+        self.flat = False
+
+    def meta(self):
+        return {"HYPE": {"assetIndex": 10, "szDecimals": 2, "maxLeverage": 10}}
+
+    def position(self, coin):
+        return None if self.flat else None
+
+    def market_open(self, coin, side, margin_usd, leverage):
+        assert margin_usd > 0 and leverage >= 1
+        self.opens.append((coin, side, margin_usd, leverage))
+        return {"coin": coin, "size": 1.5, "avg_px": 85.0, "oid": 1,
+                "leverage": leverage, "raw": {"ok": True}}
+
+    def close(self, coin):
+        self.closes.append(coin)
+        return {"coin": coin, "raw": {"ok": True}}
 
 
-def test_driver_rejected_confirm_raises():
-    page = FakePage(confirm_ok=False)
-    d = ChromeDriver("http://x", page_factory=lambda url: page)
-    with pytest.raises(RuntimeError, match="confirm rejected"):
-        d.mimic_once("pf", "base-1", 25.0, live=True)
+class FakeSession:
+    def __init__(self):
+        self.opens = []
+        self.closes = []
+
+    def record_open(self, payload):
+        assert payload["mimicMeta"]["sourcePaperTradeBaseId"] == "SRC-1"
+        assert payload["mimicMeta"]["initialSourcePaperUpdateId"] == "post-2"
+        self.opens.append(payload)
+        return {"success": True}
+
+    def record_close(self, payload):
+        self.closes.append(payload)
+        return {"success": True}
 
 
-def test_driver_dead_dialog_raises():
-    page = FakePage(shots_change=False)
-    d = ChromeDriver("http://x", page_factory=lambda url: page)
-    with pytest.raises(RuntimeError, match="did not change"):
-        d.mimic_once("pf", "base-1", 25.0, live=False)
-
-
-class FakeClient:
-    access_token = "tok"
-
-    def ensure_auth(self, **kwargs):
-        return True
-
-
-def _pos(sid="SRC-1", ticker="HYPE"):
-    return {"baseId": sid, "ticker": ticker, "side": "SHORT",
-            "leverage": 4, "entry": 85.269, "entrySim": 5}
-
-
-def _bot(tmp_path, positions, notes, live=False, driver=None):
-    mc = MirrorConfig(email="e", app_password="p", device_id="d",
+def test_cycle_dry_run_detects_sizes_no_orders(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
                       data_dir=str(tmp_path))
-    mg = _cfg(live=live)
-    return AutoBot(mc, mg,
-                   driver=driver or ChromeDriver(
-                       "http://x", page_factory=lambda url: FakePage()),
-                   fetch_positions_fn=lambda *a: positions,
-                   fetch_detail_fn=lambda *a, **k: {"symbol": "HYPEUSDT"},
-                   client_factory=lambda: FakeClient(),
-                   notify_fn=lambda t: notes.append(t) or True)
+    hl = FakeHl()
+    feed = PostFeed([POST_OPEN])
+    bot = AutoBot(mc, _cfg(live=False), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=feed), notify_fn=got.append)
+    out = bot.run_once("tok")
+    assert out["errors"] == 0
+    assert hl.opens == []  # dry-run posts nothing (first poll: index only)
+    feed.posts.append(dict(POST_OPEN, id="post-2"))
+    out = bot.run_once("tok")
+    assert hl.opens == []
+    assert any("DRY-RUN" in n for n in got)
+    out2 = bot.run_once("tok")
+    assert out2["mimicked"] == 0  # same post never re-fires
 
 
-def test_cycle_dry_run_marks_seen_no_money(tmp_path):
-    notes = []
-    bot = _bot(tmp_path, [_pos()], notes, live=False)
-    out = bot.run_once()
-    assert out["skipped"] == 1 and out["errors"] == 0
-    assert any("DRY-RUN" in n for n in notes)
-    assert bot.committed_usd() == 0.0
+class PostFeed:
+    """Mutable post list behind one watcher (keeps index state)."""
+
+    def __init__(self, posts):
+        self.posts = list(posts)
+
+    def __call__(self, token):
+        return list(self.posts)
 
 
-def test_cycle_live_mimics_and_commits(tmp_path):
-    notes = []
-    bot = _bot(tmp_path, [_pos()], notes, live=True)
-    out = bot.run_once()
+def _live_bot(tmp_path, feed_posts, got, **kw):
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl, sess = FakeHl(), FakeSession()
+    bot = AutoBot(mc, _cfg(live=True, **kw), hl=hl, session=sess,
+                  watcher=FeedWatcher(fetch_fn=PostFeed(feed_posts)),
+                  notify_fn=got.append)
+    return bot, hl, sess
+
+
+def test_cycle_live_mimics_records_commits(tmp_path):
+    got = []
+    feed = PostFeed([POST_OPEN])
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl, sess = FakeHl(), FakeSession()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=sess,
+                  watcher=FeedWatcher(fetch_fn=feed),
+                  notify_fn=got.append)
+    bot.run_once("tok")  # indexes
+    feed.posts.append(dict(POST_OPEN, id="post-2"))
+    out = bot.run_once("tok")
     assert out["mimicked"] == 1
+    assert hl.opens == [("HYPE", "SHORT", round(18.38 * 0.25, 2), 4)]
+    assert len(sess.opens) == 1
     assert bot.committed_usd() == round(18.38 * 0.25, 2)
     assert bot.open_count() == 1
-    assert any("MIMICKED HYPE" in n for n in notes)
+    assert any("MIMICKED HYPE" in n for n in got)
+
+
+def test_cycle_close_mirrors_exit(tmp_path):
+    got = []
+    feed = PostFeed([POST_OPEN])
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl, sess = FakeHl(), FakeSession()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=sess,
+                  watcher=FeedWatcher(fetch_fn=feed),
+                  notify_fn=got.append)
+    bot.run_once("tok")
+    feed.posts.append(dict(POST_OPEN, id="post-2"))
+    bot.run_once("tok")
+    assert bot.open_count() == 1
+    close_post = {"id": "post-3", "update": {
+        "ticker": "HYPE", "directionLong": False, "leverage": 4,
+        "isOpen": False, "closingPrice": 80.0, "verifiedTrade": True,
+        "baseId": "SRC-1", "baseShortId": "SH-1",
+        "owner": {"id": "7fd09aef-d45f-47dd-aa7f-72143e7d5a05",
+                  "username": "paristoon"},
+        "portfolio": {"id": "17cc19aa-d854-4857-9cca-7f05f21ec2da"}}}
+    feed.posts.append(close_post)
+    out = bot.run_once("tok")
+    assert out["closed"] == 1
+    assert hl.closes == ["HYPE"] and len(sess.closes) == 1
+    assert bot.open_count() == 0 and bot.committed_usd() == 0.0
 
 
 def test_cycle_respects_max_concurrent(tmp_path):
-    notes = []
-    bot = _bot(tmp_path, [_pos("A", "HYPE"), _pos("B", "LINK")], notes,
-               live=True)
-    bot.cfg.max_concurrent = 1
-    out = bot.run_once()
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()
+    feed = PostFeed([POST_OPEN])
+    bot = AutoBot(mc, _cfg(live=True, max_concurrent=1), hl=hl,
+                  session=FakeSession(), watcher=FeedWatcher(fetch_fn=feed),
+                  notify_fn=got.append)
+    bot.run_once("tok")  # index
+    feed.posts.append(dict(POST_OPEN, id="post-H"))
+    feed.posts.append(dict(POST_OPEN, id="post-L",
+                           update=dict(POST_OPEN["update"],
+                                       ticker="LINK", baseId="SRC-2")))
+    out = bot.run_once("tok")
     assert out["mimicked"] == 1 and out["skipped"] == 1
 
 
-def test_cycle_close_alerts_once(tmp_path):
-    notes = []
-    bot = _bot(tmp_path, [_pos()], notes, live=False)
-    bot.run_once()
-    n0 = len(notes)
-    bot2 = _bot(tmp_path, [], notes, live=False)
-    out = bot2.run_once()
-    assert out["alerts"] == 1 and len(notes) == n0 + 1
-    assert "close your copy" in notes[-1]
-    out2 = bot2.run_once()
-    assert out2["alerts"] == 0
-
-
-def test_cycle_driver_failure_alerts_not_crashes(tmp_path):
-    notes = []
-
-    class _Bad:
-        def mimic_once(self, *a, **k):
-            raise RuntimeError("cdp down")
-
-    bot = _bot(tmp_path, [_pos()], notes, live=True, driver=_Bad())
-    out = bot.run_once()
-    assert out["errors"] >= 1
-    assert any("MIMIC FAILED" in n for n in notes)
+def test_record_builder_shape():
+    ev = classify_post(POST_OPEN)
+    rec = build_record_open(ev, "HYPE", 10, "SHORT", 4, "0", 1.5,
+                            {"o": 1}, {"r": 1}, 123)
+    assert rec["coin"] == "HYPE" and rec["assetIndex"] == 10
+    assert rec["entry"] == {"side": "short", "marginMode": "isolated",
+                            "leverage": 4, "tpPx": None, "slPx": None}
+    assert rec["mimicMeta"]["sourcePaperTradeBaseId"] == "SRC-1"
+    assert rec["summary"]["intendedLeverage"] == 4

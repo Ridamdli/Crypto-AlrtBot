@@ -17,12 +17,21 @@ def main() -> None:
     cfg = MirrorConfig.from_env()
     mode = os.getenv("MIRROR_MODE", "watch").lower()
     if mode == "auto":
-        from mirror.auto import AutoBot, ChromeDriver, MimicConfig
+        from mirror.auto import AutoBot, MimicConfig
+        from mirror.feedmon import FeedWatcher
+        from mirror.hl import HlBridge
+        from mirror.recorder import TradingSession
         mg = MimicConfig.from_env()
         missing = cfg.missing_auth()
         if missing:
             raise SystemExit(f"mirror misconfigured: missing {missing}")
-        AutoBot(cfg, mg, driver=ChromeDriver(mg.cdp_url)).run_forever()
+        hl = HlBridge(os.getenv("HL_AGENT_KEY", ""),
+                      os.getenv("HL_WALLET_ADDRESS", ""))
+        sess = TradingSession(
+            refresh_token=os.getenv("INVO_TRADING_REFRESH", ""),
+            access_token=os.getenv("INVO_TRADING_TOKEN", ""))
+        AutoBot(cfg, mg, hl=hl, session=sess,
+                watcher=FeedWatcher()).run_forever()
         return
     from mirror.watch import WatcherBot
     bot = WatcherBot(cfg)
