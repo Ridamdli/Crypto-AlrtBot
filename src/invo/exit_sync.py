@@ -5,8 +5,8 @@ the last-synced levels and only emits actions on real differences. A repeat
 run with no new applied decisions emits zero actions.
 
 Scope rules (per operator direction):
-- TP1 + SL only. TP2/TP3 are never sent — the investments API carries one
-  priceTarget, and payloads are built from plan.tp1 exclusively.
+- TP + SL only. The investments API carries one priceTarget, built from the
+  plan's single tp.
 - CLOSE fires only on applied supervisor-close events (genuine invalidation).
 - REDUCE / FLAG_CONFLICT / INVALIDATE_PENDING_SETUP have no
   investment-level representation: logged, never posted.
@@ -132,7 +132,7 @@ def classify_sync_error(exc: BaseException) -> Dict[str, Any]:
 
 
 def load_sync_state(storage_dir: str = "data_store") -> Dict[str, Any]:
-    """{synced_levels: {signal_id: {stop_loss, tp1}}, closed: [signal_ids]}."""
+    """{synced_levels: {signal_id: {stop_loss, tp}}, closed: [signal_ids]}."""
     path = _os.path.join(storage_dir, SYNC_STATE_NAME)
     try:
         with open(path, encoding="utf-8") as f:
@@ -164,6 +164,20 @@ def save_sync_state(storage_dir: str, state: Dict[str, Any]) -> None:
             _os.unlink(tmp_path)
         except OSError:
             pass
+
+
+def _plan_tp(plan: Dict[str, Any]) -> Any:
+    """The plan's single TP, tolerant of legacy tp1-keyed rows."""
+    return plan.get("tp", plan.get("tp1"))
+
+
+def _same_levels(stored: Any, cur: Dict[str, Any]) -> bool:
+    """Level equality across the tp/tp1 key rename (one corrective sync at
+    most after the rename, then the stored row carries the new key)."""
+    if not isinstance(stored, dict):
+        return False
+    return (stored.get("stop_loss") == cur.get("stop_loss")
+            and stored.get("tp", stored.get("tp1")) == cur.get("tp"))
 
 
 def compute_sync_actions(
@@ -203,14 +217,14 @@ def compute_sync_actions(
         base_ids = [b for b in (rec.get("baseIds") or []) if b]
         if not base_ids:
             continue  # no live investment to target (test/manual shares)
-        # TP1-only by construction: plan.tp2/tp3 are never read here.
-        cur = {"stop_loss": plan.get("stop_loss"), "tp1": plan.get("tp1")}
-        if synced_levels.get(sid) != cur:
+        # TP + SL only by construction: the plan carries one tp.
+        cur = {"stop_loss": plan.get("stop_loss"), "tp": _plan_tp(plan)}
+        if not _same_levels(synced_levels.get(sid), cur):
             actions.append({
                 "kind": "modify",
                 "signal_id": sid,
                 "base_ids": base_ids,
-                "price_target": plan.get("tp1"),
+                "price_target": _plan_tp(plan),
                 "stop_loss": plan.get("stop_loss"),
                 "plan_version": version,
             })
@@ -267,8 +281,8 @@ def summarize_sync(plans: List[Dict[str, Any]],
         if not base_ids:
             out["missing_base"].append(sid)
             continue
-        cur = {"stop_loss": plan.get("stop_loss"), "tp1": plan.get("tp1")}
-        if synced_levels.get(sid) == cur:
+        cur = {"stop_loss": plan.get("stop_loss"), "tp": _plan_tp(plan)}
+        if _same_levels(synced_levels.get(sid), cur):
             out["in_sync"].append(sid)
         else:
             out["unsynced"].append(sid)

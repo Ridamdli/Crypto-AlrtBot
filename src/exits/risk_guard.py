@@ -138,35 +138,34 @@ class RiskGuard:
         if view.state not in (PositionState.OPEN, PositionState.PARTIAL):
             return False, [f"ADJUST_TAKE_PROFITS inadmissible for {view.state.value}"]
         try:
-            tps = [float(proposal[k]) for k in ("tp1", "tp2", "tp3")]
+            tp = float(proposal["tp"])
         except (TypeError, ValueError, KeyError):
-            return False, ["proposal tp1/tp2/tp3 missing/non-numeric"]
-        if not all(t > 0 and t == t and abs(t) != float("inf") for t in tps):
-            return False, ["targets must be finite positive prices"]
-        # Invariant 7/8: direction geometry + monotonic ladder (the candidate
-        # harness consumes tp1->tp2->tp3 in order, like the baseline).
+            return False, ["proposal tp missing/non-numeric"]
+        if not (tp > 0 and tp == tp and abs(tp) != float("inf")):
+            return False, ["target must be a finite positive price"]
+        # Invariant 7/8: direction geometry (single TP on the profit side).
         if side == "LONG":
-            if not (entry < tps[0] <= tps[1] <= tps[2]):
-                return False, ["LONG targets must satisfy entry < tp1 <= tp2 <= tp3"]
+            if not (entry < tp):
+                return False, ["LONG target must satisfy entry < tp"]
         elif side == "SHORT":
-            if not (entry > tps[0] >= tps[1] >= tps[2]):
-                return False, ["SHORT targets must satisfy entry > tp1 >= tp2 >= tp3"]
+            if not (entry > tp):
+                return False, ["SHORT target must satisfy entry > tp"]
         else:
             return False, [f"unknown side {side}"]
         # Invariant 6/7: re-check economics with real costs, measured from
         # ENTRY (a target's worth is entry-framed; ref-price framing is what
         # workers report for remaining potential, not the acceptance gate).
-        gross_from_entry = policy.gross_rr(entry, plan.stop_loss, tps[0])
+        gross_from_entry = policy.gross_rr(entry, plan.stop_loss, tp)
         net_from_entry = round(gross_from_entry - policy.fee_cost_r(
             entry, abs(entry - plan.stop_loss), self.cfg), 3)
-        if gross_from_entry < self.cfg.min_adjusted_tp1_rr or net_from_entry <= 0:
+        if gross_from_entry < self.cfg.min_adjusted_tp_rr or net_from_entry <= 0:
             return False, [
-                f"adjusted tp1 economics fail (gross {gross_from_entry}R < "
-                f"{self.cfg.min_adjusted_tp1_rr}R or net {net_from_entry}R <= 0)"
+                f"adjusted tp economics fail (gross {gross_from_entry}R < "
+                f"{self.cfg.min_adjusted_tp_rr}R or net {net_from_entry}R <= 0)"
             ]
-        if tps == [plan.tp1, plan.tp2, plan.tp3]:
-            return False, ["targets unchanged (no-op)"]
-        reasons.append(f"targets keep gross {gross_from_entry}R / net {net_from_entry}R at tp1")
+        if tp == plan.tp:
+            return False, ["target unchanged (no-op)"]
+        reasons.append(f"target keeps gross {gross_from_entry}R / net {net_from_entry}R at tp")
         return True, reasons
 
     @staticmethod

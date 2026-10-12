@@ -1,6 +1,6 @@
 from pydantic import BaseModel, model_validator
 from pydantic import ConfigDict
-from typing import List, Optional
+from typing import Any, List, Optional
 
 class SignalModel(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -16,9 +16,7 @@ class SignalModel(BaseModel):
 
     # Trade parameters
     entry: float
-    tp1: float
-    tp2: float
-    tp3: float
+    tp: float
     stop_loss: float
 
     # Risk / sizing
@@ -26,9 +24,7 @@ class SignalModel(BaseModel):
     margin: float
     position_notional: float
     risk_amount: float
-    risk_reward_tp1: float
-    risk_reward_tp2: float
-    risk_reward_tp3: float
+    risk_reward: float
 
     # Scoring
     confidence: int
@@ -44,15 +40,28 @@ class SignalModel(BaseModel):
     oi_change_pct: Optional[float] = None
     funding_rate: Optional[float] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_ladder(cls, data: Any) -> Any:
+        """Backward compatibility: old persisted rows carry tp1/tp2/tp3 and
+        risk_reward_tp1 — map the TP1 leg onto the single TP."""
+        if isinstance(data, dict):
+            data = dict(data)
+            if data.get("tp") is None and data.get("tp1") is not None:
+                data["tp"] = data["tp1"]
+            if data.get("risk_reward") is None and data.get("risk_reward_tp1") is not None:
+                data["risk_reward"] = data["risk_reward_tp1"]
+        return data
+
     @model_validator(mode="after")
     def validate_geometry(self):
-        """Ensure SL and TPs are on the correct side of entry."""
+        """Ensure SL and TP are on the correct side of entry."""
         if self.side == "LONG":
             assert self.stop_loss < self.entry, "LONG SL must be below entry"
-            assert self.tp1 > self.entry, "LONG TP1 must be above entry"
+            assert self.tp > self.entry, "LONG TP must be above entry"
         else:
             assert self.stop_loss > self.entry, "SHORT SL must be above entry"
-            assert self.tp1 < self.entry, "SHORT TP1 must be below entry"
-        assert self.risk_reward_tp1 >= 0.5, f"R:R too low: {self.risk_reward_tp1}"
+            assert self.tp < self.entry, "SHORT TP must be below entry"
+        assert self.risk_reward >= 0.5, f"R:R too low: {self.risk_reward}"
         assert 0 <= self.confidence <= 100, "Confidence must be 0-100"
         return self

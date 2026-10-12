@@ -279,7 +279,7 @@ def test_scheduler_mapping_matches_manual_test(monkeypatch, tmp_path):
 
     sched = BotScheduler.__new__(BotScheduler)
     sig = SimpleNamespace(signal_id="SIG-X", symbol="ETHUSDT", side="SHORT",
-                          leverage=10, stop_loss=2600.0, tp1=2500.0, entry=2577.04)
+                          leverage=10, stop_loss=2600.0, tp=2500.0, entry=2577.04)
     sched._share_paper_to_invo([sig])
     assert seen["signal"]["entry"] == 2577.04
     assert seen["kw"]["price_target"] == 2500.0
@@ -580,16 +580,16 @@ def _terminal_oc(sid, status, entry_triggered=True, final=True):
 
 
 def test_terminal_outcomes_release_without_credit(monkeypatch, tmp_path):
-    """TP3_HIT / STOPPED_OUT / LIQUIDATED (entered) free their reservations
+    """TP1_HIT / STOPPED_OUT / LIQUIDATED (entered) free their reservations
     with NO credit — local finality is not remote-settlement evidence."""
     from src.scheduler import BotScheduler
     from src.invo.sim_ledger import SimLedger
     monkeypatch.chdir(tmp_path)
     sim = SimLedger(storage_dir="data_store")
-    for i, st in enumerate(("TP3_HIT", "STOPPED_OUT", "LIQUIDATED")):
+    for i, st in enumerate(("TP1_HIT", "STOPPED_OUT", "LIQUIDATED")):
         sim.reserve(f"SIG-T{i}", "BTCUSDT", 10.0)
     outcomes = {f"SIG-T{i}": _terminal_oc(f"SIG-T{i}", st)
-                for i, st in enumerate(("TP3_HIT", "STOPPED_OUT", "LIQUIDATED"))}
+                for i, st in enumerate(("TP1_HIT", "STOPPED_OUT", "LIQUIDATED"))}
     assert BotScheduler._release_terminal_reservations(outcomes, sim) == 3
     assert sim.snapshot()["reserved_total"] == 0.0
     # No credit fabricated: released_total stays zero.
@@ -610,7 +610,7 @@ def test_expired_and_unresolved_preserved(monkeypatch, tmp_path):
         # Non-final ACTIVE: still live on both sides.
         "SIG-ACT": _terminal_oc("SIG-ACT", "ACTIVE", final=False),
         # Terminal status but never entered: inconsistent data, preserve.
-        "SIG-NOTRIG": _terminal_oc("SIG-NOTRIG", "TP3_HIT",
+        "SIG-NOTRIG": _terminal_oc("SIG-NOTRIG", "TP1_HIT",
                                    entry_triggered=False),
     }
     assert BotScheduler._release_terminal_reservations(outcomes, sim) == 0
@@ -639,7 +639,7 @@ def test_terminal_release_idempotent(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     sim = SimLedger(storage_dir="data_store")
     sim.reserve("SIG-1", "BTCUSDT", 10.0)
-    outcomes = {"SIG-1": _terminal_oc("SIG-1", "TP3_HIT")}
+    outcomes = {"SIG-1": _terminal_oc("SIG-1", "TP1_HIT")}
     assert BotScheduler._release_terminal_reservations(outcomes, sim) == 1
     assert BotScheduler._release_terminal_reservations(outcomes, sim) == 0
 
@@ -656,7 +656,7 @@ def test_track_outcomes_wires_terminal_release(monkeypatch, tmp_path):
     sim.reserve("SIG-WIN", "BTCUSDT", 10.0)
     sim.reserve("SIG-EXP", "ETHUSDT", 5.0)
 
-    outcomes = {"SIG-WIN": _terminal_oc("SIG-WIN", "TP3_HIT"),
+    outcomes = {"SIG-WIN": _terminal_oc("SIG-WIN", "TP1_HIT"),
                 "SIG-EXP": _terminal_oc("SIG-EXP", "EXPIRED")}
 
     class _StubTracker:
@@ -721,6 +721,9 @@ def test_share_success_records_sim_reservation(monkeypatch, tmp_path):
     monkeypatch.setenv("INVO_DEVICE_ID", "dev")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(_mod.InvoClient, "ensure_auth", lambda self, **k: None)
+    monkeypatch.setattr(_mod.InvoClient, "list_paper_investments",
+                        lambda self, *a, **k: {"portfolioRemainingSim": 100.0,
+                                               "investments": []})
 
     def fake_share(self, signal, **kw):
         return {"dry_run": False,
@@ -728,7 +731,7 @@ def test_share_success_records_sim_reservation(monkeypatch, tmp_path):
     monkeypatch.setattr(_mod.InvoClient, "share_paper_trade", fake_share)
     sched = BotScheduler.__new__(BotScheduler)
     sig = SimpleNamespace(signal_id="SIG-R1", symbol="BTCUSDT", side="LONG",
-                          leverage=10, stop_loss=89000.0, tp1=95000.0,
+                          leverage=10, stop_loss=89000.0, tp=95000.0,
                           entry=92000.0)
     sched._share_paper_to_invo([sig])
     snap = SimLedger(storage_dir="data_store").snapshot()
@@ -751,13 +754,16 @@ def test_share_conflict_records_remote_commitment(monkeypatch, tmp_path):
     monkeypatch.setenv("INVO_DEVICE_ID", "dev")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(_mod.InvoClient, "ensure_auth", lambda self, **k: None)
+    monkeypatch.setattr(_mod.InvoClient, "list_paper_investments",
+                        lambda self, *a, **k: {"portfolioRemainingSim": 100.0,
+                                               "investments": []})
 
     def fake_conflict(self, signal, **kw):
         raise InvoConflictError(["b9"], {})
     monkeypatch.setattr(_mod.InvoClient, "share_paper_trade", fake_conflict)
     sched = BotScheduler.__new__(BotScheduler)
     sig = SimpleNamespace(signal_id="SIG-C1", symbol="ETHUSDT", side="LONG",
-                          leverage=10, stop_loss=2500.0, tp1=2600.0,
+                          leverage=10, stop_loss=2500.0, tp=2600.0,
                           entry=2550.0)
     sched._share_paper_to_invo([sig])  # must not raise
     snap = SimLedger(storage_dir="data_store").snapshot()
@@ -775,13 +781,13 @@ def test_audit_event_carries_prev_levels(monkeypatch, tmp_path):
                         confirmer="authoritative-response",
                         action={"price_target": 101.0, "stop_loss": 96.0,
                                 "plan_version": 3},
-                        prev={"tp1": 100.0, "stop_loss": 95.0})
+                        prev={"tp": 100.0, "stop_loss": 95.0})
     events, gaps, _ = read_audit("data_store")
     assert gaps == []
     assert len(events) == 1
     ev = events[0]
-    assert ev["prev_tp1"] == 100.0 and ev["prev_sl"] == 95.0
-    assert ev["desired_tp1"] == 101.0 and ev["desired_sl"] == 96.0
+    assert ev["prev_tp"] == 100.0 and ev["prev_sl"] == 95.0
+    assert ev["desired_tp"] == 101.0 and ev["desired_sl"] == 96.0
     assert ev["attempt"] == 2 and ev["plan_version"] == 3
     assert ev["confirmation"] == "authoritative-response"
     assert ev["correlation_id"].startswith("SIG-P:modify:")
@@ -929,7 +935,7 @@ def test_locked_sync_applies_and_is_idempotent(monkeypatch, tmp_path):
                                "stop_loss": 96.0}]
     assert client.closes == []
     state = _sync.load_sync_state("data_store")
-    assert state["synced_levels"]["SIG-S1"] == {"stop_loss": 96.0, "tp1": 101.0}
+    assert state["synced_levels"]["SIG-S1"] == {"stop_loss": 96.0, "tp": 101.0}
     events, gaps, _ = read_audit("data_store")
     assert gaps == []
     assert any(e["event"] == "confirmed" and e["signal_id"] == "SIG-S1"
@@ -938,6 +944,19 @@ def test_locked_sync_applies_and_is_idempotent(monkeypatch, tmp_path):
     client2 = _FakeSyncClient()
     sched._run_exit_sync_locked(client2, "tok", "pid", "worker-1")
     assert client2.updates == [] and client2.closes == []
+
+
+def test_legacy_tp1_sync_state_compares_equal():
+    """A pre-rename synced_levels row ({stop_loss, tp1}) must compare equal
+    to current levels — no spurious corrective modify after deploy."""
+    from src.invo.exit_sync import compute_sync_actions, summarize_sync
+    plan = {"signal_id": "SIG-S1", "version": 1, "stop_loss": 96.0, "tp": 101.0}
+    shares = {"SIG-S1": {"baseIds": ["b1"]}}
+    legacy_state = {"synced_levels": {"SIG-S1": {"stop_loss": 96.0, "tp1": 101.0}},
+                    "closed": []}
+    assert compute_sync_actions([plan], [], shares, legacy_state) == []
+    summary = summarize_sync([plan], shares, legacy_state)
+    assert summary["in_sync"] == ["SIG-S1"] and summary["unsynced"] == []
 
 
 def test_refresh_sends_refresh_token_as_bearer(monkeypatch, tmp_path):
@@ -1005,7 +1024,7 @@ def _share_sig(sid="SIG-NEW", symbol="DOGEUSDT", side="SHORT"):
     from types import SimpleNamespace
     return SimpleNamespace(signal_id=sid, symbol=symbol, side=side,
                            leverage=10, stop_loss=0.08, entry=0.086,
-                           tp1=0.084)
+                           tp=0.084)
 
 
 class _FakeShareClient(InvoClient):

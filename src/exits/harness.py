@@ -108,14 +108,14 @@ class CandidateEvaluator:
 
         # ── Step 2: active progression with per-bar plans ───────
         active = subsequent_klines[entry_bar_idx:][: self.max_holding_bars]
-        tp1_hit = tp2_hit = tp3_hit = sl_hit = liquidated = False
+        tp1_hit = sl_hit = liquidated = False
         first_event = None
         mfe = mae = 0.0
         active_sl = base_plan.stop_loss
         plan = base_plan
         plan_changes = 0
         events_log: List[Dict[str, Any]] = []
-        seen_plan_hashes = {(plan.stop_loss, plan.tp1, plan.tp2, plan.tp3)}
+        seen_plan_hashes = {(plan.stop_loss, plan.tp)}
         holding_bars = 0
         remaining_position = 1.0
         realized_r = 0.0
@@ -133,7 +133,7 @@ class CandidateEvaluator:
             if decide_fn is not None and rel > 0:
                 history = combined[: offset + abs_idx]
                 data_ts = self._bar_close_ms(subsequent_klines[abs_idx - 1])
-                fill = {"tp1_hit": tp1_hit, "tp2_hit": tp2_hit,
+                fill = {"tp1_hit": tp1_hit,
                         "remaining": remaining_position,
                         "holding_bars": holding_bars - 1}
                 try:
@@ -141,7 +141,7 @@ class CandidateEvaluator:
                 except Exception:
                     new_plan, events = None, []
                 if new_plan is not None:
-                    key = (new_plan.stop_loss, new_plan.tp1, new_plan.tp2, new_plan.tp3)
+                    key = (new_plan.stop_loss, new_plan.tp)
                     if key not in seen_plan_hashes:
                         seen_plan_hashes.add(key)
                         plan = new_plan
@@ -170,7 +170,7 @@ class CandidateEvaluator:
                 if supervisor_closed or remaining_position <= 0:
                     break
 
-            sl, tp1, tp2, tp3 = plan.stop_loss, plan.tp1, plan.tp2, plan.tp3
+            sl, tp = plan.stop_loss, plan.tp
 
             if side == "LONG":
                 bar_favorable = max(0.0, k_high - actual_entry_price)
@@ -193,7 +193,7 @@ class CandidateEvaluator:
                 remaining_position = 0.0
                 break
 
-            next_target = tp3 if tp2_hit else (tp2 if tp1_hit else tp1)
+            next_target = tp
             if side == "LONG":
                 target_touched = k_high >= next_target
                 sl_touched = k_low <= active_sl
@@ -210,43 +210,17 @@ class CandidateEvaluator:
                 if not tp1_hit:
                     tp1_hit = True
                     if first_event is None:
-                        first_event = "TP1"
-                    rr_tp1 = abs(tp1 - actual_entry_price) / risk_distance
-                    realized_r += 0.50 * rr_tp1
-                    remaining_position -= 0.50
-                    active_sl = actual_entry_price
-                elif not tp2_hit:
-                    tp2_hit = True
-                    if first_event is None:
-                        first_event = "TP2"
-                    rr_tp2 = abs(tp2 - actual_entry_price) / risk_distance
-                    realized_r += 0.25 * rr_tp2
-                    remaining_position -= 0.25
-                    active_sl = tp1
-                elif not tp3_hit:
-                    tp3_hit = True
-                    if first_event is None:
-                        first_event = "TP3"
-                    rr_tp3 = abs(tp3 - actual_entry_price) / risk_distance
-                    realized_r += 0.25 * rr_tp3
-                    remaining_position -= 0.25
+                        first_event = "TP"
+                    rr_tp = abs(tp - actual_entry_price) / risk_distance
+                    realized_r += remaining_position * rr_tp
+                    remaining_position = 0.0
                     break
             elif sl_touched:
                 sl_hit = True
                 if first_event is None:
                     first_event = "SL"
-                if remaining_position == 1.0:
-                    realized_r = -1.0
-                else:
-                    if active_sl == actual_entry_price:
-                        realized_r += 0.0
-                    else:
-                        trailing_rr = (
-                            (active_sl - actual_entry_price) / risk_distance
-                            if side == "LONG"
-                            else (actual_entry_price - active_sl) / risk_distance
-                        )
-                        realized_r += remaining_position * trailing_rr
+                # Stopped out full position.
+                realized_r = -1.0
                 remaining_position = 0.0
                 break
 
@@ -257,13 +231,11 @@ class CandidateEvaluator:
         fees_cost_r = round(cost_in_price / risk_distance, 3) if risk_distance > 0 else 0.0
         net_realized_r = round(realized_r - fees_cost_r, 3)
 
-        if supervisor_closed or (remaining_position == 0 and not (tp1_hit or tp2_hit or tp3_hit or sl_hit or liquidated)):
+        if supervisor_closed or (remaining_position == 0 and not (tp1_hit or sl_hit or liquidated)):
             status = "SUPERVISOR_CLOSE"
         else:
             status = "STOPPED_OUT" if sl_hit and remaining_position == 0 and not tp1_hit else (
-                "TP3_HIT" if tp3_hit else (
-                    "TP2_HIT" if tp2_hit else (
-                        "TP1_HIT" if tp1_hit else "ACTIVE")))
+                "TP1_HIT" if tp1_hit else "ACTIVE")
         if liquidated:
             status = "LIQUIDATED"
 
@@ -274,7 +246,7 @@ class CandidateEvaluator:
             "actual_entry_price": actual_entry_price,
             "entry_timestamp": entry_timestamp,
             "candles_to_entry": entry_bar_idx,
-            "tp1_hit": tp1_hit, "tp2_hit": tp2_hit, "tp3_hit": tp3_hit,
+            "tp1_hit": tp1_hit,
             "sl_hit": sl_hit, "liquidated": liquidated, "liq_price": liq_price,
             "mfe": round(mfe, 6), "mae": round(mae, 6),
             "mfe_r": mfe_r, "mae_r": mae_r, "holding_bars": holding_bars,
@@ -307,7 +279,7 @@ class CandidateEvaluator:
             "side": signal["side"], "entry_triggered": False, "expired": True,
             "first_event": "EXPIRED", "actual_entry_price": None,
             "entry_timestamp": None, "candles_to_entry": check_limit,
-            "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
+            "tp1_hit": False,
             "sl_hit": False, "liquidated": False, "liq_price": liq_price,
             "mfe": 0.0, "mae": 0.0, "mfe_r": 0.0, "mae_r": 0.0,
             "holding_bars": 0, "realized_r": 0.0, "net_realized_r": 0.0,
@@ -366,9 +338,7 @@ def arm_metrics(results: List[Dict[str, Any]], seed: int = 42,
         "avg_win_r": round(sum(wins) / len(wins), 3) if wins else 0.0,
         "avg_loss_r": round(sum(losses) / len(losses), 3) if losses else 0.0,
         "stop_freq": round(sum(1 for r in trig if r.get("first_event") == "SL") / n, 3) if n else 0.0,
-        "tp1_rate": round(sum(1 for r in trig if r.get("tp1_hit")) / n, 3) if n else 0.0,
-        "tp2_rate": round(sum(1 for r in trig if r.get("tp2_hit")) / n, 3) if n else 0.0,
-        "tp3_rate": round(sum(1 for r in trig if r.get("tp3_hit")) / n, 3) if n else 0.0,
+        "tp_rate": round(sum(1 for r in trig if r.get("tp1_hit")) / n, 3) if n else 0.0,
         "exposure_mean_bars": round(sum(r.get("holding_bars", 0) for r in trig) / n, 1) if n else 0.0,
         "expectancy_ci95": ci,
     }
@@ -438,9 +408,8 @@ def make_decide_fn(
         fresh, reason, dts = _policy.check_freshness(history, now_ms, cfg)
         # Fill state doubles as the outcome record so workers that exclude
         # already-hit targets (Target, RiskReward) see partial fills.
-        outcome = {"tp1_hit": bool(fill.get("tp1_hit")),
-                   "tp2_hit": bool(fill.get("tp2_hit"))}
-        ctx = WorkerCtx(signal, plan.stop_loss, [plan.tp1, plan.tp2, plan.tp3],
+        outcome = {"tp1_hit": bool(fill.get("tp1_hit"))}
+        ctx = WorkerCtx(signal, plan.stop_loss, [plan.tp],
                         state, history, now_ms, cfg, data_ts_ms=dts or data_ts,
                         outcome=outcome, fresh=fresh, freshness_reason=reason)
         assessments = []

@@ -70,10 +70,10 @@ class ScoringEngine:
 
         # 8. R:R (10pts)
         risk_data = candidate_data.get("risk_data", {})
-        rr = risk_data.get("risk_reward_ratios", {}).get("rr_tp1", 0)
+        rr = risk_data.get("risk_reward_ratios", {}).get("rr_tp", 0)
         if rr >= 2.0:
             score += self.cfg.rr_weight
-        elif rr >= config.risk.min_rr_tp1:
+        elif rr >= config.risk.min_rr:
             score += int(self.cfg.rr_weight * 0.7)
 
         return min(100, score)

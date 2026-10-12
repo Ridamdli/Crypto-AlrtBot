@@ -31,9 +31,9 @@ def _make_signal(**overrides):
         "risk_reward_tp2": 3.0,
         "risk_reward_tp3": 4.0,
         "confidence": 67,
-        "conditions": ["EMA bearish: fast(0.25) < slow(0.26)", "R:R TP1/TP2/TP3: 2.0R / 3.0R / 4.0R"],
+        "conditions": ["EMA bearish: fast(0.25) < slow(0.26)", "R:R TP: 2.0R"],
         "invalidation_conditions": ["15m candle closes above 0.258058 (Stop Loss)"],
-        "management_rules": ["TP1 -> close 50% of position"],
+        "management_rules": ["TP -> close 100% of position"],
         "strategy_metadata": {"fast_ema": 0.2547, "pullback_pct": 0.005},
     }
     base.update(overrides)
@@ -211,3 +211,14 @@ def test_dead_letter_cap_respected(monkeypatch, tmp_path):
         assert bot.send_message("hello") is False
     assert len(_dead_letters(tmp_path)) == 3
     assert bot.dead_letter_count() == 3
+
+
+def test_format_signal_shows_single_tp():
+    """Single-TP contract: exactly one TP line, one R:R value, full close."""
+    sig = _make_signal()
+    assert sig.tp == 0.2518844  # legacy tp1 mapped
+    assert sig.risk_reward == 2.0
+    msg = TelegramFormatter.format_signal(sig, rank=8)
+    assert "TP1" not in msg and "TP2" not in msg and "TP3" not in msg
+    assert "R:R\n2.0R\n" in msg
+    assert "0.251884" in msg  # :.6g formatting

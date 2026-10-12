@@ -39,9 +39,7 @@ class PerformanceMetrics:
     signals_total: int
     signals_per_day: float
     entry_rate: float
-    tp1_hit_rate: float
-    tp2_hit_rate: float
-    tp3_hit_rate: float
+    tp_hit_rate: float
     sl_rate: float
     win_rate: float
     average_r: float
@@ -73,9 +71,7 @@ class ThresholdTuner:
                 signals_total=0,
                 signals_per_day=0.0,
                 entry_rate=0.0,
-                tp1_hit_rate=0.0,
-                tp2_hit_rate=0.0,
-                tp3_hit_rate=0.0,
+                tp_hit_rate=0.0,
                 sl_rate=0.0,
                 win_rate=0.0,
                 average_r=0.0,
@@ -95,9 +91,7 @@ class ThresholdTuner:
                 signals_total=n_total,
                 signals_per_day=round(n_total / max(1.0, num_days), 2),
                 entry_rate=0.0,
-                tp1_hit_rate=0.0,
-                tp2_hit_rate=0.0,
-                tp3_hit_rate=0.0,
+                tp_hit_rate=0.0,
                 sl_rate=0.0,
                 win_rate=0.0,
                 average_r=0.0,
@@ -108,9 +102,7 @@ class ThresholdTuner:
                 avg_holding_bars=0.0,
             )
 
-        tp1_hits = sum(1 for e in entered if e.get("tp1_hit", False))
-        tp2_hits = sum(1 for e in entered if e.get("tp2_hit", False))
-        tp3_hits = sum(1 for e in entered if e.get("tp3_hit", False))
+        tp_hits = sum(1 for e in entered if e.get("tp1_hit", False))
         sl_hits = sum(1 for e in entered if e.get("sl_hit", False))
 
         wins = [e for e in entered if e.get("net_realized_r", 0) > 0]
@@ -164,9 +156,7 @@ class ThresholdTuner:
             signals_total=n_total,
             signals_per_day=round(n_total / max(1.0, num_days), 2),
             entry_rate=entry_rate,
-            tp1_hit_rate=round(tp1_hits / n_entered, 3),
-            tp2_hit_rate=round(tp2_hits / n_entered, 3),
-            tp3_hit_rate=round(tp3_hits / n_entered, 3),
+            tp_hit_rate=round(tp_hits / n_entered, 3),
             sl_rate=round(sl_hits / n_entered, 3),
             win_rate=win_rate,
             average_r=avg_r,
@@ -242,7 +232,7 @@ class ThresholdTuner:
         param_grid keys use dot-notation to address nested config fields, e.g.:
             "volume.min_ratio"    -> base_config.volume.min_ratio
             "oi.min_change_pct"  -> base_config.oi.min_change_pct
-            "risk.min_rr_tp1"    -> base_config.risk.min_rr_tp1
+            "risk.min_rr"    -> base_config.risk.min_rr
 
         Returns a list of result dicts sorted by sort_by metric (descending),
         so the top entry is the best-performing parameter combination on the
@@ -307,7 +297,7 @@ class ThresholdTuner:
 
         metric_cols = [
             "signals_total", "signals_per_day", "entry_rate",
-            "tp1_hit_rate", "tp2_hit_rate", "tp3_hit_rate", "sl_rate",
+            "tp_hit_rate", "sl_rate",
             "win_rate", "average_r", "expected_r", "profit_factor",
             "max_drawdown_r", "worst_losing_streak", "avg_holding_bars",
         ]

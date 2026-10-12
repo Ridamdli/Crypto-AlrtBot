@@ -56,7 +56,7 @@ CONFIRMATIONS = (
 
 REQUIRED_FIELDS = (
     "event_id", "correlation_id", "signal_id", "symbol", "event",
-    "prev_tp1", "prev_sl", "desired_tp1", "desired_sl",
+    "prev_tp", "prev_sl", "desired_tp", "desired_sl",
     "attempt", "budget", "worker", "req_ts_ms", "resp_ts_ms",
     "http_status", "error_category", "response_summary", "confirmation",
     "plan_version", "final_state",

@@ -138,32 +138,26 @@ class TestStopLossEngine:
 # ─── Take Profit Engine ──────────────────────────────────────────────────────
 
 class TestTakeProfitEngine:
-    def test_long_tps_above_entry(self):
-        engine = TakeProfitEngine(r_multiples=(1.0, 2.0, 3.0))
+    def test_long_tp_above_entry(self):
+        engine = TakeProfitEngine(r_multiple=2.0)
         tps = engine.calculate_tp(entry_price=100.0, sl_price=98.0, side="LONG")
-        assert tps["tp1"] > 100.0
-        assert tps["tp2"] > tps["tp1"]
-        assert tps["tp3"] > tps["tp2"]
+        assert tps == {"tp": 104.0}
 
-    def test_short_tps_below_entry(self):
-        engine = TakeProfitEngine(r_multiples=(1.0, 2.0, 3.0))
+    def test_short_tp_below_entry(self):
+        engine = TakeProfitEngine(r_multiple=2.0)
         tps = engine.calculate_tp(entry_price=100.0, sl_price=102.0, side="SHORT")
-        assert tps["tp1"] < 100.0
-        assert tps["tp2"] < tps["tp1"]
-        assert tps["tp3"] < tps["tp2"]
+        assert tps == {"tp": 96.0}
 
-    def test_tp_r_multiples_correct(self):
-        engine = TakeProfitEngine(r_multiples=(1.0, 2.0, 3.0))
+    def test_tp_r_multiple_correct(self):
+        engine = TakeProfitEngine(r_multiple=1.5)
         tps = engine.calculate_tp(entry_price=100.0, sl_price=98.0, side="LONG")
         risk = 100.0 - 98.0  # 2.0
-        assert abs(tps["tp1"] - (100.0 + 1.0 * risk)) < 1e-9
-        assert abs(tps["tp2"] - (100.0 + 2.0 * risk)) < 1e-9
-        assert abs(tps["tp3"] - (100.0 + 3.0 * risk)) < 1e-9
+        assert abs(tps["tp"] - (100.0 + 1.5 * risk)) < 1e-9
 
-    def test_invalid_sl_returns_zeros(self):
+    def test_invalid_sl_returns_zero(self):
         engine = TakeProfitEngine()
         tps = engine.calculate_tp(entry_price=100.0, sl_price=100.0, side="LONG")
-        assert tps["tp1"] == 0.0
+        assert tps["tp"] == 0.0
 
 
 # ─── Risk Engine ─────────────────────────────────────────────────────────────

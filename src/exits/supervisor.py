@@ -288,32 +288,29 @@ class ExitSupervisor:
                         f"({cfg.min_stop_move_atr} ATR)")
                 return True, f"stop move {move:.6g} clears {floor:.6g}"
             # ADJUST: measure what would actually change after the fill-aware
-            # merge (already-filled rungs are history, not a change).
-            merged = self._merged_tps(view, ctx, proposal)
-            moves = [abs(m - p) for m, p in
-                     zip(merged, (view.plan.tp1, view.plan.tp2, view.plan.tp3))]
+            # merge (an already-hit TP is history, not a change).
+            merged = self._merged_tp(view, ctx, proposal)
+            move = abs(merged - view.plan.tp)
             floor = cfg.min_tp_move_atr * atr
-            if max(moves) < floor:
+            if move < floor:
                 return False, (
-                    f"immaterial TP move {max(moves):.6g} < {floor:.6g} "
+                    f"immaterial TP move {move:.6g} < {floor:.6g} "
                     f"({cfg.min_tp_move_atr} ATR)")
-            return True, f"TP move {max(moves):.6g} clears {floor:.6g}"
+            return True, f"TP move {move:.6g} clears {floor:.6g}"
         return True, "cooldown elapsed (reduce gated on cadence only)"
 
     @staticmethod
-    def _merged_tps(view: PositionView, ctx: WorkerCtx,
-                    proposal: Dict[str, Any]) -> "tuple[float, float, float]":
+    def _merged_tp(view: PositionView, ctx: WorkerCtx,
+                   proposal: Dict[str, Any]) -> float:
         """Fill-aware TP merge shared by the stability gate and application.
 
-        Already-filled rungs keep traded levels; only un-hit rungs take
-        proposal values. TPs fill strictly in order.
+        An already-hit TP keeps its traded level; otherwise the proposal
+        value applies.
         """
         plan = view.plan
-        h1 = bool((ctx.outcome or {}).get("tp1_hit"))
-        h2 = bool((ctx.outcome or {}).get("tp2_hit"))
-        return (plan.tp1 if h1 else float(proposal["tp1"]),
-                plan.tp2 if h2 else float(proposal["tp2"]),
-                float(proposal["tp3"]))
+        if bool((ctx.outcome or {}).get("tp1_hit")):
+            return plan.tp
+        return float(proposal["tp"])
 
     @staticmethod
     def _invalidation_evidence(struct: Optional[WorkerAssessment]) -> Optional[str]:
@@ -365,18 +362,18 @@ class ExitSupervisor:
         nxt = plan.version + 1
         if action == ExitAction.TIGHTEN_STOP.value:
             new_plan = ExitPlan(view.signal_id, nxt, float(proposal["stop_loss"]),
-                                plan.tp1, plan.tp2, plan.tp3, now_ms, "")
+                                plan.tp, now_ms, "")
         elif action == ExitAction.ADJUST_TAKE_PROFITS.value:
-            # Merge, never rewrite history (see _merged_tps).
-            m1, m2, m3 = self._merged_tps(view, ctx, proposal)
+            # Merge, never rewrite history (see _merged_tp).
+            m = self._merged_tp(view, ctx, proposal)
             new_plan = ExitPlan(view.signal_id, nxt, plan.stop_loss,
-                                m1, m2, m3, now_ms, "")
+                                m, now_ms, "")
         else:  # REDUCE_PAPER_POSITION — plan levels unchanged; exposure event recorded
             new_plan = ExitPlan(view.signal_id, nxt, plan.stop_loss,
-                                plan.tp1, plan.tp2, plan.tp3, now_ms, "")
+                                plan.tp, now_ms, "")
         key = decision_key(view.signal_id, plan.version, ctx.data_ts_ms, action, proposal)
         new_plan = ExitPlan(new_plan.signal_id, new_plan.version, new_plan.stop_loss,
-                            new_plan.tp1, new_plan.tp2, new_plan.tp3,
+                            new_plan.tp,
                             new_plan.decided_at_ms, key)
         events: List[Dict[str, Any]] = []
         if action == ExitAction.REDUCE_PAPER_POSITION.value:

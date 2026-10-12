@@ -261,7 +261,7 @@ class BotScheduler:
                          "entry": sig.entry},
                         token=token, portfolio_id=portfolio,
                         entry_sim=sim_size,
-                        price_target=float(sig.tp1),
+                        price_target=float(sig.tp),
                         dry_run=dry,
                     )
                     if not out.get("dry_run"):
@@ -334,8 +334,8 @@ class BotScheduler:
     def _sync_exits_to_invo(self) -> None:
         """Propagate APPLIED ExitOrchestrator decisions to Invo paper positions.
 
-        TP1 + SL only: the modify payload carries the active plan's tp1 as
-        priceTarget — TP2/TP3 are never read, let alone sent. CLOSE fires on
+        TP + SL only: the modify payload carries the active plan's tp as
+        priceTarget. CLOSE fires on
         applied supervisor-close events. REDUCE / FLAG / INVALIDATE have no
         investment-level representation and are logged, never posted.
         Gated on INVO_PAPER_ENABLED + live (not dry-run) + EXITS_APPLY, so
@@ -418,7 +418,7 @@ class BotScheduler:
             prev = state["synced_levels"].get(sid, {}) or {}
             gate = tracker.gate(sid, kind,
                                 plan_version=a.get("plan_version"),
-                                levels={"tp1": a.get("price_target"),
+                                levels={"tp": a.get("price_target"),
                                         "stop_loss": a.get("stop_loss")}
                                 if kind == "modify" else None)
             if not gate["proceed"]:
@@ -434,7 +434,7 @@ class BotScheduler:
                             stop_loss=a["stop_loss"], token=token,
                             dry_run=False)
                     state["synced_levels"][sid] = {
-                        "stop_loss": a["stop_loss"], "tp1": a["price_target"]}
+                        "stop_loss": a["stop_loss"], "tp": a["price_target"]}
                     tracker.note_result(sid, kind, "confirmed", {
                         "plan_version": a.get("plan_version"),
                         "levels": gate["levels"]})
@@ -542,8 +542,8 @@ class BotScheduler:
                 correlation_id=f"{sid}:{kind}:"
                                f"{(gate.get('idempotency_key') or '')[:8]}",
                 signal_id=sid, event=event,
-                prev_tp1=prev.get("tp1"), prev_sl=prev.get("stop_loss"),
-                desired_tp1=action.get("price_target"),
+                prev_tp=prev.get("tp", prev.get("tp1")), prev_sl=prev.get("stop_loss"),
+                desired_tp=action.get("price_target"),
                 desired_sl=action.get("stop_loss"),
                 attempt=gate.get("attempt", 1), budget=5,
                 worker=worker, req_ts_ms=now_ms,
@@ -624,7 +624,7 @@ class BotScheduler:
         Eligible IFF all hold (conservative conjunction):
         - outcome record is final, AND
         - status in the tracker's TERMINAL_STATUSES
-          (TP3_HIT / STOPPED_OUT / LIQUIDATED), AND
+          (TP1_HIT / STOPPED_OUT / LIQUIDATED), AND
         - entry_triggered is truthy (the local trade actually entered).
 
         Everything else is preserved, especially EXPIRED (entry never

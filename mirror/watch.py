@@ -108,7 +108,7 @@ class WatcherBot:
                 "Pariston shared a trade — ready to mimic: "
                 f"{ticker} {pos.get('side')} {pos.get('leverage')}x "
                 f"entry={pos.get('entry')} "
-                f"TP={setup.get('tp1')} SL={setup.get('stop_loss')} "
+                f"TP={setup.get('tp', setup.get('tp1'))} SL={setup.get('stop_loss')} "
                 f"[source={sid}]")
 
         summary["closed"] = self._report_vanished(live_ids)

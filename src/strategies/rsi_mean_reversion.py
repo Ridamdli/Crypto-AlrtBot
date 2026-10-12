@@ -171,9 +171,7 @@ class RSIMeanReversionStrategy(BaseStrategy):
                     
                     risk_dist = current_price - sl_price
                     if risk_dist > 0:
-                        tp1 = current_price + risk_dist * 1.5  # Mean reversion: smaller targets
-                        tp2 = current_price + risk_dist * 2.5
-                        tp3 = current_price + risk_dist * 3.5
+                        tp = current_price + risk_dist * 1.5  # Mean reversion: smaller target
                         
                         from src.strategies.base import SignalCandidate
                         candidates.append(SignalCandidate(
@@ -181,9 +179,7 @@ class RSIMeanReversionStrategy(BaseStrategy):
                             side="LONG",
                             entry_price=entry_price,
                             stop_loss=sl_price,
-                            tp1=tp1,
-                            tp2=tp2,
-                            tp3=tp3,
+                            tp=tp,
                             confidence=68,
                             strategy_id=f"rsi_mr_{self.params['rsi_period']}",
                             strategy_version="1.0.0",
@@ -201,11 +197,8 @@ class RSIMeanReversionStrategy(BaseStrategy):
                                 "Strong downtrend resumes",
                             ],
                             management_rules=[
-                                "TP1: close 50%",
-                                "TP2: close 30%",
-                                "TP3: close 20%",
-                                "Max holding: 50 bars",
-                                "After TP1: SL to entry",
+                            "TP: close 100% of position",
+                            "Max holding: 50 bars",
                             ],
                             metadata={
                                 "rsi": rsi_current,
@@ -233,9 +226,7 @@ class RSIMeanReversionStrategy(BaseStrategy):
                     
                     risk_dist = sl_price - current_price
                     if risk_dist > 0:
-                        tp1 = current_price - risk_dist * 1.5
-                        tp2 = current_price - risk_dist * 2.5
-                        tp3 = current_price - risk_dist * 3.5
+                        tp = current_price - risk_dist * 1.5
                         
                         from src.strategies.base import SignalCandidate
                         candidates.append(SignalCandidate(
@@ -243,9 +234,7 @@ class RSIMeanReversionStrategy(BaseStrategy):
                             side="SHORT",
                             entry_price=entry_price,
                             stop_loss=sl_price,
-                            tp1=tp1,
-                            tp2=tp2,
-                            tp3=tp3,
+                            tp=tp,
                             confidence=68,
                             strategy_id=f"rsi_mr_{self.params['rsi_period']}",
                             strategy_version="1.0.0",
@@ -263,11 +252,8 @@ class RSIMeanReversionStrategy(BaseStrategy):
                                 "Strong uptrend resumes",
                             ],
                             management_rules=[
-                                "TP1: close 50%",
-                                "TP2: close 30%",
-                                "TP3: close 20%",
-                                "Max holding: 50 bars",
-                                "After TP1: SL to entry",
+                            "TP: close 100% of position",
+                            "Max holding: 50 bars",
                             ],
                             metadata={
                                 "rsi": rsi_current,

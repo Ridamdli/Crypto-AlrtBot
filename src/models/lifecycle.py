@@ -41,15 +41,9 @@ class SignalLifecycleTracker:
             SignalState.STOPPED_OUT,
             SignalState.INVALIDATED,
         ],
-        SignalState.TP1_HIT: [
-            SignalState.TP2_HIT,
-            SignalState.STOPPED_OUT,  # Breakeven stop hit on remaining position
-        ],
-        SignalState.TP2_HIT: [
-            SignalState.TP3_HIT,
-            SignalState.STOPPED_OUT,  # Trailing stop hit on remaining position
-        ],
-        SignalState.TP3_HIT: [],      # Terminal
+        SignalState.TP1_HIT: [],      # Terminal (single TP, full close)
+        SignalState.TP2_HIT: [],      # Legacy (ladder era, never emitted now)
+        SignalState.TP3_HIT: [],      # Legacy (ladder era, never emitted now)
         SignalState.STOPPED_OUT: [],  # Terminal
         SignalState.EXPIRED: [],      # Terminal
         SignalState.INVALIDATED: [],  # Terminal

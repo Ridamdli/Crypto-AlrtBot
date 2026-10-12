@@ -60,7 +60,7 @@ src/
 │   ├── funding_engine.py      # Funding rate penalty
 │   ├── entry_engine.py        # Entry models (market, pullback)
 │   ├── sl_engine.py           # SL models (ATR, structural)
-│   ├── tp_engine.py           # TP1/TP2/TP3 via R-multiples
+│   ├── tp_engine.py           # Single TP via R-multiple
 │   ├── risk_engine.py         # Position size, leverage, margin, R:R
 │   ├── scoring_engine.py      # Confidence score 0–100 + ranking
 │   └── invalidation_engine.py # Invalidation & management rules
@@ -123,7 +123,7 @@ Key parameters:
 | `volume.min_ratio` | 1.5 | Minimum volume expansion ratio |
 | `volume.strong_ratio` | 2.0 | Strong volume bonus threshold |
 | `oi.min_change_pct` | 2.0 | Minimum OI % change |
-| `risk.min_rr_tp1` | 1.5 | Minimum R:R to TP1 |
+| `risk.min_rr` | 2.0 | Minimum R:R to TP |
 | `risk.max_leverage` | 10 | Hard leverage cap |
 | `risk.max_risk_pct` | 1.0 | Max account risk per trade (%) |
 | `signals.min_confidence` | 60 | Minimum confidence score (0–100) |
@@ -274,15 +274,15 @@ evaluator = SignalOutcomeEvaluator(
 )
 
 # Load a historical signal + subsequent 15m candles
-signal = {"side": "LONG", "entry": 100.0, "tp1": 103.0, "tp2": 106.0, "tp3": 109.0, "stop_loss": 97.0, ...}
+signal = {"side": "LONG", "entry": 100.0, "tp": 103.0, "stop_loss": 97.0, ...}
 subsequent_klines = [...]  # list of OHLCV dicts after signal publication
 
 result = evaluator.evaluate_signal(signal, subsequent_klines)
 print(result)
 # {
 #   "entry_triggered": True,
-#   "tp1_hit": True, "tp2_hit": False, "tp3_hit": False, "sl_hit": False,
-#   "first_event": "TP1",
+#   "tp1_hit": True, "sl_hit": False,
+#   "first_event": "TP",
 #   "realized_r": 1.5, "net_realized_r": 1.493,
 #   "mfe_r": 1.5, "mae_r": 0.1,
 #   "holding_bars": 8,
@@ -357,9 +357,7 @@ print(tuner.compare_configurations(baseline_m, candidate_m))
 | `signals_total` | Total signals generated |
 | `signals_per_day` | Average daily output |
 | `entry_rate` | % of signals where entry was triggered |
-| `tp1_hit_rate` | % of entered trades hitting TP1 |
-| `tp2_hit_rate` | % of entered trades hitting TP2 |
-| `tp3_hit_rate` | % of entered trades hitting TP3 |
+| `tp_hit_rate` | % of entered trades hitting TP |
 | `sl_rate` | % of entered trades stopped out |
 | `win_rate` | % of entered trades with positive net R |
 | `average_r` | Mean net R per entered trade |
@@ -398,9 +396,7 @@ SIDE: LONG
 
 ENTRY: 0.003245
 
-TP1: 0.004560
-TP2: 0.005610
-TP3: 0.005980
+TP: 0.004560
 
 SL: 0.002840
 
@@ -415,17 +411,14 @@ CONDITIONS:
 ✅ 15m volume ratio: 2.14x (threshold 1.5x)
 ✅ OI signal: bullish (+6.30%)
 ✅ Funding rate: 0.0100%
-✅ R:R TP1/TP2/TP3: 2.8R / 4.2R / 5.6R
+✅ R:R TP: 2.8R
 
 INVALIDATION:
 ⚠️ 15m close below 0.00310
 ⚠️ BTC loses regime support
 
 MANAGEMENT:
-→ TP1: close 50%
-→ TP2: close 25%
-→ TP3: close 25%
-→ After TP1: SL → Entry
+→ TP: close 100%
 ```
 
 ---
@@ -442,10 +435,8 @@ MANAGEMENT:
   "entry_timestamp": 1756684800000,
   "candles_to_entry": 2,
   "tp1_hit": true,
-  "tp2_hit": false,
-  "tp3_hit": false,
   "sl_hit": false,
-  "first_event": "TP1",
+  "first_event": "TP",
   "mfe_r": 1.5,
   "mae_r": 0.1,
   "holding_bars": 8,

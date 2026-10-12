@@ -158,9 +158,9 @@ def _write_markdown(out) -> None:
              f"| win rate | {b['win_rate']} | {c['win_rate']} |",
              f"| avg win / loss | {b['avg_win_r']} / {b['avg_loss_r']} | "
              f"{c['avg_win_r']} / {c['avg_loss_r']} |",
-             f"| stop freq | {b['stop_freq']} | {c['stop_freq']} |",
-             f"| TP1/TP2/TP3 | {b['tp1_rate']}/{b['tp2_rate']}/{b['tp3_rate']} | "
-             f"{c['tp1_rate']}/{c['tp2_rate']}/{c['tp3_rate']} |",
+              f"| stop freq | {b['stop_freq']} | {c['stop_freq']} |",
+              f"| TP rate | {b['tp_rate']} | "
+              f"{c['tp_rate']} |",
              f"| exposure mean bars | {b['exposure_mean_bars']} | {c['exposure_mean_bars']} |",
              f"| expectancy CI95 | {b['expectancy_ci95']} | {c['expectancy_ci95']} |",
              "",

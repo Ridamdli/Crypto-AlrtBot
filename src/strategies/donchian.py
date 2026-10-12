@@ -145,19 +145,15 @@ class DonchianBreakoutStrategy(BaseStrategy):
             if risk_dist <= 0:
                 return []
             
-            # TP levels based on R-multiples
-            tp1 = current_price + risk_dist * 2.0
-            tp2 = current_price + risk_dist * 3.0
-            tp3 = current_price + risk_dist * 4.0
+            # Single TP at 2R
+            tp = current_price + risk_dist * 2.0
             
             candidate = SignalCandidate(
                 symbol=self.symbol,
                 side="LONG",
                 entry_price=entry_price,
                 stop_loss=sl_price,
-                tp1=tp1,
-                tp2=tp2,
-                tp3=tp3,
+                tp=tp,
                 confidence=75,  # Will be scored by scoring engine
                 strategy_id=f"donchian_{self.params['lookback']}",
                 strategy_version="1.0.0",
@@ -174,11 +170,7 @@ class DonchianBreakoutStrategy(BaseStrategy):
                     "Volume confirmation fails",
                 ],
                 management_rules=[
-                    "TP1: close 50%",
-                    "TP2: close 25%",
-                    "TP3: close 25%",
-                    "After TP1: SL to entry",
-                    "After TP2: SL to TP1",
+                    "TP: close 100% of position",
                 ],
                 metadata={
                     "upper_channel": upper_15m,
@@ -206,18 +198,14 @@ class DonchianBreakoutStrategy(BaseStrategy):
             if risk_dist <= 0:
                 return []
             
-            tp1 = current_price - risk_dist * 2.0
-            tp2 = current_price - risk_dist * 3.0
-            tp3 = current_price - risk_dist * 4.0
+            tp = current_price - risk_dist * 2.0
             
             candidate = SignalCandidate(
                 symbol=self.symbol,
                 side="SHORT",
                 entry_price=entry_price,
                 stop_loss=sl_price,
-                tp1=tp1,
-                tp2=tp2,
-                tp3=tp3,
+                tp=tp,
                 confidence=75,
                 strategy_id=f"donchian_{self.params['lookback']}",
                 strategy_version="1.0.0",
@@ -234,11 +222,7 @@ class DonchianBreakoutStrategy(BaseStrategy):
                     "Volume confirmation fails",
                 ],
                 management_rules=[
-                    "TP1: close 50%",
-                    "TP2: close 25%",
-                    "TP3: close 25%",
-                    "After TP1: SL to entry",
-                    "After TP2: SL to TP1",
+                    "TP: close 100% of position",
                 ],
                 metadata={
                     "upper_channel": upper_15m,

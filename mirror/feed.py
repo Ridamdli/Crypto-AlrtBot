@@ -38,7 +38,7 @@ def to_share_setup(detail: Dict[str, Any]) -> Dict[str, Any]:
         "leverage": detail.get("leverage", 10),
         "entry": detail.get("entryPrice"),
         "stop_loss": detail.get("stopLoss"),
-        "tp1": detail.get("priceTarget"),
+        "tp": detail.get("priceTarget"),
     }
 
 

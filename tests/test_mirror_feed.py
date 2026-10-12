@@ -16,7 +16,7 @@ def test_to_share_setup_maps_tp_sl():
               "priceTarget": 1267.50}
     assert to_share_setup(detail) == {
         "symbol": "ZECUSDT", "side": "SHORT", "leverage": 10,
-        "entry": 1293.8, "stop_loss": 1306.01, "tp1": 1267.50}
+        "entry": 1293.8, "stop_loss": 1306.01, "tp": 1267.50}
 
 
 def test_to_share_setup_long_keeps_usdt_suffix():

@@ -254,7 +254,7 @@ nav{position:sticky;top:0;z-index:10;background:rgba(11,14,20,.96);border-bottom
 
 <section class="page" id="page-signals">
 <h2>Recent Signals</h2>
-<div class="table-scroll"><table><thead><tr><th>Time (UTC)</th><th>Symbol</th><th>Side</th><th>Entry</th><th>SL</th><th>TP1</th><th>Conf</th><th>Strategy</th><th>Regime</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="table-scroll"><table><thead><tr><th>Time (UTC)</th><th>Symbol</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Conf</th><th>Strategy</th><th>Regime</th></tr></thead><tbody id="rows"></tbody></table></div>
 </section>
 
 <section class="page" id="page-results">
@@ -303,7 +303,7 @@ async function load(){
       card(last ? (last.symbol + ' ' + last.side) : '—', 'last signal' + (last && last.age_minutes!=null ? ' ('+last.age_minutes+'m ago)' : '')) +
       card(st.monitored_symbols.length + ' coins', 'monitored universe');
     bars('bars-symbol', an.by_symbol); bars('bars-day', an.by_day);
-    document.getElementById('rows').innerHTML = sig.map(s=>'<tr><td>'+(s.timestamp||'')+'</td><td><b>'+s.symbol+'</b></td><td class="'+(s.side==='LONG'?'long':'short')+'">'+s.side+'</td><td>'+s.entry+'</td><td>'+s.stop_loss+'</td><td>'+s.tp1+'</td><td>'+s.confidence+'</td><td>'+(s.strategy_id||'')+'</td><td>'+(s.btc_regime||'')+'</td></tr>').join('') || '<tr><td colspan="9">no signals yet</td></tr>';
+    document.getElementById('rows').innerHTML = sig.map(s=>'<tr><td>'+(s.timestamp||'')+'</td><td><b>'+s.symbol+'</b></td><td class="'+(s.side==='LONG'?'long':'short')+'">'+s.side+'</td><td>'+s.entry+'</td><td>'+s.stop_loss+'</td><td>'+(s.tp ?? s.tp1)+'</td><td>'+s.confidence+'</td><td>'+(s.strategy_id||'')+'</td><td>'+(s.btc_regime||'')+'</td></tr>').join('') || '<tr><td colspan="9">no signals yet</td></tr>';
     const scans = (st.recent_scans || []).slice().reverse();
     document.getElementById('scans').innerHTML = scans.map(s=>'<tr><td>'+s.timestamp+'</td><td>'+s.scan_type+'</td><td class="'+(s.status==='ok'?'ok':'warn')+'">'+s.status+'</td><td>'+s.candidates+'</td><td>'+s.published+'</td></tr>').join('') || '<tr><td colspan="5">no scans recorded yet</td></tr>';
     const s = oc.stats;

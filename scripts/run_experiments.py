@@ -203,46 +203,45 @@ def main():
     )
 
     # ============================================================
-    # Experiment D: TP/RR (with consistent ladders)
+    # Experiment D: TP/RR (single TP with matching min_rr)
     # ============================================================
-    logger.info("=== Experiment D: TP/RR Ladder ===")
-    tp_ladders = [
-        (2.0, 3.0, 4.0, 2.0),
-        (2.0, 2.5, 3.5, 2.0),
-        (2.0, 3.0, 5.0, 2.0),
-        (2.5, 3.5, 4.5, 2.5),
-        (3.0, 4.0, 5.0, 3.0),
+    logger.info("=== Experiment D: Single TP ===")
+    tp_options = [
+        (1.5, 1.5),
+        (2.0, 2.0),
+        (2.5, 2.5),
+        (3.0, 3.0),
     ]
-    
+
     tp_results = []
-    for tp1, tp2, tp3, min_rr in tp_ladders:
+    for tp, min_rr in tp_options:
         cfg = copy.deepcopy(base_config)
-        cfg.tp.r_multiples = (tp1, tp2, tp3)
-        cfg.risk.min_rr_tp1 = min_rr
+        cfg.tp.r_multiple = tp
+        cfg.risk.min_rr = min_rr
         cfg.validate()
-        
-        label = f"TP({tp1},{tp2},{tp3})_minRR{min_rr}"
+
+        label = f"TP({tp})_minRR{min_rr}"
         logger.info(f"TP/RR: Testing {label}")
         evals = generate_evaluations_for_config(cfg, train_ts, target_symbols, client)
         metrics = tuner.calculate_metrics(evals, num_days=len(train_ts)/96.0)
-        
+
         result = {
-            "tp1": tp1, "tp2": tp2, "tp3": tp3, "min_rr": min_rr,
+            "tp": tp, "min_rr": min_rr,
             "config_hash": cfg.compute_hash(),
             **metrics.__dict__
         }
         tp_results.append(result)
-    
+
     # Save TP/RR results
     md_path = os.path.join("reports", "tp_rr_experiment.md")
     with open(md_path, "w") as f:
-        f.write("# TP/RR Ladder Experiment (TRAIN Partition)\n\n")
-        f.write("| TP1 | TP2 | TP3 | min_rr_tp1 | Signals | Signals/Day | Entry Rate | TP1 Rate | SL Rate | Win Rate | Avg R | Exp R | Profit Factor | Max DD |\n")
-        f.write("| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+        f.write("# Single-TP Experiment (TRAIN Partition)\n\n")
+        f.write("| TP | min_rr | Signals | Signals/Day | Entry Rate | TP Rate | SL Rate | Win Rate | Avg R | Exp R | Profit Factor | Max DD |\n")
+        f.write("| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
         for r in tp_results:
-            f.write(f"| {r['tp1']} | {r['tp2']} | {r['tp3']} | {r['min_rr']} | "
+            f.write(f"| {r['tp']} | {r['min_rr']} | "
                    f"{r['signals_total']} | {r['signals_per_day']:.1f} | {r['entry_rate']:.3f} | "
-                   f"{r['tp1_hit_rate']:.3f} | {r['sl_rate']:.3f} | {r['win_rate']:.3f} | "
+                   f"{r['tp_hit_rate']:.3f} | {r['sl_rate']:.3f} | {r['win_rate']:.3f} | "
                    f"{r['average_r']:.3f} | {r['expected_r']:.3f} | {r['profit_factor']:.3f} | "
                    f"{r['max_drawdown_r']:.1f} |\n")
     

@@ -8,7 +8,7 @@ maintains a results ledger for future analysis:
     data_store/outcomes.json   {signal_id: outcome_record}
 
 Signals are re-evaluated each cycle until final:
-  final = status in (TP3_HIT, STOPPED_OUT)
+  final = status in (TP1_HIT, STOPPED_OUT)
        or EXPIRED with enough future bars to judge entry fairly
        or elapsed 15m bars >= max_entry_bars + max_holding_bars
 
@@ -27,7 +27,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-TERMINAL_STATUSES = ("TP3_HIT", "STOPPED_OUT", "LIQUIDATED")
+TERMINAL_STATUSES = ("TP1_HIT", "STOPPED_OUT", "LIQUIDATED")
 BAR_MS = 15 * 60 * 1000
 
 
@@ -180,9 +180,7 @@ class OutcomeTracker:
             "signal_timestamp": signal.get("timestamp"),
             "entry": signal.get("entry"),
             "stop_loss": signal.get("stop_loss"),
-            "tp1": signal.get("tp1"),
-            "tp2": signal.get("tp2"),
-            "tp3": signal.get("tp3"),
+            "tp": signal.get("tp", signal.get("tp1")),
             "confidence": signal.get("confidence"),
             "btc_regime": signal.get("btc_regime"),
             "leverage": signal.get("leverage"),
@@ -193,7 +191,7 @@ class OutcomeTracker:
             "future_bars_seen": len(future),
             **{k: result.get(k) for k in (
                 "entry_triggered", "expired", "first_event", "actual_entry_price",
-                "tp1_hit", "tp2_hit", "tp3_hit", "sl_hit", "liquidated", "liq_price",
+                "tp1_hit", "sl_hit", "liquidated", "liq_price",
                 "mfe_r", "mae_r", "holding_bars", "realized_r", "net_realized_r",
                 "fees_cost_r", "status",
             )},

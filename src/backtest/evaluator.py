@@ -54,9 +54,7 @@ class SignalOutcomeEvaluator:
         side = signal["side"]
         entry_target = float(signal["entry"])
         sl = float(signal["stop_loss"])
-        tp1 = float(signal["tp1"])
-        tp2 = float(signal["tp2"])
-        tp3 = float(signal["tp3"])
+        tp = float(signal.get("tp", signal.get("tp1")))
         risk_distance = abs(entry_target - sl)
 
         # ── Optional liquidation modeling (isolated margin) ───────────────
@@ -118,8 +116,6 @@ class SignalOutcomeEvaluator:
                 "entry_timestamp": None,
                 "candles_to_entry": check_limit,
                 "tp1_hit": False,
-                "tp2_hit": False,
-                "tp3_hit": False,
                 "sl_hit": False,
                 "liquidated": False,
                 "liq_price": liq_price,
@@ -139,18 +135,16 @@ class SignalOutcomeEvaluator:
         active_klines = active_klines[: self.max_holding_bars]
 
         tp1_hit = False
-        tp2_hit = False
-        tp3_hit = False
         sl_hit = False
         liquidated = False
         first_event = None
 
         mfe = 0.0
         mae = 0.0
-        active_sl = sl  # Can move to break-even after TP1
+        active_sl = sl
         holding_bars = 0
 
-        # Position tranche tracking: 50% TP1, 25% TP2, 25% TP3
+        # Single TP: full close on touch.
         remaining_position = 1.0
         realized_r = 0.0
 
@@ -189,7 +183,7 @@ class SignalOutcomeEvaluator:
                 break
 
             # Check TP / SL hits on this bar
-            next_target = tp3 if tp2_hit else (tp2 if tp1_hit else tp1)
+            next_target = tp
 
             if side == "LONG":
                 target_touched = k_high >= next_target
@@ -211,29 +205,11 @@ class SignalOutcomeEvaluator:
                 if not tp1_hit:
                     tp1_hit = True
                     if first_event is None:
-                        first_event = "TP1"
-                    # Realize 50% of position at TP1 R:R
-                    rr_tp1 = abs(tp1 - actual_entry_price) / risk_distance
-                    realized_r += 0.50 * rr_tp1
-                    remaining_position -= 0.50
-                    # Position management rule: Move SL to break-even (entry)
-                    active_sl = actual_entry_price
-                elif not tp2_hit:
-                    tp2_hit = True
-                    if first_event is None:
-                        first_event = "TP2"
-                    rr_tp2 = abs(tp2 - actual_entry_price) / risk_distance
-                    realized_r += 0.25 * rr_tp2
-                    remaining_position -= 0.25
-                    # Trailing stop rule: Move SL to TP1
-                    active_sl = tp1
-                elif not tp3_hit:
-                    tp3_hit = True
-                    if first_event is None:
-                        first_event = "TP3"
-                    rr_tp3 = abs(tp3 - actual_entry_price) / risk_distance
-                    realized_r += 0.25 * rr_tp3
-                    remaining_position -= 0.25
+                        first_event = "TP"
+                    # Full close at the single TP.
+                    rr_tp = abs(tp - actual_entry_price) / risk_distance
+                    realized_r += rr_tp
+                    remaining_position = 0.0
                     break  # Complete exit
 
             elif sl_touched:
@@ -241,21 +217,8 @@ class SignalOutcomeEvaluator:
                 if first_event is None:
                     first_event = "SL"
 
-                if remaining_position == 1.0:
-                    # Stopped out full position
-                    realized_r = -1.0
-                else:
-                    # Stopped out at trailing stop / break-even on remaining position
-                    if active_sl == actual_entry_price:
-                        # Break-even stop
-                        realized_r += 0.0
-                    else:
-                        trailing_rr = (
-                            (active_sl - actual_entry_price) / risk_distance
-                            if side == "LONG"
-                            else (actual_entry_price - active_sl) / risk_distance
-                        )
-                        realized_r += remaining_position * trailing_rr
+                # Stopped out full position.
+                realized_r = -1.0
                 remaining_position = 0.0
                 break
 
@@ -272,11 +235,7 @@ class SignalOutcomeEvaluator:
         net_realized_r = round(realized_r - fees_cost_r, 3)
 
         status = "STOPPED_OUT" if sl_hit and remaining_position == 0 and not tp1_hit else (
-            "TP3_HIT" if tp3_hit else (
-                "TP2_HIT" if tp2_hit else (
-                    "TP1_HIT" if tp1_hit else "ACTIVE"
-                )
-            )
+            "TP1_HIT" if tp1_hit else "ACTIVE"
         )
         if liquidated:
             status = "LIQUIDATED"
@@ -292,8 +251,6 @@ class SignalOutcomeEvaluator:
             "entry_timestamp": entry_timestamp,
             "candles_to_entry": entry_bar_idx,
             "tp1_hit": tp1_hit,
-            "tp2_hit": tp2_hit,
-            "tp3_hit": tp3_hit,
             "sl_hit": sl_hit,
             "liquidated": liquidated,
             "liq_price": liq_price,

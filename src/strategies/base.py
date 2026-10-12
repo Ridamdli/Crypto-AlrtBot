@@ -27,9 +27,7 @@ class SignalCandidate:
     side: str  # "LONG" or "SHORT"
     entry_price: float
     stop_loss: float
-    tp1: float
-    tp2: float
-    tp3: float
+    tp: float
     confidence: int
     strategy_id: str
     strategy_version: str

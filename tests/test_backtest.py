@@ -38,9 +38,7 @@ def _long_signal(**overrides):
         "symbol": "TESTUSDT",
         "side": "LONG",
         "entry": 100.0,
-        "tp1": 103.0,
-        "tp2": 106.0,
-        "tp3": 109.0,
+        "tp": 103.0,
         "stop_loss": 97.0,
     }
     base.update(overrides)
@@ -53,9 +51,7 @@ def _short_signal(**overrides):
         "symbol": "TESTUSDT",
         "side": "SHORT",
         "entry": 100.0,
-        "tp1": 97.0,
-        "tp2": 94.0,
-        "tp3": 91.0,
+        "tp": 97.0,
         "stop_loss": 103.0,
     }
     base.update(overrides)
@@ -222,23 +218,22 @@ class TestOutcomeEvaluatorLong:
         result = self._eval(signal, klines)
         assert result["entry_triggered"] is True
         assert result["tp1_hit"] is True
-        assert result["first_event"] == "TP1"
+        assert result["first_event"] == "TP"
 
-    def test_long_tp_progression_tp1_tp2_tp3(self):
-        """LONG: full TP1 → TP2 → TP3 progression."""
+    def test_long_tp_hit_full_close(self):
+        """LONG: TP hit → full close at ~2R, status TP1_HIT."""
         signal = _long_signal()
         klines = [
             _make_kline(open_=101, high=101, low=99, close=101),    # entry (low 99 <= 100)
-            _make_kline(open_=101, high=104, low=100, close=103),   # TP1 hit (103)
-            _make_kline(open_=103, high=107, low=103, close=106),   # TP2 hit (106)
-            _make_kline(open_=106, high=110, low=106, close=109),   # TP3 hit (109)
+            _make_kline(open_=101, high=104, low=100, close=103),   # TP hit (103)
+            _make_kline(open_=103, high=107, low=103, close=106),   # would-be runner zone (ignored)
         ]
         result = self._eval(signal, klines)
         assert result["tp1_hit"] is True
-        assert result["tp2_hit"] is True
-        assert result["tp3_hit"] is True
         assert result["sl_hit"] is False
-        assert result["realized_r"] > 0
+        assert result["status"] == "TP1_HIT"
+        assert result["realized_r"] == pytest.approx(1.0)
+        assert result["first_event"] == "TP"
 
     def test_long_sl_hit_full_loss(self):
         """LONG: SL hit on full position → realized_r == -1.0."""
@@ -253,20 +248,19 @@ class TestOutcomeEvaluatorLong:
         assert result["first_event"] == "SL"
         assert result["realized_r"] == pytest.approx(-1.0)
 
-    def test_long_tp1_then_sl_at_breakeven(self):
-        """LONG: after TP1, SL moves to entry (100). Trailing SL hit → net 0 on remainder."""
+    def test_long_tp_hit_closes_before_later_sl(self):
+        """LONG: TP hit fully closes; a later SL touch cannot stop out."""
         signal = _long_signal()
         klines = [
             _make_kline(open_=101, high=101, low=99, close=101),    # entry (low 99 <= 100)
-            _make_kline(open_=101, high=104, low=101, close=103),   # TP1 hit
-            _make_kline(open_=103, high=103, low=99, close=101),    # SL back to entry (100) hit
+            _make_kline(open_=101, high=104, low=101, close=103),   # TP hit → full close
+            _make_kline(open_=103, high=103, low=99, close=101),    # SL zone after close (ignored)
         ]
         result = self._eval(signal, klines)
         assert result["tp1_hit"] is True
-        assert result["tp2_hit"] is False
-        assert result["sl_hit"] is True
-        # Remaining 50% stopped at breakeven → net R positive (TP1 portion only)
-        assert result["realized_r"] > 0
+        assert result["sl_hit"] is False
+        # Full 2R realized at TP (no partials).
+        assert result["realized_r"] == pytest.approx(1.0)
 
     def test_long_mfe_mae_positive(self):
         """MFE and MAE must be non-negative."""
@@ -333,18 +327,18 @@ class TestOutcomeEvaluatorShort:
         assert result["sl_hit"] is True
         assert result["realized_r"] == pytest.approx(-1.0)
 
-    def test_short_full_tp_progression(self):
-        """SHORT: TP1 → TP2 → TP3 full progression."""
+    def test_short_tp_hit_full_close(self):
+        """SHORT: TP hit → full close, status TP1_HIT."""
         signal = _short_signal()
         klines = [
             _make_kline(open_=99, high=101, low=99, close=100),    # entry
-            _make_kline(open_=100, high=100, low=96, close=97),    # TP1 (97)
-            _make_kline(open_=97, high=97, low=93, close=94),      # TP2 (94)
-            _make_kline(open_=94, high=94, low=90, close=91),      # TP3 (91)
+            _make_kline(open_=100, high=100, low=96, close=97),    # TP (97)
+            _make_kline(open_=97, high=97, low=93, close=94),      # runner zone (ignored)
         ]
         result = self._eval(signal, klines)
-        assert result["tp3_hit"] is True
-        assert result["realized_r"] > 0
+        assert result["tp1_hit"] is True
+        assert result["status"] == "TP1_HIT"
+        assert result["realized_r"] == pytest.approx(1.0)
 
     def test_short_sl_above_entry(self):
         """SHORT geometry: SL must be above entry."""
@@ -390,7 +384,7 @@ class TestAmbiguousCandle:
         """OPTIMISTIC policy: TP hit first on ambiguous LONG candle."""
         result = self._eval_with_ambiguous("LONG", AmbiguousResolution.OPTIMISTIC)
         if result["entry_triggered"]:
-            assert result["first_event"] == "TP1"
+            assert result["first_event"] == "TP"
 
     def test_conservative_resolution_short_sl_first(self):
         """CONSERVATIVE policy: SL hit first on ambiguous SHORT candle."""
@@ -415,7 +409,7 @@ class TestAmbiguousCandle:
         result = evaluator.evaluate_signal(signal, candles)
         if result["entry_triggered"]:
             # open=101, dist_to_TP1(103)=2, dist_to_SL(97)=4 → TP1 closer
-            assert result["first_event"] == "TP1"
+            assert result["first_event"] == "TP"
 
     def test_conservative_is_default(self):
         """Default resolution policy must be CONSERVATIVE (risk-first principle)."""
@@ -516,7 +510,7 @@ class TestPerformanceMetrics:
         )
         m = self._tuner().calculate_metrics(evals, num_days=1.0)
         assert m.entry_rate == pytest.approx(0.5)
-        assert m.tp1_hit_rate == pytest.approx(1.0)  # all entered ones hit TP1
+        assert m.tp_hit_rate == pytest.approx(1.0)  # all entered ones hit TP
 
 
 class TestDatasetSplit:
@@ -681,14 +675,12 @@ class TestSignalLifecycle:
     # ── Valid full progressions ────────────────────────────────────────────────
 
     def test_full_long_winning_path(self):
-        """GENERATED → WAITING_FOR_ENTRY → ACTIVE → TP1_HIT → TP2_HIT → TP3_HIT"""
+        """GENERATED → WAITING_FOR_ENTRY → ACTIVE → TP1_HIT (terminal)."""
         t = self._tracker()
         t.transition_to(SignalState.WAITING_FOR_ENTRY, "order placed")
         t.transition_to(SignalState.ACTIVE, "entry filled")
-        t.transition_to(SignalState.TP1_HIT, "TP1 reached")
-        t.transition_to(SignalState.TP2_HIT, "TP2 reached")
-        t.transition_to(SignalState.TP3_HIT, "TP3 reached")
-        assert t.current_state == SignalState.TP3_HIT
+        t.transition_to(SignalState.TP1_HIT, "TP reached")
+        assert t.current_state == SignalState.TP1_HIT
         assert t.is_terminal is True
 
     def test_stopped_out_path(self):
@@ -729,14 +721,15 @@ class TestSignalLifecycle:
         t.transition_to(SignalState.INVALIDATED, "structure broken")
         assert t.current_state == SignalState.INVALIDATED
 
-    def test_tp1_then_stopped_out_at_breakeven(self):
-        """TP1_HIT → STOPPED_OUT (trailing/breakeven stop) is valid."""
+    def test_tp1_hit_is_terminal(self):
+        """TP1_HIT is terminal: nothing may follow it (full close at TP)."""
         t = self._tracker()
         t.transition_to(SignalState.WAITING_FOR_ENTRY, "ok")
         t.transition_to(SignalState.ACTIVE, "filled")
-        t.transition_to(SignalState.TP1_HIT, "TP1 hit")
-        t.transition_to(SignalState.STOPPED_OUT, "breakeven stop")
-        assert t.current_state == SignalState.STOPPED_OUT
+        t.transition_to(SignalState.TP1_HIT, "TP hit")
+        assert t.current_state == SignalState.TP1_HIT
+        with pytest.raises(ValueError, match="Illegal lifecycle transition"):
+            t.transition_to(SignalState.STOPPED_OUT, "too late")
 
     # ── Invalid transitions ────────────────────────────────────────────────────
 
@@ -762,14 +755,14 @@ class TestSignalLifecycle:
         with pytest.raises(ValueError, match="Illegal lifecycle transition"):
             t.transition_to(SignalState.TP1_HIT, "wishful thinking")
 
-    def test_cannot_jump_tp1_to_tp3(self):
-        """TP1_HIT → TP3_HIT skips TP2 — illegal."""
+    def test_cannot_leave_tp1_hit(self):
+        """TP1_HIT is terminal — TP2_HIT after it is illegal."""
         t = self._tracker()
         t.transition_to(SignalState.WAITING_FOR_ENTRY, "ok")
         t.transition_to(SignalState.ACTIVE, "filled")
-        t.transition_to(SignalState.TP1_HIT, "TP1")
+        t.transition_to(SignalState.TP1_HIT, "TP")
         with pytest.raises(ValueError, match="Illegal lifecycle transition"):
-            t.transition_to(SignalState.TP3_HIT, "skip TP2")
+            t.transition_to(SignalState.TP3_HIT, "no further rungs")
 
     # ── Idempotency ───────────────────────────────────────────────────────────
 
@@ -949,33 +942,33 @@ class TestTPRRValidation:
     """Tests for TP/RR configuration validation (Phase 1)."""
 
     def test_valid_tp_rr_configuration(self):
-        """Valid TP ladder with TP1 >= min_rr_tp1 should pass."""
+        """Valid single-TP config with TP >= min_rr should pass."""
         cfg = AppConfig()
-        cfg.tp.r_multiples = (2.0, 3.0, 4.0)
-        cfg.risk.min_rr_tp1 = 2.0
+        cfg.tp.r_multiple = 2.0
+        cfg.risk.min_rr = 2.0
         cfg.validate()  # Should not raise
 
-    def test_invalid_tp1_below_min_rr(self):
-        """TP1 < min_rr_tp1 should raise ValueError."""
+    def test_invalid_tp_below_min_rr(self):
+        """TP < min_rr should raise ValueError."""
         cfg = AppConfig()
-        cfg.tp.r_multiples = (1.5, 2.5, 3.5)
-        cfg.risk.min_rr_tp1 = 2.0
-        with pytest.raises(ValueError, match="TP1 R-multiple.*min_rr_tp1"):
+        cfg.tp.r_multiple = 1.5
+        cfg.risk.min_rr = 2.0
+        with pytest.raises(ValueError, match="TP R-multiple.*min_rr"):
             cfg.validate()
 
-    def test_tp2_tp3_not_validated_against_min_rr(self):
-        """Only TP1 is validated against min_rr_tp1; TP2/TP3 can be anything."""
+    def test_tp_at_min_rr_passes(self):
+        """TP == min_rr is the boundary — allowed."""
         cfg = AppConfig()
-        cfg.tp.r_multiples = (2.0, 1.5, 1.0)  # TP2/TP3 < min_rr_tp1 is allowed
-        cfg.risk.min_rr_tp1 = 2.0
-        cfg.validate()  # Should not raise - only TP1 matters
+        cfg.tp.r_multiple = 2.0
+        cfg.risk.min_rr = 2.0
+        cfg.validate()  # Should not raise
 
-    def test_empty_tp_ladder_raises(self):
-        """Empty TP ladder should raise."""
+    def test_empty_tp_raises(self):
+        """Zero/negative TP multiple should raise."""
         cfg = AppConfig()
-        cfg.tp.r_multiples = ()
-        cfg.risk.min_rr_tp1 = 2.0
-        with pytest.raises(ValueError, match="TP1 R-multiple"):
+        cfg.tp.r_multiple = 0.0
+        cfg.risk.min_rr = 2.0
+        with pytest.raises(ValueError, match="TP R-multiple"):
             cfg.validate()
 
 

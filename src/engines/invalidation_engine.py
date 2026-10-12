@@ -1,6 +1,5 @@
 from typing import List, Dict, Any
 from src.utils.logger import get_logger
-from src.config import CONFIG
 
 logger = get_logger(__name__)
 
@@ -10,7 +9,6 @@ class InvalidationEngine:
         Generates explicit validation, invalidation, and management rules
         per PRD §25 and §27.
         """
-        cfg = CONFIG.management
 
         validation_conditions = [
             f"Price reaches entry zone ({entry:.6g})",
@@ -30,11 +28,7 @@ class InvalidationEngine:
             ]
 
         management_rules = [
-            f"TP1 → close {cfg.tp1_close_pct}% of position",
-            f"TP2 → close {cfg.tp2_close_pct}% of position",
-            f"TP3 → close {cfg.tp3_close_pct}% of position",
-            "After TP1: move SL to entry (break-even)",
-            "After TP2: trailing stop activation",
+            "TP → close 100% of position",
         ]
 
         return {

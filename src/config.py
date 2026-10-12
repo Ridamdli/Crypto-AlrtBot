@@ -84,7 +84,7 @@ class FundingConfig:
 
 @dataclass
 class TPConfig:
-    r_multiples: tuple = (2.0, 3.0, 4.0)  # TP1, TP2, TP3 as R-multiples
+    r_multiple: float = 2.0  # The single TP as R-multiple
 
 
 @dataclass
@@ -92,8 +92,8 @@ class RiskConfig:
     account_size: float = 1000.0
     max_risk_pct: float = 1.0            # 1% of account per trade
     max_leverage: int = 10               # hard cap
-    min_rr_tp1: float = 2.0             # minimum R:R to accept a signal (must match TPConfig.r_multiples[0])
-    sl_lookback: int = 20               # structural SL lookback in candles
+    min_rr: float = 2.0                  # minimum R:R to accept a signal
+    sl_lookback: int = 20                # structural SL lookback in candles
 
 
 @dataclass
@@ -111,9 +111,7 @@ class ScoringConfig:
 
 @dataclass
 class ManagementConfig:
-    tp1_close_pct: int = 50
-    tp2_close_pct: int = 25
-    tp3_close_pct: int = 25
+    close_pct: int = 100  # full close at the single TP
 
 
 @dataclass
@@ -138,11 +136,10 @@ class AppConfig:
 
     def validate(self) -> None:
         """Validate configuration consistency."""
-        tp1_r = self.tp.r_multiples[0] if self.tp.r_multiples else 0
-        if tp1_r < self.risk.min_rr_tp1:
+        if self.tp.r_multiple < self.risk.min_rr:
             raise ValueError(
-                f"Configuration error: TP1 R-multiple ({tp1_r}) < min_rr_tp1 ({self.risk.min_rr_tp1}). "
-                f"TP ladder must satisfy TP1 >= min_rr_tp1."
+                f"Configuration error: TP R-multiple ({self.tp.r_multiple}) < min_rr ({self.risk.min_rr}). "
+                f"TP must satisfy TP >= min_rr."
             )
 
     def compute_hash(self) -> str:

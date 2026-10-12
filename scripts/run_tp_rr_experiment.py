@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-TP/RR Ladder Experiment - Coherent TP ladders with matching min_rr_tp1.
+Single-TP Experiment - TP R-multiple with matching min_rr.
 """
 import os
 import json
@@ -17,13 +17,12 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Pre-defined coherent TP ladders with matching min_rr_tp1
-TP_LADDERS = [
-    {"tp1": 2.0, "tp2": 3.0, "tp3": 4.0, "min_rr": 2.0},
-    {"tp1": 2.0, "tp2": 2.5, "tp3": 3.5, "min_rr": 2.0},
-    {"tp1": 2.0, "tp2": 3.0, "tp3": 5.0, "min_rr": 2.0},
-    {"tp1": 2.5, "tp2": 3.5, "tp3": 4.5, "min_rr": 2.5},
-    {"tp1": 3.0, "tp2": 4.0, "tp3": 5.0, "min_rr": 3.0},
+# Candidate single-TP R-multiples with matching min_rr
+TP_OPTIONS = [
+    {"tp": 1.5, "min_rr": 1.5},
+    {"tp": 2.0, "min_rr": 2.0},
+    {"tp": 2.5, "min_rr": 2.5},
+    {"tp": 3.0, "min_rr": 3.0},
 ]
 
 def generate_timestamps(start_ts: int, end_ts: int, interval_ms: int = 900000) -> List[int]:
@@ -127,46 +126,44 @@ def main():
     train_ts = all_timestamps[:train_end]
     
     logger.info(f"Train: {len(train_ts)} timestamps, {len(target_symbols)} symbols")
-    logger.info(f"Testing {len(TP_LADDERS)} TP ladders")
+    logger.info(f"Testing {len(TP_OPTIONS)} single-TP options")
 
     results = []
-    for ladder in TP_LADDERS:
+    for opt in TP_OPTIONS:
         cfg = copy.deepcopy(base_config)
-        cfg.tp.r_multiples = (ladder["tp1"], ladder["tp2"], ladder["tp3"])
-        cfg.risk.min_rr_tp1 = ladder["min_rr"]
+        cfg.tp.r_multiple = opt["tp"]
+        cfg.risk.min_rr = opt["min_rr"]
         cfg.validate()
-        
-        label = f"TP({ladder['tp1']},{ladder['tp2']},{ladder['tp3']})_minRR{ladder['min_rr']}"
+
+        label = f"TP({opt['tp']})_minRR{opt['min_rr']}"
         logger.info(f"Testing {label} (config: {cfg.compute_hash()})")
         evals = generate_evaluations_for_config(cfg, train_ts, target_symbols, client)
         metrics = tuner.calculate_metrics(evals, num_days=len(train_ts)/96.0)
-        
+
         result = {
-            "tp1": ladder["tp1"],
-            "tp2": ladder["tp2"],
-            "tp3": ladder["tp3"],
-            "min_rr_tp1": ladder["min_rr"],
+            "tp": opt["tp"],
+            "min_rr": opt["min_rr"],
             "label": label,
             "config_hash": cfg.compute_hash(),
             **metrics.__dict__
         }
         results.append(result)
         logger.info(f"  signals={metrics.signals_total}, signals/day={metrics.signals_per_day:.1f}, "
-                   f"entry_rate={metrics.entry_rate:.3f}, tp1_rate={metrics.tp1_hit_rate:.3f}, "
+                   f"entry_rate={metrics.entry_rate:.3f}, tp_rate={metrics.tp_hit_rate:.3f}, "
                    f"sl_rate={metrics.sl_rate:.3f}, win_rate={metrics.win_rate:.3f}, "
                    f"avg_r={metrics.average_r:.3f}, exp_r={metrics.expected_r:.3f}, "
                    f"pf={metrics.profit_factor:.3f}, max_dd={metrics.max_drawdown_r:.1f}")
-    
+
     # Save markdown report
     md_path = os.path.join(args.output_dir, "calibration_rr.md")
     with open(md_path, "w") as f:
-        f.write("# TP/RR Ladder Experiment (TRAIN Partition)\n\n")
-        f.write("| TP1 | TP2 | TP3 | min_rr_tp1 | Signals | Signals/Day | Entry Rate | TP1 Rate | SL Rate | Win Rate | Avg R | Exp R | Profit Factor | Max DD |\n")
-        f.write("| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+        f.write("# Single-TP Experiment (TRAIN Partition)\n\n")
+        f.write("| TP | min_rr | Signals | Signals/Day | Entry Rate | TP Rate | SL Rate | Win Rate | Avg R | Exp R | Profit Factor | Max DD |\n")
+        f.write("| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
         for r in results:
-            f.write(f"| {r['tp1']} | {r['tp2']} | {r['tp3']} | {r['min_rr_tp1']} | "
+            f.write(f"| {r['tp']} | {r['min_rr']} | "
                    f"{r['signals_total']} | {r['signals_per_day']:.1f} | {r['entry_rate']:.3f} | "
-                   f"{r['tp1_hit_rate']:.3f} | {r['sl_rate']:.3f} | {r['win_rate']:.3f} | "
+                   f"{r['tp_hit_rate']:.3f} | {r['sl_rate']:.3f} | {r['win_rate']:.3f} | "
                    f"{r['average_r']:.3f} | {r['expected_r']:.3f} | {r['profit_factor']:.3f} | "
                    f"{r['max_drawdown_r']:.1f} |\n")
     
@@ -177,9 +174,9 @@ def main():
     
     # Stability analysis
     from scripts.analyze_stability import analyze_stability
-    # For TP/RR we analyze min_rr_tp1
+    # For TP/RR we analyze min_rr
     stability = analyze_stability(
-        [{"param_value": r["min_rr_tp1"], **r} for r in results], 
+        [{"param_value": r["min_rr"], **r} for r in results],
         "param_value", "expected_r"
     )
     stability_path = os.path.join(args.output_dir, "calibration_rr_stability.json")

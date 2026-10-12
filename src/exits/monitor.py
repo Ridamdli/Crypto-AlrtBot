@@ -134,7 +134,7 @@ class ExitMonitor:
         if not self._is_due(plan, completed, data_ts, last, now_ms):
             return None
 
-        ctx = WorkerCtx(signal, plan.stop_loss, [plan.tp1, plan.tp2, plan.tp3],
+        ctx = WorkerCtx(signal, plan.stop_loss, [plan.tp],
                         state, completed, now_ms, self.cfg,
                         data_ts_ms=data_ts, outcome=outcome,
                         fresh=fresh, freshness_reason=reason)
@@ -206,7 +206,7 @@ class ExitMonitor:
             ref = float(completed[-1]["close"])
             atr = policy.atr_wilder(completed, self.cfg.atr_period)
             if atr and atr > 0:
-                levels = [plan.tp1, plan.tp2, plan.tp3, plan.stop_loss]
+                levels = [plan.tp, plan.stop_loss]
                 if any(policy.near_level(ref, lv, atr, self.cfg.proximity_atr)
                        for lv in levels):
                     return True

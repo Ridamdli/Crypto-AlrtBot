@@ -33,11 +33,11 @@ def _signal(ts_ms, entry=100.0, sl=97.0, tp1=103.0, tp2=106.0, tp3=109.0, side="
     }
 
 
-def test_tp1_hit_is_tracked_not_final():
+def test_tp1_hit_is_tracked_and_final():
     t0 = int(time.time() * 1000) - 3 * 3600 * 1000  # 3h ago -> 12 bars elapsed
     rows = [
         _raw_row(t0 + 900000, 99.0, 101.0, 98.5, 100.0),    # touches entry 100
-        _raw_row(t0 + 1800000, 100.0, 103.5, 99.5, 102.0),  # hits TP1 103
+        _raw_row(t0 + 1800000, 100.0, 103.5, 99.5, 102.0),  # hits TP 103
     ]
     tr = OutcomeTracker(client=StubClient(rows))
     ledger = {}
@@ -45,7 +45,7 @@ def test_tp1_hit_is_tracked_not_final():
     assert rec["tp1_hit"] is True
     assert rec["entry_triggered"] is True
     assert rec["status"] == "TP1_HIT"
-    assert rec["final"] is False  # trade still open, not terminal
+    assert rec["final"] is True  # single TP hit fully closes: terminal
     assert ledger["SIG-TEST-1"]["net_realized_r"] == rec["net_realized_r"]
 
 
@@ -145,8 +145,7 @@ def test_holding_timer_final_and_open():
 def test_tracked_record_carries_holding_fields():
     t0 = int(__import__("time").time() * 1000) - 3 * 3600 * 1000
     rows = [
-        _raw_row(t0 + 900000, 99.0, 101.0, 98.5, 100.0),
-        _raw_row(t0 + 1800000, 100.0, 103.5, 99.5, 102.0),
+        _raw_row(t0 + 900000, 99.0, 101.0, 98.5, 100.0),  # entry only, TP untouched
     ]
     tr = OutcomeTracker(client=StubClient(rows))
     rec = tr.track_signal(_signal(t0), {})

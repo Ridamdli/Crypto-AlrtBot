@@ -82,22 +82,16 @@ class ExitConfig:
     min_stop_move_atr: float = 0.25
     # TP moves sacrifice upside, so they clear a wider bar than stops.
     min_tp_move_atr: float = 0.5
-    # Ladder rungs must stay at least this far apart (in ATRs). Rationale:
-    # the evaluator settles 50/25/25 tranches in tp1->tp2->tp3 order; a
-    # flattened ladder (tp1==tp2==tp3) destroys the tranche structure the
-    # whole accounting assumes. If spacing cannot be preserved within the
-    # economics floor, the worker proposes nothing.
-    min_tp_gap_atr: float = 1.0
     # Minimum time between applied plan adjustments per signal (4h).
     # Rationale: baseline mean holding is ~7.5h; a 4h cooldown allows ~1-2
     # deliberate interventions per trade while blocking every-bar churn.
     # Applies to TIGHTEN/ADJUST/REDUCE only — never to CLOSE/INVALIDATE.
     min_adjust_interval_s: int = 14400
 
-    # Adjusted TP1 must keep at least this gross R multiple and positive net R
+    # Adjusted TP must keep at least this gross R multiple and positive net R
     # after costs. Rationale: pulling a target closer trades reward for
     # realism; below 1R gross the "target" no longer compensates the risk.
-    min_adjusted_tp1_rr: float = 1.0
+    min_adjusted_tp_rr: float = 1.0
 
     # Weakening rule: this many of the last N closes against the direction
     # marks momentum deterioration (evidence only, never standalone exit).
@@ -111,7 +105,7 @@ class ExitConfig:
     min_remaining_rr: float = 0.5
 
     # Fraction of remaining paper exposure a REDUCE action sheds.
-    # Rationale: half-off is the same de-risk quantum as the TP1 tranche.
+    # Rationale: half-off is a standard de-risk quantum.
     reduce_fraction: float = 0.5
 
     # Fee/slippage mirror of SignalOutcomeEvaluator defaults

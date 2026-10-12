@@ -172,13 +172,12 @@ class StructureWorker:
 
 
 class TargetWorker:
-    """Verdict on whether TP1/TP2/TP3 remain realistic.
+    """Verdict on whether the single TP remains realistic.
 
-    A remaining target farther than max_tp_atr ATRs from the reference price
-    (last completed close) is flagged unrealistic. Proposes pulling flagged
-    targets back to the ATR cap while preserving direction ordering and the
-    minimum adjusted-TP1 economics. Targets already hit (partial fills) are
-    excluded from adjustment — the fill is history, not a plan.
+    A target farther than max_tp_atr ATRs from the reference price
+    (last completed close) is flagged unrealistic. Proposes pulling it
+    back to the ATR cap while keeping direction geometry and minimum
+    adjusted-TP economics. An already-hit TP is history, not a plan.
     """
 
     ID = "target"
@@ -220,38 +219,27 @@ class TargetWorker:
             return a
         a.verdict = "TARGETS_UNREALISTIC"
         a.proposed_action = ExitAction.ADJUST_TAKE_PROFITS.value
-        a.proposal = {"tp1": new_tps[0], "tp2": new_tps[1], "tp3": new_tps[2]}
+        a.proposal = {"tp": new_tps[0]}
         a.evidence["proposed_tps"] = new_tps
         a.evidence_quality = _quality(ctx)
         return a
 
     def _remaining_tps(self, ctx: WorkerCtx) -> List[float]:
-        """TPs not yet filled. Fill state comes from the outcome record."""
-        tps = list(ctx.plan_tps)
-        if ctx.state == PositionState.PARTIAL:
-            if ctx.outcome.get("tp2_hit"):
-                return [tps[2]]
-            if ctx.outcome.get("tp1_hit"):
-                return [tps[1], tps[2]]
-        return tps
+        """TP not yet filled. Fill state comes from the outcome record."""
+        if (ctx.outcome or {}).get("tp1_hit"):
+            return []
+        return list(ctx.plan_tps)
 
     def _pull_to_cap(
         self, ctx: WorkerCtx, tps: List[float], atr: float
     ) -> Optional[List[float]]:
-        """Pull over-cap targets back to the ATR cap, preserving the ladder.
+        """Pull an over-cap target back to the ATR cap.
 
-        Stability lesson (eval v1): pulling every violating rung to the same
-        cap flattens tp1==tp2==tp3 and destroys the 50/25/25 tranche structure
-        the settlement accounting assumes. So after the pull, rung spacing of
-        at least min_tp_gap_atr is enforced OUTWARD from the nearest target:
-        tp1 (the actionable rung) stays at the realistic cap while outer
-        rungs keep structural separation. If economics on tp1 then fail, or
-        ordering cannot be preserved, propose nothing — a retained original
-        plan beats a flattened ladder.
+        Single-TP version: one pull, then the economics gate. If economics
+        fail, propose nothing — a retained original plan beats a bad one.
         """
         ref, side = ctx.last_close, ctx.side
         cap = ctx.cfg.max_tp_atr * atr
-        gap = ctx.cfg.min_tp_gap_atr * atr
         pulled = []
         for tp in tps:
             dist = (tp - ref) if side == "LONG" else (ref - tp)
@@ -259,24 +247,14 @@ class TargetWorker:
                 pulled.append(ref + cap if side == "LONG" else ref - cap)
             else:
                 pulled.append(tp)
-        # Direction ordering first (LONG ascending / SHORT descending).
+        # Keep direction geometry (single target on the profit side).
         ordered = sorted(pulled) if side == "LONG" else sorted(pulled, reverse=True)
-        # Then enforce minimum rung spacing outward from the nearest target.
-        spaced = [ordered[0]]
-        for rung in ordered[1:]:
-            if side == "LONG":
-                spaced.append(max(rung, spaced[-1] + gap))
-            else:
-                spaced.append(min(rung, spaced[-1] - gap))
-        if side == "LONG":
-            full = [spaced[0]] * (3 - len(spaced)) + spaced if len(spaced) < 3 else spaced
-        else:
-            full = spaced + [spaced[-1]] * (3 - len(spaced)) if len(spaced) < 3 else spaced
-        # Economics gate on the nearest adjusted target.
+        full = ordered[:1]
+        # Economics gate on the adjusted target.
         entry, sl = ctx.entry, ctx.plan_stop
         rr = policy.gross_rr(entry, sl, full[0])
         net = policy.remaining_net_rr(ref, side, entry, sl, full[0], ctx.cfg)
-        if rr < ctx.cfg.min_adjusted_tp1_rr or net <= 0:
+        if rr < ctx.cfg.min_adjusted_tp_rr or net <= 0:
             return None
         return [round(x, 6) for x in full]
 
@@ -467,13 +445,9 @@ class RiskRewardWorker:
         return a
 
     def _remaining_tps(self, ctx: WorkerCtx) -> List[float]:
-        tps = list(ctx.plan_tps)
-        if ctx.state == PositionState.PARTIAL:
-            if ctx.outcome.get("tp2_hit"):
-                return [tps[2]]
-            if ctx.outcome.get("tp1_hit"):
-                return [tps[1], tps[2]]
-        return tps
+        if (ctx.outcome or {}).get("tp1_hit"):
+            return []
+        return list(ctx.plan_tps)
 
 
 ALL_WORKERS = [StructureWorker, TargetWorker, StopWorker, CounterSignalWorker, RiskRewardWorker]

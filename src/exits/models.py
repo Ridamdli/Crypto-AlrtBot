@@ -6,8 +6,8 @@ anywhere else in the repository:
 
 - PENDING:     signal exists, entry not triggered, outcome not final
                (covers "no record yet" and "recorded but waiting").
-- OPEN:        entry triggered, no TP fills yet, outcome not final.
-- PARTIAL:     entry triggered with TP1 and/or TP2 filled, not final.
+- OPEN:        entry triggered, TP not hit, outcome not final.
+- PARTIAL:     legacy (ladder era); single-TP plans never emit it.
 - CLOSED:      outcome record final=True.
 - INVALIDATED: setup never entered (expired, or exit-ledger invalidated flag).
 
@@ -55,9 +55,7 @@ class ExitPlan:
     signal_id: str
     version: int
     stop_loss: float
-    tp1: float
-    tp2: float
-    tp3: float
+    tp: float
     decided_at_ms: int
     basis_decision_key: str = "genesis"
 
@@ -66,9 +64,7 @@ class ExitPlan:
             "signal_id": self.signal_id,
             "version": self.version,
             "stop_loss": self.stop_loss,
-            "tp1": self.tp1,
-            "tp2": self.tp2,
-            "tp3": self.tp3,
+            "tp": self.tp,
             "decided_at_ms": self.decided_at_ms,
             "basis_decision_key": self.basis_decision_key,
         }
@@ -79,9 +75,7 @@ class ExitPlan:
             signal_id=d["signal_id"],
             version=int(d.get("version", 0)),
             stop_loss=float(d["stop_loss"]),
-            tp1=float(d["tp1"]),
-            tp2=float(d["tp2"]),
-            tp3=float(d["tp3"]),
+            tp=float(d.get("tp", d.get("tp1"))),
             decided_at_ms=int(d.get("decided_at_ms", 0)),
             basis_decision_key=str(d.get("basis_decision_key", "genesis")),
         )
@@ -92,9 +86,7 @@ class ExitPlan:
             signal_id=signal["signal_id"],
             version=0,
             stop_loss=float(signal["stop_loss"]),
-            tp1=float(signal["tp1"]),
-            tp2=float(signal["tp2"]),
-            tp3=float(signal["tp3"]),
+            tp=float(signal.get("tp", signal.get("tp1"))),
             decided_at_ms=0,
             basis_decision_key="genesis",
         )
@@ -145,8 +137,6 @@ def classify_position(
     if invalidated_by_exits:
         return PositionState.INVALIDATED
     if outcome.get("entry_triggered"):
-        if outcome.get("tp1_hit") or outcome.get("tp2_hit"):
-            return PositionState.PARTIAL
         return PositionState.OPEN
     return PositionState.PENDING
 

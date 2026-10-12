@@ -71,7 +71,7 @@ class SignalPipeline:
         self.funding_engine = FundingEngine()
         self.entry_engine = EntryEngine()
         self.sl_engine = StopLossEngine(structural_lookback=self.config.risk.sl_lookback)
-        self.tp_engine = TakeProfitEngine(r_multiples=self.config.tp.r_multiples)
+        self.tp_engine = TakeProfitEngine(r_multiple=self.config.tp.r_multiple)
         self.risk_engine = RiskEngine(
             account_size=self.config.risk.account_size,
             max_risk_pct=self.config.risk.max_risk_pct,
@@ -336,17 +336,13 @@ class SignalPipeline:
                                 "strategy_version": cand.strategy_version,
                                 "configuration_hash": self.config.compute_hash(),
                                 "entry": cand.entry_price,
-                                "tp1": cand.tp1,
-                                "tp2": cand.tp2,
-                                "tp3": cand.tp3,
+                                "tp": cand.tp,
                                 "stop_loss": cand.stop_loss,
                                 "leverage": 0,  # Will be calculated
                                 "margin": 0,
                                 "position_notional": 0,
                                 "risk_amount": 0,
-                                "risk_reward_tp1": 0,
-                                "risk_reward_tp2": 0,
-                                "risk_reward_tp3": 0,
+                                "risk_reward": 0,
                                 "conditions": cand.conditions,
                                 "invalidation_conditions": cand.invalidation_conditions,
                                 "management_rules": cand.management_rules,
@@ -363,16 +359,16 @@ class SignalPipeline:
 
                             # Calculate risk parameters
                             risk_data = self.risk_engine.calculate_risk_parameters(
-                                cand.entry_price, cand.stop_loss, {"tp1": cand.tp1, "tp2": cand.tp2, "tp3": cand.tp3}
+                                cand.entry_price, cand.stop_loss, {"tp": cand.tp}
                             )
                             if "error" in risk_data:
                                 logger.debug(f"{symbol}: risk error – {risk_data['error']}, skipping")
                                 continue
 
                             # Minimum R:R gate
-                            rr_tp1 = risk_data["risk_reward_ratios"].get("rr_tp1", 0)
-                            if rr_tp1 < self.config.risk.min_rr_tp1:
-                                logger.debug(f"{symbol}: R:R {rr_tp1:.2f} below minimum, skipping")
+                            rr_tp = risk_data["risk_reward_ratios"].get("rr_tp", 0)
+                            if rr_tp < self.config.risk.min_rr:
+                                logger.debug(f"{symbol}: R:R {rr_tp:.2f} below minimum, skipping")
                                 continue
 
                             # Funding penalty
@@ -387,7 +383,7 @@ class SignalPipeline:
                                 f"15m volume ratio: {vol_data['ratio']:.2f}x (threshold {self.config.volume.min_ratio}x)",
                                 f"OI signal: {oi_data['signal']} ({oi_data.get('oi_change_pct', 0):.2f}%)",
                                 f"Funding rate: {funding_rate:.4%}",
-                                f"R:R TP1/TP2/TP3: {rr_tp1}R / {risk_data['risk_reward_ratios'].get('rr_tp2')}R / {risk_data['risk_reward_ratios'].get('rr_tp3')}R",
+                                f"R:R TP: {rr_tp}R",
                             ] + cand.conditions
 
                             # Deterministic signal ID
@@ -406,17 +402,13 @@ class SignalPipeline:
                                 "strategy_version": cand.strategy_version,
                                 "configuration_hash": config_hash,
                                 "entry": cand.entry_price,
-                                "tp1": cand.tp1,
-                                "tp2": cand.tp2,
-                                "tp3": cand.tp3,
+                                "tp": cand.tp,
                                 "stop_loss": cand.stop_loss,
                                 "leverage": risk_data["leverage"],
                                 "margin": risk_data["margin"],
                                 "position_notional": risk_data["position_notional"],
                                 "risk_amount": risk_data["risk_amount"],
-                                "risk_reward_tp1": risk_data["risk_reward_ratios"].get("rr_tp1"),
-                                "risk_reward_tp2": risk_data["risk_reward_ratios"].get("rr_tp2"),
-                                "risk_reward_tp3": risk_data["risk_reward_ratios"].get("rr_tp3"),
+                                "risk_reward": risk_data["risk_reward_ratios"].get("rr_tp"),
                                 "conditions": actual_conditions,
                                 "invalidation_conditions": rules["invalidation_conditions"],
                                 "management_rules": rules["management_rules"],

@@ -145,9 +145,7 @@ class EMATrendStrategy(BaseStrategy):
                 
                 risk_dist = current_price - sl_price
                 if risk_dist > 0:
-                    tp1 = current_price + risk_dist * 2.0
-                    tp2 = current_price + risk_dist * 3.0
-                    tp3 = current_price + risk_dist * 4.0
+                    tp = current_price + risk_dist * 2.0
                     
                     from src.strategies.base import SignalCandidate
                     candidates.append(SignalCandidate(
@@ -155,9 +153,7 @@ class EMATrendStrategy(BaseStrategy):
                         side="LONG",
                         entry_price=entry_price,
                         stop_loss=sl_price,
-                        tp1=tp1,
-                        tp2=tp2,
-                        tp3=tp3,
+                        tp=tp,
                         confidence=72,
                         strategy_id=f"ema_trend_{self.params['fast_period']}_{self.params['slow_period']}",
                         strategy_version="1.0.0",
@@ -174,11 +170,7 @@ class EMATrendStrategy(BaseStrategy):
                             "Volume dries up",
                         ],
                         management_rules=[
-                            "TP1: close 50%",
-                            "TP2: close 25%",
-                            "TP3: close 25%",
-                            "After TP1: SL to entry",
-                            "After TP2: trailing SL to TP1",
+                        "TP: close 100% of position",
                         ],
                         metadata={
                             "fast_ema": fast_ema_current,
@@ -204,9 +196,7 @@ class EMATrendStrategy(BaseStrategy):
                 
                 risk_dist = sl_price - current_price
                 if risk_dist > 0:
-                    tp1 = current_price - risk_dist * 2.0
-                    tp2 = current_price - risk_dist * 3.0
-                    tp3 = current_price - risk_dist * 4.0
+                    tp = current_price - risk_dist * 2.0
                     
                     from src.strategies.base import SignalCandidate
                     candidates.append(SignalCandidate(
@@ -214,9 +204,7 @@ class EMATrendStrategy(BaseStrategy):
                         side="SHORT",
                         entry_price=entry_price,
                         stop_loss=sl_price,
-                        tp1=tp1,
-                        tp2=tp2,
-                        tp3=tp3,
+                        tp=tp,
                         confidence=72,
                         strategy_id=f"ema_trend_{self.params['fast_period']}_{self.params['slow_period']}",
                         strategy_version="1.0.0",
@@ -233,11 +221,7 @@ class EMATrendStrategy(BaseStrategy):
                             "Volume dries up",
                         ],
                         management_rules=[
-                            "TP1: close 50%",
-                            "TP2: close 25%",
-                            "TP3: close 25%",
-                            "After TP1: SL to entry",
-                            "After TP2: trailing SL to TP1",
+                        "TP: close 100% of position",
                         ],
                         metadata={
                             "fast_ema": fast_ema_current,

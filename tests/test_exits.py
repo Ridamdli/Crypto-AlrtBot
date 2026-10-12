@@ -55,16 +55,17 @@ def flat(n, px=100.0, start=T0):
     return bars([px] * n, start=start)
 
 
-def sig(side="LONG", entry=100.0, sl=99.0, tp1=102.0, tp2=103.0, tp3=104.0,
-        ts="2026-01-01T00:00:00Z", sid="SIG-TEST", lev=10):
+def sig(side="LONG", entry=100.0, sl=99.0, tp=102.0,
+        ts="2026-01-01T00:00:00Z", sid="SIG-TEST", lev=10, **kw):
+    tp = kw.pop("tp1", tp)  # legacy ladder kwarg maps onto the single TP
     notional = 10.0 / abs(entry - sl) * entry
     return {
         "signal_id": sid, "timestamp": ts, "symbol": "BTCUSDT", "side": side,
         "strategy_id": "donchian_20", "strategy_version": "1.0.0",
-        "entry": entry, "stop_loss": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
+        "entry": entry, "stop_loss": sl, "tp": tp,
         "leverage": lev, "margin": round(notional / lev, 2),
         "position_notional": round(notional, 2), "risk_amount": 10.0,
-        "risk_reward_tp1": 2.0, "risk_reward_tp2": 3.0, "risk_reward_tp3": 4.0,
+        "risk_reward": 2.0,
         "confidence": 75, "conditions": [], "invalidation_conditions": [],
         "management_rules": [],
     }
@@ -80,7 +81,7 @@ def ctx_for(signal, completed, state=PositionState.OPEN, outcome=None,
         done, _ = policy.split_completed(completed, now_ms, cfg.timeframe_ms)
     fresh, reason, data_ts = policy.check_freshness(done, now_ms, cfg)
     plan = plan or ExitPlan.genesis(signal)
-    return WorkerCtx(signal, plan.stop_loss, [plan.tp1, plan.tp2, plan.tp3],
+    return WorkerCtx(signal, plan.stop_loss, [plan.tp],
                      state, done, now_ms, cfg, data_ts_ms=data_ts,
                      outcome=outcome, fresh=fresh, freshness_reason=reason)
 
@@ -194,10 +195,10 @@ def test_target_worker_flags_unrealistic_and_proposes_ordered():
     a = TargetWorker().assess(ctx_for(s, kl))
     assert a.verdict == "TARGETS_UNREALISTIC"
     assert a.proposed_action == ExitAction.ADJUST_TAKE_PROFITS.value
-    t = [a.proposal["tp1"], a.proposal["tp2"], a.proposal["tp3"]]
-    assert t[0] <= t[1] <= t[2] and all(x > 100.0 for x in t)
-    # economics gate held: pulled tp1 keeps >=1R gross and positive net
-    assert policy.gross_rr(100.0, 99.0, t[0]) >= 1.0
+    t = a.proposal["tp"]
+    assert t > 100.0
+    # economics gate held: pulled tp keeps >=1R gross and positive net
+    assert policy.gross_rr(100.0, 99.0, t) >= 1.0
 
 
 def test_target_worker_ok_when_realistic():
@@ -210,13 +211,13 @@ def test_target_worker_ok_when_realistic():
         assert a.proposed_action is None
 
 
-def test_target_worker_skips_filled_tps():
+def test_target_worker_skips_filled_tp():
     closes = [100.0 + (0.5 if i % 2 else -0.5) for i in range(30)]
     kl = bars(closes)
-    s = sig("LONG", entry=100.0, sl=99.0, tp1=101.0, tp2=110.0, tp3=112.0)
-    oc = {"tp1_hit": True, "tp2_hit": False}
-    a = TargetWorker().assess(ctx_for(s, kl, state=PositionState.PARTIAL, outcome=oc))
-    assert a.evidence["remaining_tps"] == [110.0, 112.0]
+    s = sig("LONG", entry=100.0, sl=99.0, tp1=101.0)
+    oc = {"tp1_hit": True}
+    a = TargetWorker().assess(ctx_for(s, kl, state=PositionState.OPEN, outcome=oc))
+    assert a.evidence["remaining_tps"] == []
 
 
 def test_guard_rejects_bad_targets():
@@ -428,7 +429,7 @@ def test_classify_position_states():
     assert classify_position(s, {"final": True, "entry_triggered": False}) == PositionState.INVALIDATED
     assert classify_position(s, {"final": False, "entry_triggered": True}) == PositionState.OPEN
     assert classify_position(s, {"final": False, "entry_triggered": True,
-                                 "tp1_hit": True}) == PositionState.PARTIAL
+                                 "tp1_hit": True}) == PositionState.OPEN
     assert classify_position(s, {"final": False, "entry_triggered": False}) == PositionState.PENDING
     assert classify_position(s, None, invalidated_by_exits=True) == PositionState.INVALIDATED
 
@@ -616,7 +617,7 @@ def test_candidate_static_plan_matches_baseline(tmp_path):
     c = cand.evaluate_signal(s, kl, None)
     for k in b:
         assert c[k] == b[k], f"divergence on {k}: {c[k]} != {b[k]}"
-    assert c["status"] == "TP3_HIT"
+    assert c["status"] == "TP1_HIT"
 
 
 def test_candidate_equivalence_across_scenarios():
@@ -768,7 +769,7 @@ def _ctx_with_plan(signal, completed, plan, state, outcome=None, cfg=None, now_m
         now_ms = policy.last_close_ts(done or completed, cfg.timeframe_ms) + 1000
         done, _ = policy.split_completed(completed, now_ms, cfg.timeframe_ms)
     fresh, reason, data_ts = policy.check_freshness(done, now_ms, cfg)
-    return WorkerCtx(signal, plan.stop_loss, [plan.tp1, plan.tp2, plan.tp3],
+    return WorkerCtx(signal, plan.stop_loss, [plan.tp],
                      state, done, now_ms, cfg, data_ts_ms=data_ts,
                      outcome=outcome, fresh=fresh, freshness_reason=reason)
 
@@ -789,7 +790,7 @@ def test_gate_blocks_immaterial_stop_ratchet():
     closes = [100.0] * 24 + [99.4, 99.0, 99.2, 99.5, 99.6, 99.5]
     kl = bars(closes, lo_pad=0.05, hi_pad=0.05)
     s = sig("LONG", entry=100.0, sl=98.0)
-    plan = ExitPlan("SIG-TEST", 1, 98.85, 102.0, 103.0, 104.0, T0)
+    plan = ExitPlan("SIG-TEST", 1, 98.85, 102.0, T0)
     cfg = ExitConfig()
     c = _ctx_with_plan(s, kl, plan, PositionState.OPEN, cfg=cfg)
     sup = ExitSupervisor(cfg)
@@ -851,10 +852,10 @@ def test_gate_close_bypasses_cooldown():
     kl = bars(closes)
     s = sig("SHORT", entry=100.0, sl=102.0, tp1=98.0, tp2=97.0, tp3=96.0)
     cfg = ExitConfig()
-    plan = ExitPlan("SIG-TEST", 1, 102.0, 98.0, 97.0, 96.0, T0)
+    plan = ExitPlan("SIG-TEST", 1, 102.0, 98.0, T0)
     c = _ctx_with_plan(s, kl, plan, PositionState.OPEN, cfg=cfg)
     now = c.now_ms
-    plan = ExitPlan("SIG-TEST", 1, 102.0, 98.0, 97.0, 96.0, now - 60_000)
+    plan = ExitPlan("SIG-TEST", 1, 102.0, 98.0, now - 60_000)
     sup = ExitSupervisor(cfg)
     view = _view_with_plan(s, plan, PositionState.OPEN)
     from src.exits.workers import ALL_WORKERS
@@ -863,44 +864,51 @@ def test_gate_close_bypasses_cooldown():
     assert d.action == ExitAction.CLOSE_PAPER_POSITION.value
 
 
-# ── stability gate: ladder spacing + fill-aware merge ───────────
-def test_gate_tp_ladder_keeps_spacing():
+# ── stability gate: single-TP pull + fill-aware merge ───────────
+def test_gate_tp_pull_keeps_economics():
     closes = [100.0 + (0.5 if i % 2 else -0.5) for i in range(30)]
     kl = bars(closes)
-    s = sig("LONG", entry=100.0, sl=99.0, tp1=110.0, tp2=112.0, tp3=114.0)
+    s = sig("LONG", entry=100.0, sl=99.0, tp1=110.0)
     cfg = ExitConfig()
     c = _ctx_with_plan(s, kl, ExitPlan.genesis(s), PositionState.OPEN, cfg=cfg)
     a = TargetWorker().assess(c)
     assert a.proposed_action == ExitAction.ADJUST_TAKE_PROFITS.value
-    t1, t2, t3 = a.proposal["tp1"], a.proposal["tp2"], a.proposal["tp3"]
-    atr = policy.atr_wilder(c.completed, cfg.atr_period)
-    assert t1 < t2 < t3  # never flattened
-    assert (t2 - t1) >= cfg.min_tp_gap_atr * atr - 1e-9
-    assert (t3 - t2) >= cfg.min_tp_gap_atr * atr - 1e-9
+    t = a.proposal["tp"]
+    assert t > 100.0  # still on the profit side
+    assert policy.gross_rr(100.0, 99.0, t) >= 1.0  # economics floor holds
 
 
-def test_gate_merge_keeps_filled_rungs():
-    # tp1 filled at 102: the proposal's tp1 slot is stale padding and must
-    # not overwrite history; only un-hit rungs move (102.6/103.5 keep order).
+def test_gate_merge_keeps_hit_tp():
+    # tp hit at 102: the proposal's tp slot is stale and must not
+    # overwrite history; an un-hit TP takes the proposal value.
     from src.exits.models import WorkerAssessment
-    s = sig("LONG", entry=100.0, sl=99.0, tp1=102.0, tp2=103.0, tp3=104.0)
+    s = sig("LONG", entry=100.0, sl=99.0, tp1=102.0)
     closes = [100.0 + (0.5 if i % 2 else -0.5) for i in range(30)]
     kl = bars(closes)
     cfg = ExitConfig()
     plan = ExitPlan.genesis(s)
-    oc = {"tp1_hit": True, "tp2_hit": False}
-    c = _ctx_with_plan(s, kl, plan, PositionState.PARTIAL, outcome=oc, cfg=cfg)
-    prop = {"tp1": 102.0, "tp2": 102.6, "tp3": 103.5}
+    oc = {"tp1_hit": True}
+    c = _ctx_with_plan(s, kl, plan, PositionState.OPEN, outcome=oc, cfg=cfg)
+    prop = {"tp": 102.6}
     w = WorkerAssessment("target", "1.0.0", c.now_ms, c.data_ts_ms,
                          "TARGETS_UNREALISTIC", proposed_action="ADJUST_TAKE_PROFITS",
                          proposal=dict(prop), evidence_quality=0.9)
     sup = ExitSupervisor(cfg)
-    view = _view_with_plan(s, plan, PositionState.PARTIAL, outcome=oc)
+    view = _view_with_plan(s, plan, PositionState.OPEN, outcome=oc)
     d = sup.decide(view, [w], c, c.now_ms)
-    assert d.action == ExitAction.ADJUST_TAKE_PROFITS.value
-    assert d.plan_after["tp1"] == 102.0  # traded level preserved
-    assert d.plan_after["tp2"] == 102.6
-    assert d.plan_after["tp3"] == 103.5
+    # Merged levels equal the plan (hit TP preserved) → immaterial → kept.
+    assert d.action == ExitAction.NO_CHANGE.value
+    assert d.plan_after is None
+
+    oc2 = {"tp1_hit": False}
+    c2 = _ctx_with_plan(s, kl, plan, PositionState.OPEN, outcome=oc2, cfg=cfg)
+    w2 = WorkerAssessment("target", "1.0.0", c2.now_ms, c2.data_ts_ms,
+                          "TARGETS_UNREALISTIC", proposed_action="ADJUST_TAKE_PROFITS",
+                          proposal=dict(prop), evidence_quality=0.9)
+    view2 = _view_with_plan(s, plan, PositionState.OPEN, outcome=oc2)
+    d2 = sup.decide(view2, [w2], c2, c2.now_ms)
+    assert d2.action == ExitAction.ADJUST_TAKE_PROFITS.value
+    assert d2.plan_after["tp"] == 102.6  # un-hit TP takes proposal
 
 
 def test_gate_event_repeats_start_cooldown_in_replay():
@@ -911,17 +919,17 @@ def test_gate_event_repeats_start_cooldown_in_replay():
     from src.exits.models import ExitPlan
     cfg = ExitConfig()
     decide = make_decide_fn(cfg)
-    s = sig("LONG", entry=100.0, sl=99.0, tp1=102.0, tp2=103.0, tp3=104.0)
+    s = sig("LONG", entry=100.0, sl=99.0, tp1=102.0)
     # Flat series: stop/target/counter workers stay quiet (ATR~0 abstains,
-    # no breaks); plan carries a near-exhausted tp2 so RR proposes REDUCE.
+    # no breaks); plan TP nearly exhausted so RR proposes REDUCE.
     kl = flat(40)
-    plan = ExitPlan("SIG-TEST", 0, 99.0, 102.0, 100.2, 100.3, 0)
-    fill = {"tp1_hit": True, "tp2_hit": False, "remaining": 0.5, "holding_bars": 3}
+    plan = ExitPlan("SIG-TEST", 0, 99.0, 100.2, 0)
+    fill = {"tp1_hit": False, "remaining": 1.0, "holding_bars": 3}
     dts1 = kl[-1]["close_time"]
     p1, e1 = decide(s, plan, fill, kl, dts1)
     # REDUCE applies: same levels at version 1 plus one reduce event.
     assert p1 is not None and p1.version == 1
-    assert (p1.stop_loss, p1.tp1) == (99.0, 102.0)
+    assert (p1.stop_loss, p1.tp) == (99.0, 100.2)
     assert len(e1) == 1 and e1[0]["kind"] == "reduce"
     # Next bar, same proposal: cooldown (last intervention 15m ago).
     kl2 = kl[1:] + [dict(kl[-1], timestamp=kl[-1]["timestamp"] + TF,

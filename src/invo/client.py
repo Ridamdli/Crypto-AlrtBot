@@ -491,11 +491,10 @@ class InvoClient:
         )
         return {"dry_run": False, "payload": payload, "response": result}
 
-    # ── paper trade management: TP1 + SL only ─────────────────────────
+    # ── paper trade management: TP + SL only ──────────────────────────
     # The investments API carries ONE priceTarget and ONE stopLoss per
-    # position. TP2/TP3 do not exist server-side and are never sent here:
-    # callers pass the active plan's tp1 as price_target. Same rule for
-    # modify and create (see share_paper_trade: price_target=sig.tp1).
+    # position: callers pass the plan's single tp as price_target. Same
+    # rule for modify and create (see share_paper_trade: price_target=sig.tp).
     @staticmethod
     def build_paper_modify_payload(
         base_id: str,
@@ -561,7 +560,7 @@ class InvoClient:
         liquidation_price: Optional[float] = None,
         dry_run: bool = True,
     ) -> Dict[str, Any]:
-        """Move TP1/SL on one paper investment. No real money.
+        """Move TP/SL on one paper investment. No real money.
 
         dry_run=True (default): build + validate payload, POST nothing.
         """
@@ -738,7 +737,7 @@ class InvoClient:
             symbol=signal["symbol"],
             side=signal["side"],
             leverage=signal.get("leverage", 10),
-            tp_px=signal.get("tp1"),
+            tp_px=signal.get("tp", signal.get("tp1")),
             sl_px=signal.get("stop_loss"),
             portfolio_id=portfolio_id,
         )

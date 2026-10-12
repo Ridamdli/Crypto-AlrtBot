@@ -153,9 +153,7 @@ class MomentumFilterStrategy(BaseStrategy):
                 
                 risk_dist = current_price - sl_price
                 if risk_dist > 0:
-                    tp1 = current_price + risk_dist * 2.0
-                    tp2 = current_price + risk_dist * 3.0
-                    tp3 = current_price + risk_dist * 4.0
+                    tp = current_price + risk_dist * 2.0
                     
                     highest_lookback, _ = self._get_recent_extremes(pd.DataFrame(klines_15m), self.params["lookback"])
                     
@@ -164,9 +162,7 @@ class MomentumFilterStrategy(BaseStrategy):
                         side="LONG",
                         entry_price=current_price,
                         stop_loss=sl_price,
-                        tp1=tp1,
-                        tp2=tp2,
-                        tp3=tp3,
+                        tp=tp,
                         confidence=70,
                         strategy_id=f"momentum_{self.params['lookback']}",
                         strategy_version="1.0.0",
@@ -183,11 +179,7 @@ class MomentumFilterStrategy(BaseStrategy):
                             "Volume dries up",
                         ],
                         management_rules=[
-                            "TP1: close 50%",
-                            "TP2: close 25%",
-                            "TP3: close 25%",
-                            "After TP1: SL to entry",
-                            "After TP2: trailing SL to TP1",
+                        "TP: close 100% of position",
                         ],
                         metadata={
                             "expansion_pct": expansion_pct,
@@ -213,9 +205,7 @@ class MomentumFilterStrategy(BaseStrategy):
                 
                 risk_dist = sl_price - current_price
                 if risk_dist > 0:
-                    tp1 = current_price - risk_dist * 2.0
-                    tp2 = current_price - risk_dist * 3.0
-                    tp3 = current_price - risk_dist * 4.0
+                    tp = current_price - risk_dist * 2.0
                     
                     _, lowest_lookback = self._get_recent_extremes(pd.DataFrame(klines_15m), self.params["lookback"])
                     
@@ -224,9 +214,7 @@ class MomentumFilterStrategy(BaseStrategy):
                         side="SHORT",
                         entry_price=current_price,
                         stop_loss=sl_price,
-                        tp1=tp1,
-                        tp2=tp2,
-                        tp3=tp3,
+                        tp=tp,
                         confidence=70,
                         strategy_id=f"momentum_{self.params['lookback']}",
                         strategy_version="1.0.0",
@@ -243,11 +231,7 @@ class MomentumFilterStrategy(BaseStrategy):
                             "Volume dries up",
                         ],
                         management_rules=[
-                            "TP1: close 50%",
-                            "TP2: close 25%",
-                            "TP3: close 25%",
-                            "After TP1: SL to entry",
-                            "After TP2: trailing SL to TP1",
+                        "TP: close 100% of position",
                         ],
                         metadata={
                             "expansion_pct": expansion_pct,

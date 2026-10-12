@@ -222,7 +222,7 @@ def main():
     config.validate()  # This will validate TP/RR consistency
     
     logger.info(f"Config: {config.compute_hash()}, OI mode: {args.oi_mode}")
-    logger.info(f"TP ladder: {config.tp.r_multiples}, min_rr_tp1: {config.risk.min_rr_tp1}")
+    logger.info(f"TP: {config.tp.r_multiple}R, min_rr: {config.risk.min_rr}")
 
     with client.store.get_connection() as conn:
         res = conn.execute("SELECT MIN(timestamp), MAX(timestamp) FROM klines WHERE interval='15m'").fetchone()

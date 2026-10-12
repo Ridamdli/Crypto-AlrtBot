@@ -550,7 +550,7 @@ class TestStrategyGeometry:
         VolumeBreakoutStrategy,
     ])
     def test_long_signal_geometry(self, StrategyClass):
-        """LONG: entry > SL, TP1/2/3 > entry."""
+        """LONG: entry > SL, single TP > entry."""
         strategy = StrategyClass({"params": {}}, "TESTUSDT")
         
         # Create klines that should trigger a LONG
@@ -570,9 +570,7 @@ class TestStrategyGeometry:
         for cand in candidates:
             if cand.side == "LONG":
                 assert cand.entry_price > cand.stop_loss, f"LONG SL must be below entry: {StrategyClass.__name__}"
-                assert cand.tp1 > cand.entry_price, f"LONG TP1 must be above entry: {StrategyClass.__name__}"
-                assert cand.tp2 > cand.tp1, f"LONG TP2 > TP1: {StrategyClass.__name__}"
-                assert cand.tp3 > cand.tp2, f"LONG TP3 > TP2: {StrategyClass.__name__}"
+                assert cand.tp > cand.entry_price, f"LONG TP must be above entry: {StrategyClass.__name__}"
     
     @pytest.mark.parametrize("StrategyClass", [
         DonchianBreakoutStrategy,
@@ -583,7 +581,7 @@ class TestStrategyGeometry:
         VolumeBreakoutStrategy,
     ])
     def test_short_signal_geometry(self, StrategyClass):
-        """SHORT: entry < SL, TP1/2/3 < entry."""
+        """SHORT: entry < SL, single TP < entry."""
         strategy = StrategyClass({"params": {}}, "TESTUSDT")
         
         klines = _make_klines(50, 100.0, "down")
@@ -602,9 +600,7 @@ class TestStrategyGeometry:
         for cand in candidates:
             if cand.side == "SHORT":
                 assert cand.entry_price < cand.stop_loss, f"SHORT SL must be above entry: {StrategyClass.__name__}"
-                assert cand.tp1 < cand.entry_price, f"SHORT TP1 must be below entry: {StrategyClass.__name__}"
-                assert cand.tp2 < cand.tp1, f"SHORT TP2 < TP1: {StrategyClass.__name__}"
-                assert cand.tp3 < cand.tp2, f"SHORT TP3 < TP2: {StrategyClass.__name__}"
+                assert cand.tp < cand.entry_price, f"SHORT TP must be below entry: {StrategyClass.__name__}"
 
 
 if __name__ == "__main__":

@@ -49,7 +49,7 @@ class JesseAdapter:
             writer = csv.writer(f)
             writer.writerow([
                 "signal_id", "timestamp", "symbol", "side",
-                "entry", "sl", "tp1", "tp2", "tp3", "leverage", "confidence"
+                "entry", "sl", "tp", "leverage", "confidence"
             ])
             for s in signals:
                 writer.writerow([
@@ -59,9 +59,7 @@ class JesseAdapter:
                     s.get("side"),
                     s.get("entry"),
                     s.get("stop_loss"),
-                    s.get("tp1"),
-                    s.get("tp2"),
-                    s.get("tp3"),
+                    s.get("tp", s.get("tp1")),
                     s.get("leverage"),
                     s.get("confidence"),
                 ])
