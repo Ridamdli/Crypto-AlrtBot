@@ -182,6 +182,13 @@ class SimLedger:
 
         Returns a would_overdraft FLAG — callers must treat it as monitoring
         signal, never as permission. remote_remaining=None means unknown.
+
+        NOTE (M-B review outcome): this method has NO production callers as
+        of this commit; it exists for monitoring/tests. Do NOT wire its flag
+        into share gating or sizing without revisiting the observational-only
+        contract — blocking on a stale local mirror could suppress valid
+        trades, which is worse than the server-side rejection it would
+        preempt. Documentation-only status is deliberate, not an omission.
         """
         snap = self.snapshot()
         if remote_remaining is None:

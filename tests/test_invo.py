@@ -574,6 +574,110 @@ def test_scheduler_marks_gone_positions_closed(monkeypatch, tmp_path):
     assert calls == []
 
 
+def _terminal_oc(sid, status, entry_triggered=True, final=True):
+    return {"signal_id": sid, "symbol": "BTCUSDT", "status": status,
+            "entry_triggered": entry_triggered, "final": final}
+
+
+def test_terminal_outcomes_release_without_credit(monkeypatch, tmp_path):
+    """TP3_HIT / STOPPED_OUT / LIQUIDATED (entered) free their reservations
+    with NO credit — local finality is not remote-settlement evidence."""
+    from src.scheduler import BotScheduler
+    from src.invo.sim_ledger import SimLedger
+    monkeypatch.chdir(tmp_path)
+    sim = SimLedger(storage_dir="data_store")
+    for i, st in enumerate(("TP3_HIT", "STOPPED_OUT", "LIQUIDATED")):
+        sim.reserve(f"SIG-T{i}", "BTCUSDT", 10.0)
+    outcomes = {f"SIG-T{i}": _terminal_oc(f"SIG-T{i}", st)
+                for i, st in enumerate(("TP3_HIT", "STOPPED_OUT", "LIQUIDATED"))}
+    assert BotScheduler._release_terminal_reservations(outcomes, sim) == 3
+    assert sim.snapshot()["reserved_total"] == 0.0
+    # No credit fabricated: released_total stays zero.
+    assert sim.snapshot()["released_total"] == 0.0
+
+
+def test_expired_and_unresolved_preserved(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    from src.invo.sim_ledger import SimLedger
+    monkeypatch.chdir(tmp_path)
+    sim = SimLedger(storage_dir="data_store")
+    sim.reserve("SIG-EXP", "BTCUSDT", 10.0)
+    sim.reserve("SIG-ACT", "ETHUSDT", 5.0)
+    sim.reserve("SIG-NOTRIG", "SOLUSDT", 7.0)
+    outcomes = {
+        # EXPIRED final: entry never triggered locally; remote may be open.
+        "SIG-EXP": _terminal_oc("SIG-EXP", "EXPIRED"),
+        # Non-final ACTIVE: still live on both sides.
+        "SIG-ACT": _terminal_oc("SIG-ACT", "ACTIVE", final=False),
+        # Terminal status but never entered: inconsistent data, preserve.
+        "SIG-NOTRIG": _terminal_oc("SIG-NOTRIG", "TP3_HIT",
+                                   entry_triggered=False),
+    }
+    assert BotScheduler._release_terminal_reservations(outcomes, sim) == 0
+    assert sim.snapshot()["reserved_total"] == 22.0
+
+
+def test_terminal_release_survives_malformed_records(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    from src.invo.sim_ledger import SimLedger
+    monkeypatch.chdir(tmp_path)
+    sim = SimLedger(storage_dir="data_store")
+    sim.reserve("SIG-OK", "BTCUSDT", 10.0)
+    outcomes = {
+        "SIG-OK": _terminal_oc("SIG-OK", "STOPPED_OUT"),
+        "SIG-NONE": None,
+        "SIG-STR": "garbage",
+        "SIG-NOKEYS": {"final": True},  # no status/entry fields
+    }
+    assert BotScheduler._release_terminal_reservations(outcomes, sim) == 1
+    assert sim.snapshot()["reserved_total"] == 0.0
+
+
+def test_terminal_release_idempotent(monkeypatch, tmp_path):
+    from src.scheduler import BotScheduler
+    from src.invo.sim_ledger import SimLedger
+    monkeypatch.chdir(tmp_path)
+    sim = SimLedger(storage_dir="data_store")
+    sim.reserve("SIG-1", "BTCUSDT", 10.0)
+    outcomes = {"SIG-1": _terminal_oc("SIG-1", "TP3_HIT")}
+    assert BotScheduler._release_terminal_reservations(outcomes, sim) == 1
+    assert BotScheduler._release_terminal_reservations(outcomes, sim) == 0
+
+
+def test_track_outcomes_wires_terminal_release(monkeypatch, tmp_path):
+    """End-to-end through _track_outcomes with stubbed tracker/portfolio:
+    natural terminal outcomes free the mirror; EXPIRED stays reserved."""
+    from src.scheduler import BotScheduler
+    from src.invo.sim_ledger import SimLedger
+    import src.tracking.outcome_tracker as _otmod
+    import src.papertrade.portfolio as _ppmod
+    monkeypatch.chdir(tmp_path)
+    sim = SimLedger(storage_dir="data_store")
+    sim.reserve("SIG-WIN", "BTCUSDT", 10.0)
+    sim.reserve("SIG-EXP", "ETHUSDT", 5.0)
+
+    outcomes = {"SIG-WIN": _terminal_oc("SIG-WIN", "TP3_HIT"),
+                "SIG-EXP": _terminal_oc("SIG-EXP", "EXPIRED")}
+
+    class _StubTracker:
+        def track_all(self):
+            return {"finalized_this_run": 1}
+        def load_ledger(self):
+            return outcomes
+
+    class _StubPortfolio:
+        def settle(self, ledger):
+            assert ledger is outcomes
+            return {"newly_booked": 1}
+
+    monkeypatch.setattr(_otmod, "OutcomeTracker", lambda *a, **k: _StubTracker())
+    monkeypatch.setattr(_ppmod, "PaperPortfolio", lambda *a, **k: _StubPortfolio())
+    sched = BotScheduler.__new__(BotScheduler)
+    sched._track_outcomes()  # must not raise
+    snap = SimLedger(storage_dir="data_store").snapshot()
+    assert snap["reserved_total"] == 5.0  # only SIG-EXP remains
+
+
 def test_scheduler_sync_gated_by_dry_run_and_apply(monkeypatch, tmp_path):
     from src.scheduler import BotScheduler
     import src.invo.client as _mod

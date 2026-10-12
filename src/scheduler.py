@@ -556,9 +556,58 @@ class BotScheduler:
             from src.papertrade.portfolio import PaperPortfolio
             tracker = OutcomeTracker()
             tracker.track_all()
-            PaperPortfolio().settle(tracker.load_ledger())
+            outcomes = tracker.load_ledger()
+            PaperPortfolio().settle(outcomes)
         except Exception as e:
             logger.warning(f"[Scheduler] Outcome tracking skipped: {e}")
+            return
+        # Observational mirror only: free reservations for locally-terminal
+        # ENTERED positions. Separate guard so mirror work can never break
+        # tracking/settlement above.
+        try:
+            from src.invo.sim_ledger import SimLedger
+            sim = SimLedger(storage_dir="data_store")
+            freed = self._release_terminal_reservations(outcomes, sim)
+            if freed:
+                logger.info(f"[Scheduler] Sim mirror freed {freed} terminal reservation(s).")
+        except Exception as e:
+            logger.warning(f"[Scheduler] Sim terminal-release skipped: {e}")
+
+    @staticmethod
+    def _release_terminal_reservations(outcomes, sim) -> int:
+        """Release mirror reservations for natural terminal outcomes.
+
+        Eligible IFF all hold (conservative conjunction):
+        - outcome record is final, AND
+        - status in the tracker's TERMINAL_STATUSES
+          (TP3_HIT / STOPPED_OUT / LIQUIDATED), AND
+        - entry_triggered is truthy (the local trade actually entered).
+
+        Everything else is preserved, especially EXPIRED (entry never
+        triggered locally tells us nothing about the remote position, which
+        was opened at share time) and non-final records. Release uses
+        credit=None: the reservation is freed WITHOUT crediting, because a
+        local terminal outcome is not authoritative evidence of remote
+        settlement — the remote leg may still be open, in which case the
+        next reconcile surfaces it as remote_only divergence (observable).
+        Idempotent: repeat runs release nothing further.
+        """
+        from src.tracking.outcome_tracker import TERMINAL_STATUSES
+        freed = 0
+        for sid, oc in (outcomes.items() if isinstance(outcomes, dict) else []):
+            try:
+                if not isinstance(oc, dict) or not oc.get("final"):
+                    continue
+                if oc.get("status") not in TERMINAL_STATUSES:
+                    continue
+                if not oc.get("entry_triggered"):
+                    continue
+                out = sim.release(sid, credit=None,
+                                  note="local-terminal-unverified")
+                freed += 1 if out.get("released") else 0
+            except Exception:
+                continue  # one bad record must never block the rest
+        return freed
 
     def _record_scan(self, scan_type: str, status: str, candidates: int, published: int) -> None:
         """Append a heartbeat entry so the dashboard proves every worker cycle ran."""
