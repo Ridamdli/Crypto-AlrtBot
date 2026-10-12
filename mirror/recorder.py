@@ -14,7 +14,10 @@ logger = get_logger(__name__)
 
 BASE = "https://api.invoapp.com"
 APP_HEADERS = {"x-app-build-number": "84", "x-app-release": "1.1.0",
-               "x-app-version": "0.0.86", "x-platform": "web"}
+               "x-app-version": "0.0.86", "x-platform": "web",
+               "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/154.0.0.0 Safari/537.36")}
 
 
 def decode_exp(token: str) -> Optional[int]:

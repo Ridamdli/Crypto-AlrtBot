@@ -18,6 +18,9 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 FEED_URL = "https://api.invoapp.com/v1_0/posts/get_feed"
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/154.0.0.0 Safari/537.36")
 
 
 def classify_post(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -69,6 +72,7 @@ def fetch_feed(token: str, page: int = 1, size: int = 20) -> List[Dict[str, Any]
                            "params": {"page": page, "size": size}}).encode()
     req = _req.Request(FEED_URL, data=payload,
                        headers={"Content-Type": "application/json",
+                                "User-Agent": BROWSER_UA,
                                 "authorization": f"Bearer {token}",
                                 "x-app-version": "0.0.75",
                                 "x-platform": "web"})
