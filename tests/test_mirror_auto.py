@@ -460,6 +460,34 @@ def test_hl_minimum_bump_and_skip(tmp_path):
     assert any("under-hl-minimum" in n for n in got)
 
 
+def test_cap_skipped_base_retries_when_slot_frees(tmp_path):
+    got = []
+    feed = PostFeed([])
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()
+    bot = AutoBot(mc, _cfg(live=True, max_concurrent=1), hl=hl,
+                  session=FakeSession(), watcher=FeedWatcher(fetch_fn=feed),
+                  notify_fn=got.append)
+    import mirror.auto as _auto
+    import mirror.feed as _feed
+    _feed_orig = _feed.fetch_open_positions
+    opens = [
+        {"baseId": "B-HYPE", "ticker": "HYPE", "side": "SHORT", "leverage": 4},
+        {"baseId": "B-LINK", "ticker": "LINK", "side": "SHORT", "leverage": 5}]
+    _feed.fetch_open_positions = lambda *a, **k: opens
+    try:
+        out = bot.bootstrap_from_sims(object(), "tok")
+        assert out["mimicked"] == 1 and out["skipped"] == 1
+        assert "sims-B-LINK" not in bot.store.seen_ids()  # retryable
+        bot.store.audit("mimic_closed", {"coin": "HYPE", "margin_usd": 1})
+        out2 = bot.bootstrap_from_sims(object(), "tok")
+        assert out2["mimicked"] == 1  # LINK got its slot
+        assert [c for c, _, _, _ in hl.opens].count("LINK") == 1
+    finally:
+        _feed.fetch_open_positions = _feed_orig
+
+
 def test_stranger_posts_never_mimicked(tmp_path):
     """Pariston-only guarantee: other traders' opens, closes and updates
     are ignored entirely — no orders, no records, no close attempts."""

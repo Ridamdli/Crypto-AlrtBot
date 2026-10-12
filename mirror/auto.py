@@ -239,10 +239,10 @@ class AutoBot:
         return healed
 
     def bootstrap_from_sims(self, client, token: str) -> Dict[str, Any]:
-        """One-shot: mimic Pariston's ALREADY-open positions (feed only
-        emits new posts, so startup would otherwise miss them). Each open
-        not already mirrored becomes one capped mimic; seen-marked so a
-        restart never re-fires. Returns a summary."""
+        """Sync Pariston's ALREADY-open positions (feed only emits new
+        posts). Cap-skipped coins stay unmarked and retry on later syncs;
+        mimicked/dry/wallet-held outcomes are terminal for their base id.
+        Returns a summary."""
         from mirror.feed import fetch_open_positions
         summary: Dict[str, Any] = {"mimicked": 0, "skipped": 0, "errors": 0}
         try:
@@ -273,7 +273,6 @@ class AutoBot:
                         continue
                 except Exception as e:
                     logger.warning(f"[Auto] position check failed: {e}")
-            self.store.mark_seen(f"sims-{base}")
             ev = {"action": "open", "post_id": f"sims-{base}",
                   "base_id": base, "base_short_id": "",
                   "ticker": ticker, "side": pos.get("side", "SHORT"),
@@ -281,10 +280,15 @@ class AutoBot:
                   "owner_id": PARISTON_OWNER_ID,
                   "portfolio_id": PARISTON_PORTFOLIO_ID}
             try:
-                self._mimic_open(ev, summary)
+                outcome = self._mimic_open(ev, summary)
             except Exception as e:
                 summary["errors"] += 1
                 logger.warning(f"[Auto] bootstrap mimic failed: {e}")
+                continue
+            # Cap/floor skips are retried on later syncs (slots free up);
+            # everything else is terminal for this base id.
+            if outcome != "cap-skipped":
+                self.store.mark_seen(f"sims-{base}")
         logger.info(f"[Auto] bootstrap: {summary}")
         return summary
 
@@ -317,22 +321,26 @@ class AutoBot:
         logger.info(f"[Auto] cycle: {summary}")
         return summary
 
-    def _mimic_open(self, ev: Dict[str, Any], summary: Dict[str, Any]) -> None:
+    def _mimic_open(self, ev: Dict[str, Any], summary: Dict[str, Any]) -> str:
+        """Attempt one mimic. Returns the outcome: 'mimicked', 'dry',
+        'cap-skipped' (retryable when slots free up), 'empty' (no coin),
+        or 'hl-skipped' (terminal: wallet-held/under-minimum handled by
+        callers). Raises on execution failure."""
         coin = (ev.get("ticker") or "").replace("USDT", "").replace("USDC", "")
         side = str(ev.get("side") or "LONG").upper()
         leverage = int(ev.get("leverage") or 10)
         if not coin:
-            return
+            return "empty"
         if self.open_count() >= self.cfg.max_concurrent:
             summary["skipped"] += 1
             self._notify(f"SKIP {coin}: max-concurrent-{self.cfg.max_concurrent}")
-            return
+            return "cap-skipped"
         margin, reason = decide_live_size(self._account_usd(),
                                           self.committed_usd(), self.cfg)
         if margin is None:
             summary["skipped"] += 1
             self._notify(f"SKIP {coin}: {reason}")
-            return
+            return "cap-skipped" if "floor" in reason or "concurrent" in reason else "hl-skipped"
         # HL $10 order minimum: meet it within caps+floor, else skip loudly.
         import math as _math
         if margin * leverage < 10.5:
@@ -347,7 +355,7 @@ class AutoBot:
                 summary["skipped"] += 1
                 self._notify(f"SKIP {coin}: under-hl-minimum "
                              f"(${margin * leverage:.2f} notional)")
-                return
+                return "hl-skipped"
         self._notify(f"Pariston {coin} {side} {leverage}x -> mimic ${margin} "
                      f"(acct ${self._account_usd():.2f}) "
                      f"[{reason}] {'LIVE' if self.cfg.live else 'DRY-RUN'}")
@@ -357,7 +365,7 @@ class AutoBot:
                              {"source": ev.get("base_id"), "coin": coin,
                               "side": side, "leverage": leverage,
                               "margin_usd": margin})
-            return
+            return "dry"
         before = self.hl.position(coin)
         qty_before = before["szi"] if before else "0"
         fill = self.hl.market_open(coin, side, margin, leverage)
@@ -383,6 +391,7 @@ class AutoBot:
             except Exception as e:
                 self._notify(f"RECORD FAILED {coin} (fill stands): {e}")
                 logger.warning(f"[Auto] record failed: {e}")
+        return "mimicked"
 
     def _tpsl_of(self, coin: str) -> List[str]:
         """Latest resting trigger cloids for a coin (empty when none)."""
@@ -486,9 +495,20 @@ class AutoBot:
             self.bootstrap_from_sims(client, client.access_token or "")
         except Exception as e:
             logger.warning(f"[Auto] startup bootstrap skipped: {e}")
+        n = 0
         while True:
             try:
                 self.run_once(token)
+                # Sims re-sync every 4th cycle (~60s): picks up already-open
+                # coins skipped earlier on caps, and anything the feed missed.
+                n += 1
+                if n % 4 == 0:
+                    try:
+                        client = self._client()
+                        self.bootstrap_from_sims(
+                            client, client.access_token or "")
+                    except Exception as e:
+                        logger.warning(f"[Auto] periodic sync skipped: {e}")
             except Exception as e:
                 logger.warning(f"[Auto] cycle crashed (contained): {e}")
             time.sleep(self.mirror_cfg.poll_s)
