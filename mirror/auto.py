@@ -207,6 +207,24 @@ class AutoBot:
                 del out[d["coin"]]
         return out
 
+    def reconcile_ledger(self) -> int:
+        """Self-heal: ledger-open coins flat on HL (manual closes, liquidations)
+        are marked closed so caps/concurrency reflect reality. Returns count."""
+        if self.hl is None:
+            return 0
+        healed = 0
+        for coin, info in list(self.mirrored_coins().items()):
+            try:
+                if self.hl.position(coin) is None:
+                    self.store.audit("mimic_closed", {
+                        "coin": coin, "margin_usd": info.get("margin_usd", 0),
+                        "note": "reconciled-flat"})
+                    healed += 1
+                    logger.info(f"[Auto] reconciled flat {coin}")
+            except Exception as e:
+                logger.warning(f"[Auto] reconcile check failed: {e}")
+        return healed
+
     def bootstrap_from_sims(self, client, token: str) -> Dict[str, Any]:
         """One-shot: mimic Pariston's ALREADY-open positions (feed only
         emits new posts, so startup would otherwise miss them). Each open
@@ -381,6 +399,7 @@ class AutoBot:
                     f"(live={self.cfg.live}, poll={self.mirror_cfg.poll_s}s)")
         try:
             client = self._client()
+            self.reconcile_ledger()
             self.bootstrap_from_sims(client, client.access_token or "")
         except Exception as e:
             logger.warning(f"[Auto] startup bootstrap skipped: {e}")

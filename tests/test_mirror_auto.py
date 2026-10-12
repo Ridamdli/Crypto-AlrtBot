@@ -360,6 +360,22 @@ def test_bootstrap_skips_wallet_held_coin(tmp_path):
         _feed.fetch_open_positions = _feed_orig
 
 
+def test_reconcile_heals_manually_closed(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()  # flat everywhere
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    bot.store.audit("mimicked", {"coin": "LINK", "margin_usd": 4.61,
+                                 "source": "SRC-9"})
+    assert bot.open_count() == 1
+    assert bot.reconcile_ledger() == 1
+    assert bot.open_count() == 0 and bot.committed_usd() == 0.0
+    assert bot.reconcile_ledger() == 0  # idempotent
+
+
 def test_stranger_posts_never_mimicked(tmp_path):
     """Pariston-only guarantee: other traders' opens, closes and updates
     are ignored entirely — no orders, no records, no close attempts."""
