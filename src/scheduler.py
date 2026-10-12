@@ -17,6 +17,19 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+def _ticker_to_symbol(ticker: str) -> str:
+    """Map an Invo sims ticker ('ZEC') to a signal symbol ('ZECUSDT').
+
+    Our universe is USDT-quoted; a bare coin gets the suffix, an already
+    qualified ticker passes through. Empty in, empty out.
+    """
+    t = (ticker or "").strip().upper()
+    if not t:
+        return ""
+    return t if t.endswith(("USDT", "USDC")) else t + "USDT"
+
+
 class BotScheduler:
     """
     Lightweight local scheduler per PRD §28 and Phase 6.
@@ -205,14 +218,43 @@ class BotScheduler:
                             _outcomes = {}
                 except (FileNotFoundError, ValueError, OSError):
                     _outcomes = {}
+                # Ground truth (one cheap read): the coins actually open in
+                # the portfolio right now. A non-final outcome must NOT block
+                # a share when Invo shows the slot empty — externally closed
+                # (or bot-closed) positions never finalize in the tracker,
+                # and the old screen blocked their coin for up to 24h
+                # (seen live: DOGE #8 skipped on a LONG closed 21h earlier).
+                # Unreadable -> None -> legacy ledger-only screen.
+                try:
+                    _snap = client.list_paper_investments(token, portfolio)
+                    _invs = (_snap.get("investments", [])
+                             if isinstance(_snap, dict) else [])
+                    invo_open = {_ticker_to_symbol(str(_i.get("ticker") or ""))
+                                 for _i in _invs if isinstance(_i, dict)}
+                    invo_open.discard("")
+                except Exception as _e:
+                    logger.warning("[Scheduler] Invo presence unreadable, "
+                                   f"ledger screen only: {_e}")
+                    invo_open = None
+                just_shared: set = set()
             else:
                 token = ""
                 _outcomes = {}
+                invo_open = None
+                just_shared = set()
             for sig in published:
                 try:
-                    if not dry and client.already_shared_open(sig.symbol, portfolio, _outcomes):
-                        logger.info(f"[Scheduler] Invo share skipped (open position already shared): {sig.symbol}")
-                        continue
+                    if not dry:
+                        if sig.symbol in just_shared:
+                            logger.info(f"[Scheduler] Invo share skipped (shared earlier this cycle): {sig.symbol}")
+                            continue
+                        if invo_open is not None:
+                            if sig.symbol in invo_open:
+                                logger.info(f"[Scheduler] Invo share skipped (open in portfolio): {sig.symbol}")
+                                continue
+                        elif client.already_shared_open(sig.symbol, portfolio, _outcomes):
+                            logger.info(f"[Scheduler] Invo share skipped (open position already shared): {sig.symbol}")
+                            continue
                     out = client.share_paper_trade(
                         {"symbol": sig.symbol, "side": sig.side,
                          "leverage": sig.leverage, "stop_loss": sig.stop_loss,
@@ -240,9 +282,11 @@ class BotScheduler:
                                 sim_size)
                         except Exception as re:
                             logger.warning(f"[Scheduler] Sim reserve skipped: {re}")
+                        just_shared.add(sig.symbol)
                 except InvoConflictError as e:
                     # Setup already shared (same coin open) — not an error.
                     logger.info(f"[Scheduler] Invo share skipped (already open): {e}")
+                    just_shared.add(sig.symbol)
                     record_share("data_store", getattr(sig, "signal_id", "?"), {
                         "baseIds": e.conflicting_base_ids,
                         "already_open": True,

@@ -999,3 +999,134 @@ def test_fetch_position_history_empty_items_returns_empty(monkeypatch, tmp_path)
     monkeypatch.setattr(c.session, "post",
                         lambda *a, **k: _Resp(200, '{"success": true, "items": []}'))
     assert c.fetch_position_history("b9", "TOK") == {}
+
+
+def _share_sig(sid="SIG-NEW", symbol="DOGEUSDT", side="SHORT"):
+    from types import SimpleNamespace
+    return SimpleNamespace(signal_id=sid, symbol=symbol, side=side,
+                           leverage=10, stop_loss=0.08, entry=0.086,
+                           tp1=0.084)
+
+
+class _FakeShareClient(InvoClient):
+    """Fake InvoClient for the share-guard tests (no network).
+
+    Subclasses the real client so already_shared_open keeps its true
+    ledger logic; only transport/auth methods are stubbed.
+    """
+
+    def __init__(self, investments=None, fail_snapshot=False):
+        self.investments = investments if investments is not None else []
+        self.fail_snapshot = fail_snapshot
+        self.shared = []
+        self.access_token = "tok"
+
+    def ensure_auth(self, **kwargs):
+        return True
+
+    def list_paper_investments(self, token, portfolio_id):
+        if self.fail_snapshot:
+            raise RuntimeError("sims down")
+        return {"portfolioRemainingSim": 100.0,
+                "investments": [{"baseId": f"b-{i}", "ticker": t}
+                                for i, t in enumerate(self.investments)]}
+
+    def share_paper_trade(self, signal, token, portfolio_id, entry_sim,
+                          price_target, dry_run):
+        assert dry_run is False
+        self.shared.append(signal["symbol"])
+        return {"dry_run": False,
+                "response": {"baseIds": ["nb-1"], "remainingSim": 95.0}}
+
+
+def _share_env(monkeypatch):
+    monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
+    monkeypatch.setenv("INVO_PAPER_DRY_RUN", "false")
+    monkeypatch.setenv("INVO_EMAIL", "e")
+    monkeypatch.setenv("INVO_GMAIL_APP_PASSWORD", "p")
+    monkeypatch.setenv("INVO_PORTFOLIO_ID", "pf")
+    monkeypatch.setenv("INVO_DEVICE_ID", "d")
+    monkeypatch.setenv("INVO_SIM_SIZE", "5.0")
+
+
+def _seed_prior_share(tmp_path, final):
+    import json as _json
+    import os as _os
+    import time as _time
+    from src.invo.client import record_share
+    _os.makedirs(tmp_path / "data_store", exist_ok=True)
+    with open(tmp_path / "data_store" / "outcomes.json", "w",
+              encoding="utf-8") as f:
+        _json.dump({"SIG-OLD": {"final": final}}, f)
+    record_share(str(tmp_path / "data_store"), "SIG-OLD",
+                 {"symbol": "DOGEUSDT", "side": "LONG", "portfolioId": "pf",
+                  "baseIds": ["b-old"],
+                  "shared_at": int(_time.time())})
+
+
+def _run_share(monkeypatch, tmp_path, client, signals):
+    from src.scheduler import BotScheduler
+    from src.invo import client as _client_mod
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_client_mod, "InvoClient",
+                        lambda *a, **k: client)
+    sched = BotScheduler.__new__(BotScheduler)
+    sched._share_paper_to_invo(signals)
+
+
+def test_share_guard_shares_when_invo_empty_despite_open_outcome(
+        monkeypatch, tmp_path):
+    """The DOGE #8 fix: a non-final outcome must not block a share when the
+    Invo slot is actually empty (externally closed position)."""
+    _share_env(monkeypatch)
+    _seed_prior_share(tmp_path, final=False)
+    client = _FakeShareClient(investments=[])
+    _run_share(monkeypatch, tmp_path, client, [_share_sig()])
+    assert client.shared == ["DOGEUSDT"]
+
+
+def test_share_guard_skips_coin_open_in_invo(monkeypatch, tmp_path):
+    """Ground truth wins both ways: Invo-open coin is skipped even when the
+    old outcome is final (server would conflict)."""
+    _share_env(monkeypatch)
+    _seed_prior_share(tmp_path, final=True)
+    client = _FakeShareClient(investments=["DOGE"])
+    _run_share(monkeypatch, tmp_path, client, [_share_sig()])
+    assert client.shared == []
+
+
+def test_share_guard_legacy_when_snapshot_fails_open_outcome(
+        monkeypatch, tmp_path):
+    """Unreadable presence -> legacy ledger screen (safe direction)."""
+    _share_env(monkeypatch)
+    _seed_prior_share(tmp_path, final=False)
+    client = _FakeShareClient(fail_snapshot=True)
+    _run_share(monkeypatch, tmp_path, client, [_share_sig()])
+    assert client.shared == []
+
+
+def test_share_guard_legacy_when_snapshot_fails_final_outcome(
+        monkeypatch, tmp_path):
+    _share_env(monkeypatch)
+    _seed_prior_share(tmp_path, final=True)
+    client = _FakeShareClient(fail_snapshot=True)
+    _run_share(monkeypatch, tmp_path, client, [_share_sig()])
+    assert client.shared == ["DOGEUSDT"]
+
+
+def test_share_guard_same_cycle_dedup(monkeypatch, tmp_path):
+    """Two same-coin signals in one cycle -> exactly one POST."""
+    _share_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    client = _FakeShareClient(investments=[])
+    _run_share(monkeypatch, tmp_path, client,
+               [_share_sig("SIG-A"), _share_sig("SIG-B")])
+    assert client.shared == ["DOGEUSDT"]
+
+
+def test_ticker_to_symbol_mapping():
+    from src.scheduler import _ticker_to_symbol
+    assert _ticker_to_symbol("ZEC") == "ZECUSDT"
+    assert _ticker_to_symbol("zec") == "ZECUSDT"
+    assert _ticker_to_symbol("BTCUSDT") == "BTCUSDT"
+    assert _ticker_to_symbol("") == ""
