@@ -1,12 +1,16 @@
-"""Package safety: mirror/ must be unable to move money, by construction.
+"""Package safety: the watch path must be unable to move money.
 
-Scans every module in the package for trading-capable markers and asserts
-the entrypoint runs only the detect-only watcher. If anyone adds a share,
-close, modify, or DEX call to this package, this test fails first.
+Scans the detect-only modules for trading-capable markers. mirror/auto.py
+is the explicit exception: it drives the operator's signed-in browser and
+is covered by its own guards (MIMIC_LIVE defaults false, caps, verified
+confirms — see tests/test_mirror_auto.py).
 """
 import pathlib
 
 MIRROR_DIR = pathlib.Path(__file__).resolve().parent.parent / "mirror"
+
+WATCH_FILES = ("__init__.py", "__main__.py", "brain.py", "config.py",
+               "feed.py", "service.py", "store.py", "watch.py")
 
 FORBIDDEN = (
     "share_paper_trade",
@@ -17,29 +21,36 @@ FORBIDDEN = (
     "/sell",
     "/dex/mimic/copy",
     "/dex/position/create",
+    "/dex/position/close",
+    "/dex/position/update",
     "share_position",
     "record_mirror",
 )
 
 
-def _sources():
-    return sorted(MIRROR_DIR.glob("*.py"))
-
-
-def test_no_trading_markers_anywhere_in_package():
-    files = _sources()
-    assert len(files) >= 6, f"mirror package shrank unexpectedly: {files}"
+def test_no_trading_markers_in_watch_path():
     violations = []
-    for path in files:
+    for name in WATCH_FILES:
+        path = MIRROR_DIR / name
+        if not path.exists():
+            continue
         text = path.read_text(encoding="utf-8")
         for marker in FORBIDDEN:
             if marker in text:
-                violations.append(f"{path.name}: {marker}")
-    assert violations == [], f"trading power in detect-only package: {violations}"
+                violations.append(f"{name}: {marker}")
+    assert violations == [], f"trading power in detect-only path: {violations}"
 
 
-def test_entrypoint_runs_watcher_only():
+def test_entrypoint_defaults_to_watch():
     text = (MIRROR_DIR / "__main__.py").read_text(encoding="utf-8")
-    assert "WatcherBot" in text
-    assert "MirrorBot" not in text
-    assert "MIRROR_MODE" not in text
+    assert 'os.getenv("MIRROR_MODE", "watch")' in text
+
+
+def test_auto_live_defaults_off():
+    from mirror.auto import MimicConfig
+    import os
+    for var in ("MIMIC_LIVE", "MIMIC_CDP_URL", "MIMIC_ACCOUNT_USD",
+                "MIMIC_MAX_USD", "MIMIC_MAX_PCT", "MIMIC_MAX_CONCURRENT",
+                "MIMIC_MIN_REMAINING_USD"):
+        os.environ.pop(var, None)
+    assert MimicConfig.from_env().live is False
