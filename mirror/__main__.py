@@ -26,8 +26,16 @@ def main() -> None:
         missing = cfg.missing_auth()
         if missing:
             raise SystemExit(f"mirror misconfigured: missing {missing}")
-        hl = HlBridge(os.getenv("HL_AGENT_KEY", ""),
-                      os.getenv("HL_WALLET_ADDRESS", ""))
+        agent_key = os.getenv("HL_AGENT_KEY", "")
+        wallet = os.getenv("HL_WALLET_ADDRESS", "")
+        if mg.live and not (agent_key and wallet):
+            raise SystemExit("mirror misconfigured for LIVE: missing "
+                             "HL_AGENT_KEY / HL_WALLET_ADDRESS (refused to "
+                             "run live without execution credentials)")
+        if not mg.live:
+            print("[Mirror] dry-run mode: detection + sizing + audit, "
+                  "zero orders (set MIMIC_LIVE=true to execute).")
+        hl = HlBridge(agent_key, wallet)
         sess = TradingSession(
             refresh_token=os.getenv("INVO_TRADING_REFRESH", ""),
             access_token=os.getenv("INVO_TRADING_TOKEN", ""),

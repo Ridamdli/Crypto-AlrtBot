@@ -2,3 +2,5 @@ requests
 python-dotenv
 pandas
 pydantic
+hyperliquid-python-sdk>=0.24.0
+eth-account
