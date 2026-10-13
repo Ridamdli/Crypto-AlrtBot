@@ -488,6 +488,45 @@ def test_cap_skipped_base_retries_when_slot_frees(tmp_path):
         _feed.fetch_open_positions = _feed_orig
 
 
+def test_backfill_attaches_resolved_tpsl(tmp_path, monkeypatch):
+    import json as _json
+    main = tmp_path / "main_data"
+    main.mkdir()
+    _json.dump({"SIG-1": {"symbol": "HYPEUSDT", "side": "SHORT",
+                          "entry": 85.1, "tp": 79.8, "stop_loss": 87.8}},
+               open(main / "outcomes.json", "w"))
+    monkeypatch.setenv("MIMIC_MAIN_DATA_DIR", str(main))
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl(holdings={"HYPE"})
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    bot.store.audit("mimicked", {"coin": "HYPE", "margin_usd": 4.68,
+                                 "source": "SRC-1", "side": "SHORT"})
+    assert bot._backfill_tpsl() == 1
+    assert hl.orders == [("HYPE", "SHORT", 1.5, 79.8, 87.8)]
+    assert bot._backfill_tpsl() == 0  # idempotent
+
+
+def test_resolve_rejects_loose_match(tmp_path, monkeypatch):
+    import json as _json
+    main = tmp_path / "main_data"
+    main.mkdir()
+    _json.dump({"SIG-1": {"symbol": "HYPEUSDT", "side": "SHORT",
+                          "entry": 90.0, "tp": 79.8, "stop_loss": 87.8}},
+               open(main / "outcomes.json", "w"))
+    monkeypatch.setenv("MIMIC_MAIN_DATA_DIR", str(main))
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    bot = AutoBot(mc, _cfg(live=True), hl=FakeHl(), session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=lambda t: None)
+    assert bot._resolve_local_tpsl("HYPE", "SHORT", 85.269) == (None, None)
+    assert bot._resolve_local_tpsl("HYPE", "LONG", 85.269) == (None, None)
+
+
 def test_stranger_posts_never_mimicked(tmp_path):
     """Pariston-only guarantee: other traders' opens, closes and updates
     are ignored entirely — no orders, no records, no close attempts."""

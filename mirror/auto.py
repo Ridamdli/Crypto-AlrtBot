@@ -393,6 +393,65 @@ class AutoBot:
                 logger.warning(f"[Auto] record failed: {e}")
         return "mimicked"
 
+    def _resolve_local_tpsl(self, ticker: str, side: str,
+                            entry: float) -> tuple:
+        """Pariston's TP/SL for an open copy, sourced from our own bot's
+        outcome ledger (same setup, same entry). Returns (tp, sl | None).
+        Match requires same symbol+side and entry within 0.3% — anything
+        looser risks arming someone else's levels. No match, no triggers."""
+        import json as _json
+        import os as _os
+        path = _os.path.join(os.getenv("MIMIC_MAIN_DATA_DIR", "data_store"),
+                             "outcomes.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                ledger = _json.load(f)
+        except (FileNotFoundError, ValueError, OSError):
+            return None, None
+        if not isinstance(ledger, dict) or entry is None or entry <= 0:
+            return None, None
+        symbol = ticker if ticker.endswith("USDT") else ticker + "USDT"
+        best, best_dist = None, 0.003
+        for rec in ledger.values():
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("symbol") != symbol or \
+                    str(rec.get("side", "")).upper() != side.upper():
+                continue
+            try:
+                dist = abs(float(rec.get("entry", 0)) - entry) / entry
+            except (TypeError, ValueError, ZeroDivisionError):
+                continue
+            if dist <= best_dist:
+                tp = rec.get("tp", rec.get("tp1"))
+                sl = rec.get("stop_loss")
+                if tp is not None and sl is not None:
+                    best, best_dist = (tp, sl), dist
+        return best if best else (None, None)
+
+    def _backfill_tpsl(self) -> int:
+        """Attach triggers to mirrored coins missing them (sims-sourced
+        opens carry no TP/SL; feed posts do). Returns count attached."""
+        n = 0
+        for coin in list(self.mirrored_coins()):
+            if self._tpsl_of(coin):
+                continue
+            try:
+                pos = self.hl.position(coin) if self.hl else None
+                if pos is None:
+                    continue
+                side = "LONG" if float(pos.get("szi", 0) or 0) > 0 else "SHORT"
+                tp, sl = self._resolve_local_tpsl(
+                    coin, side, float(pos.get("entryPx", 0) or 0))
+                if tp is None or sl is None:
+                    continue
+                self._attach_tpsl(coin, side, {"tp": tp, "sl": sl})
+                if self._tpsl_of(coin):
+                    n += 1
+            except Exception as e:
+                logger.warning(f"[Auto] tpsl backfill failed {coin}: {e}")
+        return n
+
     def _tpsl_of(self, coin: str) -> List[str]:
         """Latest resting trigger cloids for a coin (empty when none)."""
         cloids: List[str] = []
@@ -507,6 +566,9 @@ class AutoBot:
                         client = self._client()
                         self.bootstrap_from_sims(
                             client, client.access_token or "")
+                        healed = self._backfill_tpsl()
+                        if healed:
+                            logger.info(f"[Auto] tpsl backfilled on {healed} coin(s)")
                     except Exception as e:
                         logger.warning(f"[Auto] periodic sync skipped: {e}")
             except Exception as e:
