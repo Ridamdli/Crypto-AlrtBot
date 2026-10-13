@@ -155,6 +155,14 @@ class AutoBot:
         self._notify_fn = notify_fn or (lambda t: logger.info(f"[Auto] {t}"))
         self._dash = {"at": 0.0, "signals": []}
         self._pariston_opens = 1
+        from mirror.eventlog import EventLog
+        self.events = EventLog(mirror_cfg.data_dir)
+
+    def _ev(self, level: str, event: str, detail=None) -> None:
+        try:
+            self.events.log(level, event, detail)
+        except Exception:
+            pass
 
     def _notify(self, text: str) -> None:
         self.store.audit("notify", {"text": text[:300]})
@@ -249,6 +257,8 @@ class AutoBot:
                     self.store.audit("mimic_closed", {
                         "coin": coin, "margin_usd": info.get("margin_usd", 0),
                         "note": "reconciled-flat"})
+                    self._ev("INFO", "reconciled",
+                             {"coin": coin, "note": "flat-on-HL"})
                     healed += 1
                     logger.info(f"[Auto] reconciled flat {coin}")
             except Exception as e:
@@ -318,6 +328,7 @@ class AutoBot:
             news, updates = self.watcher.poll(token)
         except Exception as e:
             logger.warning(f"[Auto] feed unreachable, cycle skipped: {e}")
+            self._ev("ERROR", "feed_unreachable", {"error": str(e)[:160]})
             return {**summary, "errors": 1}
         for ev in news:
             if not is_pariston(ev):
@@ -327,6 +338,8 @@ class AutoBot:
             except Exception as e:
                 summary["errors"] += 1
                 self._notify(f"MIMIC FAILED {ev.get('ticker')}: {e}")
+                self._ev("ERROR", "mimic_failed",
+                         {"ticker": ev.get("ticker"), "error": str(e)[:160]})
                 logger.warning(f"[Auto] mimic failed: {e}")
         for ev in updates:
             if not is_pariston(ev):
@@ -335,7 +348,12 @@ class AutoBot:
                 self._follow_update(ev, summary)
             except Exception as e:
                 summary["errors"] += 1
+                self._ev("ERROR", "update_failed",
+                         {"ticker": ev.get("ticker"), "error": str(e)[:160]})
                 logger.warning(f"[Auto] update follow failed: {e}")
+        if any(summary[k] for k in ("mimicked", "closed", "errors", "alerts")):
+            self._ev("INFO" if not summary["errors"] else "ERROR",
+                     "cycle", dict(summary))
         logger.info(f"[Auto] cycle: {summary}")
         return summary
 
@@ -352,6 +370,8 @@ class AutoBot:
         if self.open_count() >= self.cfg.max_concurrent:
             summary["skipped"] += 1
             self._notify(f"SKIP {coin}: max-concurrent-{self.cfg.max_concurrent}")
+            self._ev("WARN", "skip", {"coin": coin,
+                                      "reason": f"max-concurrent-{self.cfg.max_concurrent}"})
             return "cap-skipped"
         margin, reason = decide_live_size(self._account_usd(),
                                           self.committed_usd(), self.cfg,
@@ -359,6 +379,7 @@ class AutoBot:
         if margin is None:
             summary["skipped"] += 1
             self._notify(f"SKIP {coin}: {reason}")
+            self._ev("WARN", "skip", {"coin": coin, "reason": reason})
             return "cap-skipped" if "floor" in reason or "concurrent" in reason else "hl-skipped"
         # HL $10 order minimum: meet it within caps+floor, else skip loudly.
         import math as _math
@@ -374,6 +395,8 @@ class AutoBot:
                 summary["skipped"] += 1
                 self._notify(f"SKIP {coin}: under-hl-minimum "
                              f"(${margin * leverage:.2f} notional)")
+                self._ev("WARN", "skip",
+                         {"coin": coin, "reason": "under-hl-minimum"})
                 return "hl-skipped"
         self._notify(f"Pariston {coin} {side} {leverage}x -> mimic ${margin} "
                      f"(acct ${self._account_usd():.2f}) "
@@ -394,6 +417,10 @@ class AutoBot:
                   "margin_usd": margin,
                   "avg_px": fill.get("avg_px"), "oid": fill.get("oid")}
         self.store.audit("mimicked", detail)
+        self._ev("INFO", "mimicked", {"coin": coin, "side": side,
+                                      "margin_usd": margin,
+                                      "avg_px": fill.get("avg_px"),
+                                      "oid": fill.get("oid")})
         self._notify(f"MIMICKED {coin} {side} ${margin} @ {fill.get('avg_px')} "
                      f"oid={fill.get('oid')}")
         self._attach_tpsl(coin, side, ev)
@@ -409,6 +436,8 @@ class AutoBot:
                                  {"coin": coin, "ok": bool(res.get("success"))})
             except Exception as e:
                 self._notify(f"RECORD FAILED {coin} (fill stands): {e}")
+                self._ev("WARN", "record_failed",
+                         {"coin": coin, "error": str(e)[:160]})
                 logger.warning(f"[Auto] record failed: {e}")
         return "mimicked"
 
@@ -565,9 +594,13 @@ class AutoBot:
             self.store.audit("tpsl_placed", {
                 "coin": coin, "tp": tp, "sl": sl,
                 "cloids": [out["tp_cloid"], out["sl_cloid"]]})
+            self._ev("INFO", "tpsl_placed",
+                     {"coin": coin, "tp": tp, "sl": sl})
             self._notify(f"TP/SL set {coin}: tp={tp} sl={sl}")
         except Exception as e:
             self._notify(f"TPSL FAILED {coin} (position stands): {e}")
+            self._ev("WARN", "tpsl_failed",
+                     {"coin": coin, "error": str(e)[:160]})
             logger.warning(f"[Auto] tpsl failed: {e}")
 
     def _close_coin(self, coin: str, copies: Dict[str, Any],
@@ -595,6 +628,8 @@ class AutoBot:
                                   "margin_usd": copies[coin]["margin_usd"],
                                   "note": "already-flat"})
                 summary["closed"] += 1
+                self._ev("INFO", "closed",
+                         {"coin": coin, "why": "already-flat"})
                 self._notify(f"CLOSED {coin} (already flat on HL).")
                 return
             raise
@@ -712,6 +747,8 @@ class AutoBot:
                     "source": base, "note": "adopted-wallet-holding",
                     "avg_px": pos.get("entryPx")})
                 self.store.mark_seen(f"sims-{base}" if base else f"adopt-{coin}")
+                self._ev("INFO", "adopted",
+                         {"coin": coin, "side": side, "margin_usd": margin})
                 self._notify(f"ADOPTED {coin} {side} (${margin} margin) "
                              f"into lifecycle tracking.")
         # Closes first: mirrored coin gone from his board, or flipped side.
@@ -722,12 +759,16 @@ class AutoBot:
                     self._close_coin(coin, copies, summary, "sims-missing")
                 except Exception as e:
                     summary["errors"] += 1
+                    self._ev("ERROR", "close_failed",
+                             {"coin": coin, "error": str(e)[:160]})
                     logger.warning(f"[Auto] sync close failed {coin}: {e}")
             elif board[coin] != str(copies[coin].get("side") or "").upper():
                 try:
                     self._close_coin(coin, copies, summary, "sims-flip")
                 except Exception as e:
                     summary["errors"] += 1
+                    self._ev("ERROR", "close_failed",
+                             {"coin": coin, "error": str(e)[:160]})
                     logger.warning(f"[Auto] sync close failed {coin}: {e}")
         part = self.bootstrap_from_sims(client, token)
         for k in ("mimicked", "skipped", "errors"):
@@ -741,13 +782,16 @@ class AutoBot:
     def run_forever(self, token: str = "") -> None:
         logger.info("[Auto] started "
                     f"(live={self.cfg.live}, poll={self.mirror_cfg.poll_s}s)")
+        self._ev("INFO", "started", {"live": self.cfg.live})
         try:
             client = self._client()
             self.reconcile_ledger()
             self.bootstrap_from_sims(client, client.access_token or "")
         except Exception as e:
+            self._ev("ERROR", "startup_failed", {"error": str(e)[:160]})
             logger.warning(f"[Auto] startup bootstrap skipped: {e}")
         n = 0
+        heart_every = max(1, int(3600 / max(self.mirror_cfg.poll_s, 1)))
         while True:
             try:
                 self.run_once(token)
@@ -760,7 +804,15 @@ class AutoBot:
                         client = self._client()
                         self._sims_sync(client, client.access_token or "")
                     except Exception as e:
+                        self._ev("ERROR", "sync_failed",
+                                 {"error": str(e)[:160]})
                         logger.warning(f"[Auto] periodic sync skipped: {e}")
+                if n % heart_every == 0:
+                    self._ev("INFO", "heartbeat",
+                             {"open": self.open_count(),
+                              "committed_usd": self.committed_usd(),
+                              "account_usd": self._account_usd()})
             except Exception as e:
+                self._ev("ERROR", "cycle_crashed", {"error": str(e)[:160]})
                 logger.warning(f"[Auto] cycle crashed (contained): {e}")
             time.sleep(self.mirror_cfg.poll_s)
