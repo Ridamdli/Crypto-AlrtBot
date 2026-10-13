@@ -33,7 +33,9 @@ def classify_post(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not update.get("verifiedTrade"):
         return None
     is_open = update.get("isOpen") is True
-    is_closed = update.get("isOpen") is False and update.get("closingPrice") is not None
+    # A closed setup is isOpen=false, period. closingPrice is optional —
+    # requiring it once misclassified real closes as opens.
+    is_closed = update.get("isOpen") is False
     changes = update.get("changes") or {}
     if is_closed:
         action = "close"

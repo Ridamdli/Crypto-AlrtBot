@@ -56,7 +56,7 @@ class MimicConfig:
     account_usd: float = 18.38
     max_usd_per_mimic: float = 5.0
     max_pct_per_mimic: float = 25.0
-    max_concurrent: int = 5
+    max_concurrent: int = 20
     min_remaining_usd: float = 3.0
     feed_size: int = 20
 
@@ -67,25 +67,28 @@ class MimicConfig:
             account_usd=_f("MIMIC_ACCOUNT_USD", 18.38),
             max_usd_per_mimic=_f("MIMIC_MAX_USD", 5.0),
             max_pct_per_mimic=_f("MIMIC_MAX_PCT", 25.0),
-            max_concurrent=_i("MIMIC_MAX_CONCURRENT", 5),
+            max_concurrent=_i("MIMIC_MAX_CONCURRENT", 20),
             min_remaining_usd=_f("MIMIC_MIN_REMAINING_USD", 3.0),
             feed_size=_i("MIMIC_FEED_SIZE", 20),
         )
 
 
 def decide_live_size(account_usd: float, committed_usd: float,
-                     cfg: MimicConfig) -> tuple:
+                     cfg: MimicConfig, n_opens: int = 1) -> tuple:
     """(margin_usd | None, reason). Real-money brain: flat cap + guards.
 
-    Never risks more than max_pct of the account or max_usd flat, never
-    drops remaining below the floor (concurrency checked by caller).
+    The per-mimic target splits the book across Pariston's open count so
+    every setup gets mirrored (no slot lottery): min(flat cap, pct cap,
+    90% of equity / opens). Floor + HL-minimum guards still apply.
     """
     if account_usd is None or account_usd <= 0:
         return None, "skip:bank-unknown"
     remaining = account_usd - committed_usd
     if remaining < cfg.min_remaining_usd:
         return None, f"skip:below-floor-{remaining:.2f}"
-    target = min(cfg.max_usd_per_mimic, account_usd * cfg.max_pct_per_mimic / 100.0)
+    target = min(cfg.max_usd_per_mimic,
+                 account_usd * cfg.max_pct_per_mimic / 100.0,
+                 account_usd * 0.9 / max(int(n_opens or 1), 1))
     target = round(target, 2)
     if target <= 0:
         return None, "skip:risk-cap-zero"
@@ -95,6 +98,17 @@ def decide_live_size(account_usd: float, committed_usd: float,
             return None, "skip:below-floor-after-cap"
         return target, f"shrunk-to-floor:{target}"
     return target, "full-mimic"
+
+
+def _signal_ts(ts: Any) -> float:
+    """ISO-8601 UTC string -> epoch seconds (0 when unparsable)."""
+    try:
+        from datetime import datetime, timezone
+        return datetime.fromisoformat(
+            str(ts).replace("Z", "+00:00")).replace(
+            tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def is_pariston(ev: Dict[str, Any]) -> bool:
@@ -140,6 +154,7 @@ class AutoBot:
         self.watcher = watcher or FeedWatcher()
         self._notify_fn = notify_fn or (lambda t: logger.info(f"[Auto] {t}"))
         self._dash = {"at": 0.0, "signals": []}
+        self._pariston_opens = 1
 
     def _notify(self, text: str) -> None:
         self.store.audit("notify", {"text": text[:300]})
@@ -216,7 +231,8 @@ class AutoBot:
             if e.get("event") == "mimicked" and d.get("coin"):
                 out[d["coin"]] = {"margin_usd": d.get("margin_usd", 0),
                                   "source": d.get("source"),
-                                  "side": d.get("side")}
+                                  "side": d.get("side"),
+                                  "opened_ts": e.get("ts", 0)}
             elif e.get("event") == "mimic_closed" and d.get("coin") in out:
                 del out[d["coin"]]
         return out
@@ -254,6 +270,7 @@ class AutoBot:
             summary["errors"] = 1
             return summary
         mirrored = self.mirrored_coins()
+        self._pariston_opens = max(len(positions), 1)
         for pos in positions:
             base = str(pos.get("baseId") or "")
             if not base or f"sims-{base}" in self.store.seen_ids():
@@ -337,7 +354,8 @@ class AutoBot:
             self._notify(f"SKIP {coin}: max-concurrent-{self.cfg.max_concurrent}")
             return "cap-skipped"
         margin, reason = decide_live_size(self._account_usd(),
-                                          self.committed_usd(), self.cfg)
+                                          self.committed_usd(), self.cfg,
+                                          self._pariston_opens)
         if margin is None:
             summary["skipped"] += 1
             self._notify(f"SKIP {coin}: {reason}")
@@ -395,38 +413,58 @@ class AutoBot:
         return "mimicked"
 
     def _resolve_local_tpsl(self, ticker: str, side: str,
-                            entry: float) -> tuple:
-        """Pariston's TP/SL for an open copy. Sources in order: live main-bot
-        dashboard signals, then the local outcome ledger. Match requires
-        same symbol+side and entry within 0.5% — anything looser risks
-        arming someone else's levels. No match, no triggers."""
+                            entry: float, open_ts: float = 0) -> tuple:
+        """Pariston's TP/SL for an open copy. Primary: live main-bot
+        dashboard signals — same coin+side, newest signal within
+        [open-3h, open+15m], entry within 2% as sanity. Fallback: local
+        outcome ledger (same keys, entry within 0.5%). No match, no
+        triggers — arming wrong levels is worse than arming none."""
         if entry is None or entry <= 0:
             return None, None
         symbol = ticker if ticker.endswith("USDT") else ticker + "USDT"
-        cands: List[Dict[str, Any]] = []
+        best, best_key = None, None
         try:
-            cands.extend(self._dashboard_signals())
-        except Exception as e:
-            logger.warning(f"[Auto] dashboard signals unreadable: {e}")
-        try:
-            cands.extend(self._ledger_signals(symbol))
-        except Exception:
-            pass
-        best, best_dist = None, 0.005
-        for rec in cands:
-            if rec.get("symbol") != symbol or \
-                    str(rec.get("side", "")).upper() != side.upper():
-                continue
-            try:
-                dist = abs(float(rec.get("entry", 0)) - entry) / entry
-            except (TypeError, ValueError, ZeroDivisionError):
-                continue
-            if dist <= best_dist:
+            for rec in self._dashboard_signals():
+                if rec.get("symbol") != symbol or \
+                        str(rec.get("side", "")).upper() != side.upper():
+                    continue
+                sts = _signal_ts(rec.get("timestamp"))
+                if open_ts and sts:
+                    if not (open_ts - 3 * 3600 <= sts <= open_ts + 900):
+                        continue
+                try:
+                    dist = abs(float(rec.get("entry", 0)) - entry) / entry
+                except (TypeError, ValueError, ZeroDivisionError):
+                    continue
+                if dist > 0.02:
+                    continue
                 tp = rec.get("tp", rec.get("tp1"))
                 sl = rec.get("stop_loss")
-                if tp is not None and sl is not None:
-                    best, best_dist = (tp, sl), dist
-        return best if best else (None, None)
+                if tp is None or sl is None:
+                    continue
+                key = sts or 0
+                if best_key is None or key > best_key:
+                    best, best_key = (tp, sl), key
+            if best:
+                return best
+        except Exception as e:
+            logger.warning(f"[Auto] dashboard resolve failed: {e}")
+        try:
+            for rec in self._ledger_signals(symbol):
+                if str(rec.get("side", "")).upper() != side.upper():
+                    continue
+                try:
+                    dist = abs(float(rec.get("entry", 0)) - entry) / entry
+                except (TypeError, ValueError, ZeroDivisionError):
+                    continue
+                if dist <= 0.005:
+                    tp = rec.get("tp", rec.get("tp1"))
+                    sl = rec.get("stop_loss")
+                    if tp is not None and sl is not None:
+                        return tp, sl
+        except Exception:
+            pass
+        return None, None
 
     def _dashboard_signals(self) -> List[Dict[str, Any]]:
         """Live signals from the main bot dashboard (60s cache). Empty when
@@ -465,7 +503,7 @@ class AutoBot:
         """Attach triggers to mirrored coins missing them (sims-sourced
         opens carry no TP/SL; feed posts do). Returns count attached."""
         n = 0
-        for coin in list(self.mirrored_coins()):
+        for coin, info in list(self.mirrored_coins().items()):
             if self._tpsl_of(coin):
                 continue
             try:
@@ -474,7 +512,8 @@ class AutoBot:
                     continue
                 side = "LONG" if float(pos.get("szi", 0) or 0) > 0 else "SHORT"
                 tp, sl = self._resolve_local_tpsl(
-                    coin, side, float(pos.get("entryPx", 0) or 0))
+                    coin, side, float(pos.get("entryPx", 0) or 0),
+                    info.get("opened_ts", 0))
                 if tp is None or sl is None:
                     continue
                 self._attach_tpsl(coin, side, {"tp": tp, "sl": sl})
@@ -496,11 +535,20 @@ class AutoBot:
                 cloids = []
         return cloids
 
-    def _attach_tpsl(self, coin: str, side: str, ev: Dict[str, Any]) -> None:
-        """Rest Pariston's TP/SL as native triggers. Best-effort: a failure
-        alerts but never unwinds the fill. Skipped silently without TP+SL."""
-        if ev.get("tp") is None or ev.get("sl") is None:
-            return
+    def _attach_tpsl(self, coin: str, side: str, ev: Dict[str, Any],
+                     open_ts: float = 0) -> None:
+        """Rest Pariston's TP/SL as native triggers. Levels come from the
+        event when present, else resolved via the dashboard by open time.
+        Best-effort: a failure alerts but never unwinds the fill."""
+        tp, sl = ev.get("tp"), ev.get("sl")
+        if tp is None or sl is None:
+            tp, sl = self._resolve_local_tpsl(
+                coin, side,
+                float((self.hl.position(coin) or {}).get("entryPx", 0) or 0)
+                if self.hl else 0,
+                open_ts or __import__("time").time())
+            if tp is None or sl is None:
+                return
         try:
             from mirror.hl import HlBridge
             pos = self.hl.position(coin) if self.hl else None
@@ -510,7 +558,7 @@ class AutoBot:
             if size <= 0:
                 return
             entry = float(pos.get("entryPx", 0) or 0)
-            tp, sl = HlBridge.sane_tpsl(side, entry, ev.get("tp"), ev.get("sl"))
+            tp, sl = HlBridge.sane_tpsl(side, entry, tp, sl)
             self.hl.cancel_tpsl(coin, self._tpsl_of(coin))
             out = self.hl.place_tpsl(coin, side, size, tp, sl)
             self.store.audit("tpsl_placed", {
@@ -521,40 +569,45 @@ class AutoBot:
             self._notify(f"TPSL FAILED {coin} (position stands): {e}")
             logger.warning(f"[Auto] tpsl failed: {e}")
 
+    def _close_coin(self, coin: str, copies: Dict[str, Any],
+                    summary: Dict[str, Any], why: str) -> None:
+        """Market-close one mirrored coin (triggers canceled first). Shared
+        by feed closes and the sims safety net. No-op when dry/not held."""
+        if coin not in copies:
+            return
+        if not self.cfg.live or self.hl is None:
+            summary["alerts"] += 1
+            self._notify(f"Pariston closed {coin} — close your copy "
+                         f"(dry-run: no action taken).")
+            return
+        if self.hl is not None:
+            self.hl.cancel_tpsl(coin, self._tpsl_of(coin))
+        fill = self.hl.close(coin)
+        summary["closed"] += 1
+        self.store.audit("mimic_closed",
+                         {"coin": coin,
+                          "margin_usd": copies[coin]["margin_usd"]})
+        self._notify(f"CLOSED {coin} alongside Pariston ({why}).")
+        if self.session is not None:
+            try:
+                meta = self.hl.meta().get(coin, {})
+                self.session.record_close({
+                    "clientTxId": f"close:{uuid.uuid4().hex[:8]}",
+                    "baseShortId": copies[coin].get("source") or coin,
+                    "assetIndex": meta.get("assetIndex", 0),
+                    "submission": {"hlOrder": fill.get("raw"),
+                                   "nonceMs": int(time.time() * 1000),
+                                   "hlResponse": fill.get("raw")},
+                    "summary": {"qtyBefore": "?", "qtyAfter": "0"}})
+            except Exception as e:
+                logger.warning(f"[Auto] close-record failed: {e}")
+
     def _follow_update(self, ev: Dict[str, Any], summary: Dict[str, Any]) -> None:
         coin = (ev.get("ticker") or "").replace("USDT", "").replace("USDC", "")
         if not coin:
             return
         if ev.get("action") == "close":
-            copies = self.mirrored_coins()
-            if coin not in copies:
-                return
-            if not self.cfg.live or self.hl is None:
-                summary["alerts"] += 1
-                self._notify(f"Pariston closed {coin} — close your copy "
-                             f"(dry-run: no action taken).")
-                return
-            if self.hl is not None:
-                self.hl.cancel_tpsl(coin, self._tpsl_of(coin))
-            fill = self.hl.close(coin)
-            summary["closed"] += 1
-            self.store.audit("mimic_closed",
-                             {"coin": coin,
-                              "margin_usd": copies[coin]["margin_usd"]})
-            self._notify(f"CLOSED {coin} alongside Pariston.")
-            if self.session is not None:
-                try:
-                    meta = self.hl.meta().get(coin, {})
-                    self.session.record_close({
-                        "clientTxId": f"close:{uuid.uuid4().hex[:8]}",
-                        "baseShortId": copies[coin].get("source") or coin,
-                        "assetIndex": meta.get("assetIndex", 0),
-                        "submission": {"hlOrder": fill.get("raw"),
-                                       "nonceMs": int(time.time() * 1000),
-                                       "hlResponse": fill.get("raw")},
-                        "summary": {"qtyBefore": "?", "qtyAfter": "0"}})
-                except Exception as e:
-                    logger.warning(f"[Auto] close-record failed: {e}")
+            self._close_coin(coin, self.mirrored_coins(), summary, "feed")
             return
         # Source TP/SL edit on a mirrored coin: replace our resting
         # triggers immediately. Anything without usable TP+SL (or on a
@@ -577,6 +630,61 @@ class AutoBot:
         self._notify(f"Pariston updated {coin} ({ev.get('action')} "
                      f"tp={ev.get('tp')} sl={ev.get('sl')}) — logged, no action.")
 
+    def _sims_sync(self, client, token: str) -> Dict[str, Any]:
+        """Ground-truth sync against Pariston's board: open the missing,
+        close what he no longer holds (side-flip counts as closed), then
+        backfill TP/SL. A malformed/empty-unverifiable read aborts before
+        any close — an unreadable board must never flatten the book."""
+        from mirror.feed import fetch_open_positions
+        summary: Dict[str, Any] = {"mimicked": 0, "closed": 0,
+                                   "skipped": 0, "alerts": 0, "errors": 0}
+        try:
+            snap = client.list_paper_investments(token, PARISTON_PORTFOLIO_ID)
+        except Exception as e:
+            logger.warning(f"[Auto] sims sync unreadable: {e}")
+            summary["errors"] = 1
+            return summary
+        if not isinstance(snap, dict) or snap.get("success") is False:
+            logger.warning("[Auto] sims sync rejected (bad envelope)")
+            summary["errors"] = 1
+            return summary
+        invs = snap.get("investments")
+        if not isinstance(invs, list):
+            logger.warning("[Auto] sims sync rejected (no investments list)")
+            summary["errors"] = 1
+            return summary
+        board: Dict[str, str] = {}
+        for inv in invs:
+            if not isinstance(inv, dict) or not inv.get("baseId"):
+                continue
+            coin = str(inv.get("ticker") or "").upper()
+            if coin:
+                board[coin] = "LONG" if inv.get("directionLong") else "SHORT"
+        self._pariston_opens = len(board)
+        # Closes first: mirrored coin gone from his board, or flipped side.
+        copies = self.mirrored_coins()
+        for coin in list(copies):
+            if coin not in board:
+                try:
+                    self._close_coin(coin, copies, summary, "sims-missing")
+                except Exception as e:
+                    summary["errors"] += 1
+                    logger.warning(f"[Auto] sync close failed {coin}: {e}")
+            elif board[coin] != str(copies[coin].get("side") or "").upper():
+                try:
+                    self._close_coin(coin, copies, summary, "sims-flip")
+                except Exception as e:
+                    summary["errors"] += 1
+                    logger.warning(f"[Auto] sync close failed {coin}: {e}")
+        part = self.bootstrap_from_sims(client, token)
+        for k in ("mimicked", "skipped", "errors"):
+            summary[k] += part.get(k, 0)
+        healed = self._backfill_tpsl()
+        if healed:
+            logger.info(f"[Auto] tpsl backfilled on {healed} coin(s)")
+        logger.info(f"[Auto] sims sync: {summary}")
+        return summary
+
     def run_forever(self, token: str = "") -> None:
         logger.info("[Auto] started "
                     f"(live={self.cfg.live}, poll={self.mirror_cfg.poll_s}s)")
@@ -591,16 +699,13 @@ class AutoBot:
             try:
                 self.run_once(token)
                 # Sims re-sync every 4th cycle (~60s): picks up already-open
-                # coins skipped earlier on caps, and anything the feed missed.
+                # coins skipped earlier on caps, closes anything Pariston
+                # no longer holds (feed safety net), backfills TP/SL.
                 n += 1
                 if n % 4 == 0:
                     try:
                         client = self._client()
-                        self.bootstrap_from_sims(
-                            client, client.access_token or "")
-                        healed = self._backfill_tpsl()
-                        if healed:
-                            logger.info(f"[Auto] tpsl backfilled on {healed} coin(s)")
+                        self._sims_sync(client, client.access_token or "")
                     except Exception as e:
                         logger.warning(f"[Auto] periodic sync skipped: {e}")
             except Exception as e:

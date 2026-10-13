@@ -580,6 +580,71 @@ def test_resolve_empty_without_dashboard(tmp_path, monkeypatch):
     assert bot._resolve_local_tpsl("HYPE", "SHORT", 85.0) == (None, None)
 
 
+def test_brain_splits_book_across_opens():
+    margin, reason = decide_live_size(20.0, 0.0, _cfg(), n_opens=9)
+    assert margin == round(20.0 * 0.9 / 9, 2) and reason == "full-mimic"
+    margin2, _ = decide_live_size(20.0, 0.0, _cfg(), n_opens=1)
+    assert margin2 == 5.0
+
+
+def test_sims_missing_close_never_fires_on_bad_envelope(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    bot.store.audit("mimicked", {"coin": "HYPE", "margin_usd": 4.68,
+                                 "source": "SRC-1", "side": "SHORT"})
+
+    class _BadClient:
+        def list_paper_investments(self, token, portfolio):
+            return {"success": False}
+
+    out = bot._sims_sync(_BadClient(), "tok")
+    assert out["errors"] == 1 and bot.open_count() == 1
+
+    class _EmptyClient:
+        def list_paper_investments(self, token, portfolio):
+            return "garbage"
+
+    out = bot._sims_sync(_EmptyClient(), "tok")
+    assert out["errors"] == 1 and bot.open_count() == 1
+
+
+def test_sims_missing_close_fires(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl(holdings={"HYPE"})
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    bot.store.audit("mimicked", {"coin": "HYPE", "margin_usd": 4.68,
+                                 "source": "SRC-1", "side": "SHORT"})
+
+    class _Client:
+        def list_paper_investments(self, token, portfolio):
+            return {"success": True, "investments": [
+                {"baseId": "B-X", "ticker": "LINK", "directionLong": False}]}
+
+    out = bot._sims_sync(_Client(), "tok")
+    assert out["closed"] == 1
+    assert hl.closes == ["HYPE"]
+    assert any("sims-missing" in n for n in got)
+
+
+def test_close_classifier_needs_no_closing_price():
+    from mirror.feedmon import classify_post
+    ev = classify_post({"id": "c1", "update": {
+        "ticker": "HYPE", "directionLong": False, "verifiedTrade": True,
+        "isOpen": False, "baseId": "B1",
+        "owner": {"id": "7fd09aef-d45f-47dd-aa7f-72143e7d5a05"},
+        "portfolio": {"id": "17cc19aa-d854-4857-9cca-7f05f21ec2da"}}})
+    assert ev["action"] == "close"
+
+
 def test_stranger_posts_never_mimicked(tmp_path):
     """Pariston-only guarantee: other traders' opens, closes and updates
     are ignored entirely — no orders, no records, no close attempts."""
