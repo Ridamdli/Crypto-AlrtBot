@@ -334,7 +334,15 @@ async function load(){
       card(iv.last_otp_at ? new Date(iv.last_otp_at*1000).toLocaleString() : 'never', 'last OTP login');
     document.getElementById('invo-rows').innerHTML = (iv.activity||[]).slice().reverse().map(a=>{
       const d = a.detail||{};
-      const det = [d.symbol, d.side, d.reason, d.email, Array.isArray(d.baseIds)? d.baseIds.length + ' baseIds' : ''].filter(Boolean).join(' · ');
+      const shortId = d.baseId ? '…'+String(d.baseId).slice(-6) : '';
+      const det = [d.symbol, d.side, d.reason, d.email, shortId,
+        d.priceTarget!=null ? 'TP '+d.priceTarget : '',
+        d.stopLoss!=null ? 'SL '+d.stopLoss : '',
+        d.closingPrice!=null ? 'close@'+d.closingPrice : '',
+        d.remainingSim!=null ? 'sim '+Math.round(d.remainingSim*100)/100 : '',
+        Array.isArray(d.baseIds)? d.baseIds.length + ' baseIds' : '',
+        d.response ? String(d.response).slice(0,90) : '',
+        d.error ? String(d.error).slice(0,90) : ''].filter(Boolean).join(' · ');
       const t = a.ts ? new Date(a.ts*1000).toLocaleString() : '';
       return '<tr><td>'+t+'</td><td>'+a.event+'</td><td>'+det+'</td></tr>';
     }).join('') || '<tr><td colspan="3">no bridge activity yet (bridge is disabled until you enable it)</td></tr>';
