@@ -67,7 +67,7 @@ class MimicConfig:
             account_usd=_f("MIMIC_ACCOUNT_USD", 18.38),
             max_usd_per_mimic=_f("MIMIC_MAX_USD", 5.0),
             max_pct_per_mimic=_f("MIMIC_MAX_PCT", 25.0),
-            max_concurrent=_i("MIMIC_MAX_CONCURRENT", 2),
+            max_concurrent=_i("MIMIC_MAX_CONCURRENT", 5),
             min_remaining_usd=_f("MIMIC_MIN_REMAINING_USD", 3.0),
             feed_size=_i("MIMIC_FEED_SIZE", 20),
         )
