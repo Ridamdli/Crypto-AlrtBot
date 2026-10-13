@@ -527,6 +527,59 @@ def test_resolve_rejects_loose_match(tmp_path, monkeypatch):
     assert bot._resolve_local_tpsl("HYPE", "LONG", 85.269) == (None, None)
 
 
+def test_resolve_prefers_dashboard_signals(tmp_path, monkeypatch):
+    import json as _json
+    import urllib.request as _req
+    monkeypatch.setenv(
+        "MIMIC_MAIN_DASHBOARD_URL", "https://dash.example")
+    monkeypatch.setenv("MIMIC_MAIN_DASHBOARD_TOKEN", "tok")
+    monkeypatch.setenv("MIMIC_MAIN_DATA_DIR", str(tmp_path / "empty"))
+
+    payload = _json.dumps([{"symbol": "HYPEUSDT", "side": "SHORT",
+                            "entry": 85.2, "tp": 79.8,
+                            "stop_loss": 87.8}]).encode()
+
+    class _Resp:
+        status = 200
+
+        def read(self):
+            return payload
+
+    class _CM:
+        def __enter__(self):
+            return _Resp()
+
+        def __exit__(self, *a):
+            return False
+
+    seen = {}
+
+    def _fake_urlopen(req, timeout=None):
+        seen["url"] = req.full_url
+        return _CM()
+
+    monkeypatch.setattr(_req, "urlopen", _fake_urlopen)
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    bot = AutoBot(mc, _cfg(live=True), hl=FakeHl(), session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=lambda t: None)
+    assert bot._resolve_local_tpsl("HYPE", "SHORT", 85.0) == (79.8, 87.8)
+    assert "token=tok" in seen["url"] and "limit=100" in seen["url"]
+
+
+def test_resolve_empty_without_dashboard(tmp_path, monkeypatch):
+    monkeypatch.delenv("MIMIC_MAIN_DASHBOARD_URL", raising=False)
+    monkeypatch.delenv("MIMIC_MAIN_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setenv("MIMIC_MAIN_DATA_DIR", str(tmp_path / "empty"))
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    bot = AutoBot(mc, _cfg(live=True), hl=FakeHl(), session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=lambda t: None)
+    assert bot._resolve_local_tpsl("HYPE", "SHORT", 85.0) == (None, None)
+
+
 def test_stranger_posts_never_mimicked(tmp_path):
     """Pariston-only guarantee: other traders' opens, closes and updates
     are ignored entirely — no orders, no records, no close attempts."""

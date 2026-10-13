@@ -139,6 +139,7 @@ class AutoBot:
         self.session = session
         self.watcher = watcher or FeedWatcher()
         self._notify_fn = notify_fn or (lambda t: logger.info(f"[Auto] {t}"))
+        self._dash = {"at": 0.0, "signals": []}
 
     def _notify(self, text: str) -> None:
         self.store.audit("notify", {"text": text[:300]})
@@ -395,26 +396,24 @@ class AutoBot:
 
     def _resolve_local_tpsl(self, ticker: str, side: str,
                             entry: float) -> tuple:
-        """Pariston's TP/SL for an open copy, sourced from our own bot's
-        outcome ledger (same setup, same entry). Returns (tp, sl | None).
-        Match requires same symbol+side and entry within 0.3% — anything
-        looser risks arming someone else's levels. No match, no triggers."""
-        import json as _json
-        import os as _os
-        path = _os.path.join(os.getenv("MIMIC_MAIN_DATA_DIR", "data_store"),
-                             "outcomes.json")
-        try:
-            with open(path, encoding="utf-8") as f:
-                ledger = _json.load(f)
-        except (FileNotFoundError, ValueError, OSError):
-            return None, None
-        if not isinstance(ledger, dict) or entry is None or entry <= 0:
+        """Pariston's TP/SL for an open copy. Sources in order: live main-bot
+        dashboard signals, then the local outcome ledger. Match requires
+        same symbol+side and entry within 0.5% — anything looser risks
+        arming someone else's levels. No match, no triggers."""
+        if entry is None or entry <= 0:
             return None, None
         symbol = ticker if ticker.endswith("USDT") else ticker + "USDT"
-        best, best_dist = None, 0.003
-        for rec in ledger.values():
-            if not isinstance(rec, dict):
-                continue
+        cands: List[Dict[str, Any]] = []
+        try:
+            cands.extend(self._dashboard_signals())
+        except Exception as e:
+            logger.warning(f"[Auto] dashboard signals unreadable: {e}")
+        try:
+            cands.extend(self._ledger_signals(symbol))
+        except Exception:
+            pass
+        best, best_dist = None, 0.005
+        for rec in cands:
             if rec.get("symbol") != symbol or \
                     str(rec.get("side", "")).upper() != side.upper():
                 continue
@@ -428,6 +427,39 @@ class AutoBot:
                 if tp is not None and sl is not None:
                     best, best_dist = (tp, sl), dist
         return best if best else (None, None)
+
+    def _dashboard_signals(self) -> List[Dict[str, Any]]:
+        """Live signals from the main bot dashboard (60s cache). Empty when
+        unconfigured — never raises into the caller (handled there)."""
+        import time as _time
+        import urllib.request as _req
+        import urllib.parse as _parse
+        import json as _json
+        base = os.getenv("MIMIC_MAIN_DASHBOARD_URL", "").rstrip("/")
+        token = os.getenv("MIMIC_MAIN_DASHBOARD_TOKEN", "")
+        if not base or not token:
+            return []
+        if _time.time() - self._dash["at"] < 60 and self._dash["signals"]:
+            return self._dash["signals"]
+        url = base + "/api/signals?limit=100&token=" + _parse.quote(token)
+        req = _req.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with _req.urlopen(req, timeout=20) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        sigs = data if isinstance(data, list) else []
+        self._dash.update(at=_time.time(), signals=sigs)
+        return sigs
+
+    def _ledger_signals(self, symbol: str) -> List[Dict[str, Any]]:
+        import json as _json
+        import os as _os
+        path = _os.path.join(os.getenv("MIMIC_MAIN_DATA_DIR", "data_store"),
+                             "outcomes.json")
+        with open(path, encoding="utf-8") as f:
+            ledger = _json.load(f)
+        if not isinstance(ledger, dict):
+            return []
+        return [r for r in ledger.values()
+                if isinstance(r, dict) and r.get("symbol") == symbol]
 
     def _backfill_tpsl(self) -> int:
         """Attach triggers to mirrored coins missing them (sims-sourced
