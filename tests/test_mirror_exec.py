@@ -181,11 +181,13 @@ def test_trigger_payload_is_wire_numeric():
 
 def test_wire_px_truncates_float_garbage():
     """Regression: raw signal math (12.254806000000002) is rejected by
-    the venue with 'invalid price' — wire prices carry at most 5 sig figs."""
+    the venue with 'invalid price' — wire prices follow the SDK rule
+    (5 sig figs, at most 6-szDecimals decimals)."""
     from mirror.hl import HlBridge
-    assert HlBridge._wire_px(12.254806000000002) == 12.255
-    assert HlBridge._wire_px(0.082634) == 0.082634
-    assert HlBridge._wire_px(732.32) == 732.32
+    assert HlBridge._wire_px(12.254806000000002, 0) == 12.255
+    assert HlBridge._wire_px(0.082634, 0) == 0.082634
+    assert HlBridge._wire_px(732.32, 1) == 732.32
+    assert HlBridge._wire_px(82.584, 2) == 82.584
 
 
 def test_place_tpsl_long_sells():
