@@ -117,6 +117,7 @@ def test_session_lazy_loads_dropped_in_file(tmp_path, monkeypatch):
 class _FakeTriggerEx:
     def __init__(self):
         self.orders = []
+        self.raw_types = []
         self.cancels = []
 
     def order(self, coin, is_buy, sz, limit_px, order_type, reduce_only,
@@ -125,6 +126,7 @@ class _FakeTriggerEx:
         assert order_type["trigger"]["isMarket"] is True
         self.orders.append((coin, is_buy, sz, order_type["trigger"]["tpsl"],
                             cloid))
+        self.raw_types.append(order_type)
         n = len(self.orders)
         return {"response": {"data": {"statuses": [
             {"resting": {"oid": 5000 + n}}]}}}
@@ -163,6 +165,18 @@ def test_place_tpsl_rests_both_triggers_short():
     assert all(o[2] == 1.5 for o in ex.orders)
     assert out["tp_oid"] == 5001 and out["sl_oid"] == 5002
     assert out["tp_cloid"].startswith("0x")
+
+
+def test_trigger_payload_is_wire_numeric():
+    """Regression: SDK float_to_wire rejects strings — triggerPx and
+    sizes must be numeric (live failure: 'Unknown format code')."""
+    b, ex = _tpsl_bridge()
+    b.place_tpsl("HYPE", "SHORT", 1.5, 79.8, 87.8)
+    import hyperliquid.utils.signing as _signing
+    for order_type in ex.raw_types:
+        trig = order_type["trigger"]
+        assert isinstance(trig["triggerPx"], float)
+        _signing.float_to_wire(trig["triggerPx"])
 
 
 def test_place_tpsl_long_sells():

@@ -202,7 +202,7 @@ class HlBridge:
         for kind, px in (("tp", float(tp_px)), ("sl", float(sl_px))):
             cloid = "0x" + _secrets.token_hex(16)
             raw = ex.order(coin, is_buy, float(size), float(px),
-                           {"trigger": {"triggerPx": str(px), "isMarket": True,
+                           {"trigger": {"triggerPx": float(px), "isMarket": True,
                                         "tpsl": kind}},
                            True, cloid, INVO_BUILDER)
             data = raw.get("response", {}).get("data", {}) \
