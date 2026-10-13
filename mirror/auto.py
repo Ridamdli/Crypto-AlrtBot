@@ -661,6 +661,36 @@ class AutoBot:
             if coin:
                 board[coin] = "LONG" if inv.get("directionLong") else "SHORT"
         self._pariston_opens = len(board)
+        # Adopt wallet holdings that match his board but predate the ledger
+        # (manual copies, previous bot generations): they enter full
+        # lifecycle tracking instead of shadowing it forever.
+        if self.cfg.live and self.hl is not None:
+            copies = self.mirrored_coins()
+            for coin, side in board.items():
+                if coin in copies:
+                    continue
+                try:
+                    pos = self.hl.position(coin)
+                except Exception:
+                    continue
+                if pos is None:
+                    continue
+                try:
+                    lev = (pos.get("leverage") or {}).get("value", 0)
+                    margin = round(abs(float(pos.get("positionValue", 0) or 0)) /
+                                   max(int(lev or 1), 1), 2)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    margin = 0.0
+                base = next((str(i.get("baseId") or "") for i in invs
+                             if isinstance(i, dict) and
+                             str(i.get("ticker") or "").upper() == coin), "")
+                self.store.audit("mimicked", {
+                    "coin": coin, "side": side, "margin_usd": margin,
+                    "source": base, "note": "adopted-wallet-holding",
+                    "avg_px": pos.get("entryPx")})
+                self.store.mark_seen(f"sims-{base}" if base else f"adopt-{coin}")
+                self._notify(f"ADOPTED {coin} {side} (${margin} margin) "
+                             f"into lifecycle tracking.")
         # Closes first: mirrored coin gone from his board, or flipped side.
         copies = self.mirrored_coins()
         for coin in list(copies):

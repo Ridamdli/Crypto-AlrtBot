@@ -645,6 +645,30 @@ def test_close_classifier_needs_no_closing_price():
     assert ev["action"] == "close"
 
 
+def test_adoption_brings_wallet_holding_into_lifecycle(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl(holdings={"LINK"})
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+
+    class _Client:
+        def list_paper_investments(self, token, portfolio):
+            return {"success": True, "investments": [
+                {"baseId": "B-LINK", "ticker": "LINK",
+                 "directionLong": False}]}
+
+    out = bot._sims_sync(_Client(), "tok")
+    assert "LINK" in bot.mirrored_coins()
+    assert any("ADOPTED LINK" in n for n in got)
+    # Second sync: adopted, not duplicated, not closed.
+    out2 = bot._sims_sync(_Client(), "tok")
+    assert out2["mimicked"] == 0 and out2["closed"] == 0
+    assert bot.open_count() == 1
+
+
 def test_stranger_posts_never_mimicked(tmp_path):
     """Pariston-only guarantee: other traders' opens, closes and updates
     are ignored entirely — no orders, no records, no close attempts."""
