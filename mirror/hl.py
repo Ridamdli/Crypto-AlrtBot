@@ -197,10 +197,15 @@ class HlBridge:
         {tp_oid, sl_oid, tp_cloid, sl_cloid}. Raises on failure."""
         import secrets as _secrets
         ex = self._client_or_throw()
+        try:
+            from hyperliquid.utils.types import Cloid as _Cloid
+        except ImportError:
+            _Cloid = None
         is_buy = side.upper() == "SHORT"  # triggers close against the position
         out = {}
         for kind, px in (("tp", float(tp_px)), ("sl", float(sl_px))):
-            cloid = "0x" + _secrets.token_hex(16)
+            hex_id = "0x" + _secrets.token_hex(16)
+            cloid = _Cloid(hex_id) if _Cloid is not None else hex_id
             raw = ex.order(coin, is_buy, float(size), float(px),
                            {"trigger": {"triggerPx": float(px), "isMarket": True,
                                         "tpsl": kind}},
@@ -213,17 +218,22 @@ class HlBridge:
             if oid is None:
                 raise RuntimeError(f"{kind} trigger not resting: "
                                    f"{str(raw)[:160]}")
-            out[f"{kind}_oid"], out[f"{kind}_cloid"] = oid, cloid
+            out[f"{kind}_oid"], out[f"{kind}_cloid"] = oid, hex_id
         logger.info(f"[HL] tpsl resting {coin} {side} tp={tp_px} sl={sl_px}")
         return out
 
     def cancel_tpsl(self, coin: str, cloids: List[str]) -> int:
         """Best-effort cancel of resting triggers by cloid. Returns count."""
         ex = self._client_or_throw()
+        try:
+            from hyperliquid.utils.types import Cloid as _Cloid
+        except ImportError:
+            _Cloid = None
         n = 0
         for cl in cloids or []:
             try:
-                ex.cancel_by_cloid(coin, cl)
+                ex.cancel_by_cloid(
+                    coin, _Cloid(cl) if _Cloid is not None else cl)
                 n += 1
             except Exception as e:
                 logger.warning(f"[HL] cancel {coin} {cl[:10]}… failed: {e}")

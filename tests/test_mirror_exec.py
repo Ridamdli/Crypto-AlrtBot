@@ -187,5 +187,6 @@ def test_place_tpsl_long_sells():
 
 def test_cancel_tpsl_best_effort():
     b, ex = _tpsl_bridge()
-    assert b.cancel_tpsl("HYPE", ["0xaaa", "0xbbb"]) == 2
+    assert b.cancel_tpsl("HYPE", ["0x" + "a" * 32, "0x" + "b" * 32]) == 2
     assert b.cancel_tpsl("HYPE", []) == 0
+    assert b.cancel_tpsl("HYPE", ["bogus"]) == 0  # invalid cloid skipped
