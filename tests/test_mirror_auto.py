@@ -124,6 +124,8 @@ class FakeHl:
                 "leverage": leverage, "raw": {"ok": True}}
 
     def close(self, coin):
+        if self.position(coin) is None:
+            raise RuntimeError(f"no open position for {coin}")
         self.closes.append(coin)
         return {"coin": coin, "raw": {"ok": True}}
 
@@ -672,6 +674,24 @@ def test_adoption_brings_wallet_holding_into_lifecycle(tmp_path):
     out2 = bot._sims_sync(_Client(), "tok")
     assert out2["mimicked"] == 0 and out2["closed"] == 0
     assert bot.open_count() == 1
+
+
+def test_close_heals_already_flat_instead_of_erroring(tmp_path):
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()  # flat: close() raises below
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    bot.store.audit("mimicked", {"coin": "BNB", "margin_usd": 2.03,
+                                 "source": "SRC-9", "side": "SHORT"})
+    summary = {"mimicked": 0, "closed": 0, "skipped": 0, "alerts": 0,
+               "errors": 0}
+    bot._close_coin("BNB", bot.mirrored_coins(), summary, "sims-missing")
+    assert summary["closed"] == 1 and summary["errors"] == 0
+    assert bot.open_count() == 0
+    assert any("already flat" in n for n in got)
 
 
 def test_stranger_posts_never_mimicked(tmp_path):

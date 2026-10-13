@@ -584,7 +584,20 @@ class AutoBot:
         if self.hl is not None:
             self.hl.cancel_tpsl(coin, self._tpsl_of(coin))
             self.hl.cancel_coin_triggers(coin)
-        fill = self.hl.close(coin)
+        try:
+            fill = self.hl.close(coin)
+        except Exception as e:
+            if "no open position" in str(e):
+                # Goal state already true (trigger fill, manual close, or
+                # liquidation): heal the ledger instead of erroring.
+                self.store.audit("mimic_closed",
+                                 {"coin": coin,
+                                  "margin_usd": copies[coin]["margin_usd"],
+                                  "note": "already-flat"})
+                summary["closed"] += 1
+                self._notify(f"CLOSED {coin} (already flat on HL).")
+                return
+            raise
         summary["closed"] += 1
         self.store.audit("mimic_closed",
                          {"coin": coin,
@@ -663,6 +676,14 @@ class AutoBot:
             if coin:
                 board[coin] = "LONG" if inv.get("directionLong") else "SHORT"
         self._pariston_opens = len(board)
+        # Heal first: ledger-open but HL-flat (trigger fills, manual
+        # closes) must not reach the close path as errors.
+        try:
+            healed = self.reconcile_ledger()
+            if healed:
+                logger.info(f"[Auto] sims sync healed {healed} flat leg(s)")
+        except Exception as e:
+            logger.warning(f"[Auto] sims reconcile failed: {e}")
         # Adopt wallet holdings that match his board but predate the ledger
         # (manual copies, previous bot generations): they enter full
         # lifecycle tracking instead of shadowing it forever.
