@@ -24,3 +24,26 @@ def test_to_share_setup_long_keeps_usdt_suffix():
               "entryPrice": 67000.0, "stopLoss": None, "priceTarget": 70000.0}
     setup = to_share_setup(detail)
     assert setup["symbol"] == "BTCUSDT" and setup["side"] == "LONG"
+
+
+def test_to_share_setup_unwraps_history_post_shape():
+    """History endpoint returns a post object (fields under `update`); the
+    flat-shape guard used to drop it, blinding the edit sync (UNI TP miss)."""
+    from mirror.feed import fetch_source_levels
+    post = {"id": "h1", "update": {
+        "ticker": "UNI", "directionLong": True, "leverage": 3,
+        "entryPrice": 7.5576, "priceTarget": 8.114131,
+        "stopLoss": 7.21278, "isOpen": True, "baseId": "B-UNI"}}
+    assert to_share_setup(post) == {
+        "symbol": "UNIUSDT", "side": "LONG", "leverage": 3,
+        "entry": 7.5576, "stop_loss": 7.21278, "tp": 8.114131}
+
+    class _Client:
+        def fetch_position_history(self, base_id, token):
+            assert base_id == "B-UNI"
+            return post
+
+    assert fetch_source_levels(_Client(), "tok", "B-UNI") == {
+        "symbol": "UNIUSDT", "side": "LONG", "leverage": 3,
+        "entry": 7.5576, "stop_loss": 7.21278, "tp": 8.114131,
+        "ticker": "UNI", "is_open": True}

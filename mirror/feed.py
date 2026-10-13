@@ -28,17 +28,23 @@ def normalize_position(inv: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def to_share_setup(detail: Dict[str, Any]) -> Dict[str, Any]:
-    """History detail -> paper-share-ready setup (symbol/side/lv/entry/TP/SL)."""
-    ticker = str(detail.get("ticker") or "").upper()
+    """History detail -> paper-share-ready setup (symbol/side/lv/entry/TP/SL).
+
+    The history endpoint returns a post object with the position fields
+    nested under `update` (same shape as feed posts); flat dicts are also
+    accepted (unit fixtures, legacy callers)."""
+    src = detail.get("update") if isinstance(detail.get("update"), dict) \
+        else detail
+    ticker = str(src.get("ticker") or "").upper()
     symbol = ticker if ticker.endswith("USDT") else (ticker + "USDT" if ticker else "")
-    long = bool(detail.get("directionLong", False))
+    long = bool(src.get("directionLong", False))
     return {
         "symbol": symbol,
         "side": "LONG" if long else "SHORT",
-        "leverage": detail.get("leverage", 10),
-        "entry": detail.get("entryPrice"),
-        "stop_loss": detail.get("stopLoss"),
-        "tp": detail.get("priceTarget"),
+        "leverage": src.get("leverage", 10),
+        "entry": src.get("entryPrice"),
+        "stop_loss": src.get("stopLoss"),
+        "tp": src.get("priceTarget"),
     }
 
 
@@ -58,7 +64,11 @@ def fetch_open_positions(client, token: str,
 
 def fetch_setup_detail(client, token: str, base_id: str) -> Dict[str, Any]:
     detail = client.fetch_position_history(base_id, token)
-    if not isinstance(detail, dict) or not detail.get("ticker"):
+    if not isinstance(detail, dict):
+        return {}
+    src = detail.get("update") if isinstance(detail.get("update"), dict) \
+        else detail
+    if not src.get("ticker"):
         return {}
     return to_share_setup(detail)
 
@@ -72,9 +82,15 @@ def fetch_source_levels(client, token: str, base_id: str) -> Dict[str, Any]:
         detail = client.fetch_position_history(base_id, token)
     except Exception:
         return {}
-    if not isinstance(detail, dict) or not detail.get("ticker"):
+    if not isinstance(detail, dict):
+        return {}
+    # History endpoint returns a post object (fields under `update`);
+    # flat detail dicts are also accepted.
+    src = detail.get("update") if isinstance(detail.get("update"), dict) \
+        else detail
+    if not src.get("ticker"):
         return {}
     setup = to_share_setup(detail)
-    setup["ticker"] = str(detail.get("ticker") or "").upper()
-    setup["is_open"] = detail.get("isOpen")
+    setup["ticker"] = str(src.get("ticker") or "").upper()
+    setup["is_open"] = src.get("isOpen")
     return setup

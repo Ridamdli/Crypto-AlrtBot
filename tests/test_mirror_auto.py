@@ -760,9 +760,10 @@ def test_edit_sync_catches_redacted_tp_move(tmp_path):
     class _Client:
         def fetch_position_history(self, base_id, token):
             assert base_id == "SRC-1"
-            return {"ticker": "HYPE", "directionLong": False, "leverage": 4,
-                    "entryPrice": 85.0, "priceTarget": 78.0,
-                    "stopLoss": 88.0, "isOpen": True}
+            return {"id": "h1", "update": {
+                "ticker": "HYPE", "directionLong": False, "leverage": 4,
+                "entryPrice": 85.0, "priceTarget": 78.0,
+                "stopLoss": 88.0, "isOpen": True, "baseId": "SRC-1"}}
 
     assert bot._sync_edits(_Client(), "tok") == 1
     assert hl.orders[-1][3:] == (78.0, 88.0)
