@@ -179,6 +179,15 @@ def test_trigger_payload_is_wire_numeric():
         _signing.float_to_wire(trig["triggerPx"])
 
 
+def test_wire_px_truncates_float_garbage():
+    """Regression: raw signal math (12.254806000000002) is rejected by
+    the venue with 'invalid price' — wire prices carry at most 5 sig figs."""
+    from mirror.hl import HlBridge
+    assert HlBridge._wire_px(12.254806000000002) == 12.255
+    assert HlBridge._wire_px(0.082634) == 0.082634
+    assert HlBridge._wire_px(732.32) == 732.32
+
+
 def test_place_tpsl_long_sells():
     b, ex = _tpsl_bridge()
     b.place_tpsl("BTC", "LONG", 0.01, 90000.0, 80000.0)

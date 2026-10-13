@@ -191,6 +191,13 @@ class HlBridge:
                 raise RuntimeError("SHORT needs tp < entry < sl")
         return tp_f, sl_f
 
+    @staticmethod
+    def _wire_px(px: float) -> float:
+        """HL price rule: at most 5 significant figures (raw floats from
+        signal math carry garbage like 12.254806000000002 and the venue
+        rejects them with 'invalid price')."""
+        return float(f"{float(px):.5g}")
+
     def place_tpsl(self, coin: str, side: str, size: float,
                    tp_px: float, sl_px: float) -> Dict[str, Any]:
         """Resting reduce-only TP + SL triggers for the full size. Returns
@@ -203,7 +210,7 @@ class HlBridge:
             _Cloid = None
         is_buy = side.upper() == "SHORT"  # triggers close against the position
         out = {}
-        for kind, px in (("tp", float(tp_px)), ("sl", float(sl_px))):
+        for kind, px in (("tp", self._wire_px(tp_px)), ("sl", self._wire_px(sl_px))):
             hex_id = "0x" + _secrets.token_hex(16)
             cloid = _Cloid(hex_id) if _Cloid is not None else hex_id
             raw = ex.order(coin, is_buy, float(size), float(px),
