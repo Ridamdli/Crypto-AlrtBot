@@ -234,6 +234,35 @@ class HlBridge:
         logger.info(f"[HL] tpsl resting {coin} {side} tp={tp_px} sl={sl_px}")
         return out
 
+    def cancel_coin_triggers(self, coin: str) -> int:
+        """Cancel ALL resting orders for a coin (ledger-independent safety
+        net: covers triggers placed by older runs or unknown ledgers).
+        Returns count canceled. Never raises."""
+        try:
+            orders = self.public_post("/info", {"type": "openOrders",
+                                                "user": self.wallet_address})
+        except Exception as e:
+            logger.warning(f"[HL] openOrders unreadable: {e}")
+            return 0
+        if not isinstance(orders, list):
+            return 0
+        ex = self._client_or_throw()
+        n = 0
+        for o in orders:
+            if not isinstance(o, dict) or o.get("coin") != coin:
+                continue
+            try:
+                oid = o.get("oid")
+                if oid is None:
+                    continue
+                ex.cancel(coin, int(oid))
+                n += 1
+            except Exception as e:
+                logger.warning(f"[HL] cancel {coin} oid failed: {e}")
+        if n:
+            logger.info(f"[HL] canceled {n} resting order(s) on {coin}")
+        return n
+
     def cancel_tpsl(self, coin: str, cloids: List[str]) -> int:
         """Best-effort cancel of resting triggers by cloid. Returns count."""
         ex = self._client_or_throw()

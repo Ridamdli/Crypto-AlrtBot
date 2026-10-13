@@ -101,6 +101,32 @@ def test_session_post_without_session_raises():
         s.post("/dex/trade", {})
 
 
+def test_cancel_coin_triggers_sweeps_coin_only(monkeypatch):
+    from mirror.hl import HlBridge
+    import mirror.hl as _hlmod
+    orders = [
+        {"coin": "LINK", "oid": 11},
+        {"coin": "LINK", "oid": 22},
+        {"coin": "HYPE", "oid": 33},
+        {"coin": "LINK"},  # no oid: skipped
+    ]
+    monkeypatch.setattr(HlBridge, "public_post",
+                        staticmethod(lambda *a, **k: orders))
+
+    class _Ex:
+        def __init__(self):
+            self.canceled = []
+
+        def cancel(self, coin, oid):
+            self.cancels = getattr(self, "cancels", []) + [(coin, oid)]
+
+    ex = _Ex()
+    b = HlBridge(agent_key="k", wallet_address="w",
+                 client_factory=lambda: ex)
+    assert b.cancel_coin_triggers("LINK") == 2
+    assert ex.cancels == [("LINK", 11), ("LINK", 22)]
+
+
 def test_session_lazy_loads_dropped_in_file(tmp_path, monkeypatch):
     import json as _json
     state = str(tmp_path / "trading_session.json")

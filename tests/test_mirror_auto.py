@@ -107,6 +107,10 @@ class FakeHl:
         self.cancels.append((coin, list(cloids or [])))
         return len(cloids or [])
 
+    def cancel_coin_triggers(self, coin):
+        self.cancels.append((coin, "sweep"))
+        return 0
+
     def place_tpsl(self, coin, side, size, tp, sl):
         self.orders.append((coin, side, size, tp, sl))
         n = len(self.orders)
@@ -431,7 +435,8 @@ def test_tpsl_update_replaces_resting_triggers(tmp_path):
     out = bot.run_once("tok")
     assert out["alerts"] == 1
     assert len(hl.orders) == 2  # replaced
-    assert hl.cancels[-1] == ("HYPE", ["0xtp001", "0xsl001"])
+    assert ("HYPE", ["0xtp001", "0xsl001"]) in hl.cancels  # cloid cancel
+    assert ("HYPE", "sweep") in hl.cancels  # open-order sweep
     assert any("TP/SL synced HYPE" in n for n in got)
 
 

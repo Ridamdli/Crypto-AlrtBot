@@ -560,6 +560,7 @@ class AutoBot:
             entry = float(pos.get("entryPx", 0) or 0)
             tp, sl = HlBridge.sane_tpsl(side, entry, tp, sl)
             self.hl.cancel_tpsl(coin, self._tpsl_of(coin))
+            self.hl.cancel_coin_triggers(coin)
             out = self.hl.place_tpsl(coin, side, size, tp, sl)
             self.store.audit("tpsl_placed", {
                 "coin": coin, "tp": tp, "sl": sl,
@@ -582,6 +583,7 @@ class AutoBot:
             return
         if self.hl is not None:
             self.hl.cancel_tpsl(coin, self._tpsl_of(coin))
+            self.hl.cancel_coin_triggers(coin)
         fill = self.hl.close(coin)
         summary["closed"] += 1
         self.store.audit("mimic_closed",
