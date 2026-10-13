@@ -740,3 +740,47 @@ def test_pariston_increase_adds_capped_position(tmp_path):
     assert len(hl.opens) == 2
     assert bot.open_count() == 2
     assert bot.committed_usd() == round(round(18.38 * 0.25, 2) * 2, 2)
+
+
+def test_edit_sync_catches_redacted_tp_move(tmp_path):
+    """UNI case: feed redacts TP/SL so _follow_update has nothing, but the
+    history-detail sync replaces resting triggers (idempotent)."""
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl(holdings={"HYPE"})
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    bot.store.audit("mimicked", {"coin": "HYPE", "margin_usd": 4.68,
+                                 "source": "SRC-1", "side": "SHORT"})
+    bot.store.audit("tpsl_placed", {"coin": "HYPE", "tp": 79.8, "sl": 87.8,
+                                    "cloids": ["0xtp000", "0xsl000"]})
+
+    class _Client:
+        def fetch_position_history(self, base_id, token):
+            assert base_id == "SRC-1"
+            return {"ticker": "HYPE", "directionLong": False, "leverage": 4,
+                    "entryPrice": 85.0, "priceTarget": 78.0,
+                    "stopLoss": 88.0, "isOpen": True}
+
+    assert bot._sync_edits(_Client(), "tok") == 1
+    assert hl.orders[-1][3:] == (78.0, 88.0)
+    assert bot._sync_edits(_Client(), "tok") == 0  # no thrash
+
+
+def test_edit_sync_skips_dry_run(tmp_path):
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    bot = AutoBot(mc, _cfg(live=False), hl=FakeHl(),
+                  session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=lambda t: None)
+    bot.store.audit("mimicked", {"coin": "HYPE", "margin_usd": 4.68,
+                                 "source": "SRC-1", "side": "SHORT"})
+
+    class _Client:
+        def fetch_position_history(self, base_id, token):
+            raise AssertionError("must not call history in dry-run")
+
+    assert bot._sync_edits(_Client(), "tok") == 0

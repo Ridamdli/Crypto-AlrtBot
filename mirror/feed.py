@@ -61,3 +61,20 @@ def fetch_setup_detail(client, token: str, base_id: str) -> Dict[str, Any]:
     if not isinstance(detail, dict) or not detail.get("ticker"):
         return {}
     return to_share_setup(detail)
+
+
+def fetch_source_levels(client, token: str, base_id: str) -> Dict[str, Any]:
+    """Ground-truth TP/SL for one source position. Cross-account readable
+    via history (feed posts redact TP/SL for non-owners, sims rows carry
+    none). Returns {ticker, side, tp, sl, entry, leverage, is_open} or {}
+    when unreadable. Read-only, never raises."""
+    try:
+        detail = client.fetch_position_history(base_id, token)
+    except Exception:
+        return {}
+    if not isinstance(detail, dict) or not detail.get("ticker"):
+        return {}
+    setup = to_share_setup(detail)
+    setup["ticker"] = str(detail.get("ticker") or "").upper()
+    setup["is_open"] = detail.get("isOpen")
+    return setup

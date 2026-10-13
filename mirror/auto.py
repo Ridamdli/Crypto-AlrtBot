@@ -11,7 +11,9 @@ every guard passes AND the HL fill verifies):
 
 Exit doctrine (adopted from the proven reference build): no independent
 TP/SL on live copies — we trust Pariston's entries AND exits. Source TP/SL
-edits arrive as feed update posts and are logged/alerted, not traded.
+edits arrive as feed update posts (fast path) AND via per-coin history
+detail (ground truth: feed redacts TP/SL for non-owners, sims rows carry
+none). Both replace our resting triggers.
 
 MIMIC_LIVE=false (default) runs the full loop with a fake-or-read-only
 posture: detection + sizing + audit, zero orders. Flip only with caps set.
@@ -564,6 +566,72 @@ class AutoBot:
                 cloids = []
         return cloids
 
+    def _last_tpsl_levels(self, coin: str) -> tuple:
+        """Last synced (tp, sl) for a coin, or (None, None)."""
+        tp, sl = None, None
+        for e in self.store.recent_audit(5000):
+            d = e.get("detail") or {}
+            if e.get("event") == "tpsl_placed" and d.get("coin") == coin:
+                tp, sl = d.get("tp"), d.get("sl")
+            elif e.get("event") in ("tpsl_cleared", "mimic_closed") \
+                    and d.get("coin") == coin:
+                tp, sl = None, None
+        return tp, sl
+
+    @staticmethod
+    def _levels_moved(old: Any, new: Any) -> bool:
+        try:
+            if old is None or new is None:
+                return old != new
+            return abs(float(old) - float(new)) > 1e-9
+        except (TypeError, ValueError):
+            return old != new
+
+    def _sync_edits(self, client, token: str) -> int:
+        """Ground-truth TP/SL sync: per mirrored coin, read Pariston's live
+        levels via history detail and replace resting triggers on change.
+        This is what catches edits the feed redacts (e.g. UNI TP move).
+        Best-effort per coin; never raises. Returns count synced."""
+        if not self.cfg.live or self.hl is None:
+            return 0
+        from mirror.feed import fetch_source_levels
+        copies = self.mirrored_coins()
+        n = 0
+        for coin, info in list(copies.items()):
+            base = str(info.get("source") or "")
+            if not base:
+                continue
+            try:
+                lv = fetch_source_levels(client, token, base)
+            except Exception as e:
+                logger.warning(f"[Auto] edit sync unreadable {coin}: {e}")
+                continue
+            if not lv or lv.get("is_open") is False:
+                continue  # closes handled by feed/sims paths
+            tp, sl = lv.get("tp"), lv.get("stop_loss")
+            if tp is None or sl is None:
+                continue
+            old_tp, old_sl = self._last_tpsl_levels(coin)
+            if old_tp is None and old_sl is None:
+                pass  # missing triggers: attach
+            elif not (self._levels_moved(old_tp, tp)
+                      or self._levels_moved(old_sl, sl)):
+                continue
+            try:
+                pos = self.hl.position(coin)
+                if pos is None:
+                    continue
+                side = "LONG" if float(pos.get("szi", 0) or 0) > 0 else "SHORT"
+                before_n = len(self._tpsl_of(coin))
+                self._attach_tpsl(coin, side, {"tp": tp, "sl": sl})
+                if self._tpsl_of(coin):
+                    n += 1
+                    self._notify(f"TP/SL synced {coin} from source "
+                                 f"(replaced {before_n} triggers).")
+            except Exception as e:
+                logger.warning(f"[Auto] edit sync failed {coin}: {e}")
+        return n
+
     def _attach_tpsl(self, coin: str, side: str, ev: Dict[str, Any],
                      open_ts: float = 0) -> None:
         """Rest Pariston's TP/SL as native triggers. Levels come from the
@@ -660,8 +728,9 @@ class AutoBot:
             self._close_coin(coin, self.mirrored_coins(), summary, "feed")
             return
         # Source TP/SL edit on a mirrored coin: replace our resting
-        # triggers immediately. Anything without usable TP+SL (or on a
-        # coin we don't hold) is logged + alerted, never traded blind.
+        # triggers immediately (fast path). Redacted edits (tp/sl None for
+        # non-owners) fall through to the per-coin history sync in
+        # _sims_sync, which catches them within ~60s.
         copies = self.mirrored_coins()
         if coin in copies and ev.get("tp") is not None \
                 and ev.get("sl") is not None:
@@ -776,6 +845,13 @@ class AutoBot:
         healed = self._backfill_tpsl()
         if healed:
             logger.info(f"[Auto] tpsl backfilled on {healed} coin(s)")
+        try:
+            synced = self._sync_edits(client, token)
+            if synced:
+                summary["alerts"] += synced
+                logger.info(f"[Auto] tpsl edit-synced on {synced} coin(s)")
+        except Exception as e:
+            logger.warning(f"[Auto] edit sync skipped: {e}")
         logger.info(f"[Auto] sims sync: {summary}")
         return summary
 
