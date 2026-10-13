@@ -7,6 +7,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
+COPY mirror/ ./mirror/
 
 # Secrets are NEVER baked into the image.
 # Provide them at runtime: --env-file .env  OR  -e TELEGRAM_BOT_TOKEN=... -e TELEGRAM_CHAT_ID=...
