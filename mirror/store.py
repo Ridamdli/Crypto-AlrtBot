@@ -52,6 +52,15 @@ class MirrorStore:
             data["seen"].append(source_base_id)
             self._save(data)
 
+    def unmark_seen(self, source_base_id: str) -> None:
+        """Allow one fresh attempt for a previously skipped source id.
+        Capital/concurrency skips are transient (floor lowered, slots
+        freed) and must never bury a coin forever."""
+        data = self.load()
+        if source_base_id in data["seen"]:
+            data["seen"].remove(source_base_id)
+            self._save(data)
+
     def reported_closed_ids(self) -> set:
         return set(self.load().get("reported_closed", []))
 

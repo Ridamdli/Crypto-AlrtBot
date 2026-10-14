@@ -269,9 +269,12 @@ class AutoBot:
 
     def bootstrap_from_sims(self, client, token: str) -> Dict[str, Any]:
         """Sync Pariston's ALREADY-open positions (feed only emits new
-        posts). Cap-skipped coins stay unmarked and retry on later syncs;
-        mimicked/dry/wallet-held outcomes are terminal for their base id.
-        Returns a summary."""
+        posts). Cap/floor/minimum skips stay unmarked and retry on later
+        syncs; mimicked/dry/wallet-held outcomes are terminal for their
+        base id. A live coin on his board that we neither mirror nor hold
+        gets one fresh attempt per sync even if previously skipped, so a
+        resolved capital skip (floor lowered, slot freed) can never bury
+        a coin. Returns a summary."""
         from mirror.feed import fetch_open_positions
         summary: Dict[str, Any] = {"mimicked": 0, "skipped": 0, "errors": 0}
         try:
@@ -285,24 +288,30 @@ class AutoBot:
         self._pariston_opens = max(len(positions), 1)
         for pos in positions:
             base = str(pos.get("baseId") or "")
-            if not base or f"sims-{base}" in self.store.seen_ids():
+            if not base:
                 continue
             ticker = str(pos.get("ticker") or "")
             if ticker in mirrored:
                 self.store.mark_seen(f"sims-{base}")
                 continue
+            hl_holds = False
             if self.hl is not None:
                 try:
-                    if self.hl.position(ticker) is not None:
-                        # Wallet already exposed (manual or older copy):
-                        # never blind-add, alert instead.
-                        self.store.mark_seen(f"sims-{base}")
-                        self._notify(f"SKIP bootstrap {ticker}: wallet "
-                                     f"already holds it (manual review).")
-                        summary["skipped"] += 1
-                        continue
+                    hl_holds = self.hl.position(ticker) is not None
                 except Exception as e:
                     logger.warning(f"[Auto] position check failed: {e}")
+            if hl_holds:
+                # Wallet already exposed (manual or older copy):
+                # never blind-add, alert instead.
+                self.store.mark_seen(f"sims-{base}")
+                self._notify(f"SKIP bootstrap {ticker}: wallet "
+                             f"already holds it (manual review).")
+                summary["skipped"] += 1
+                continue
+            if self.cfg.live and f"sims-{base}" in self.store.seen_ids():
+                self.store.unmark_seen(f"sims-{base}")
+            if f"sims-{base}" in self.store.seen_ids():
+                continue
             ev = {"action": "open", "post_id": f"sims-{base}",
                   "base_id": base, "base_short_id": "",
                   "ticker": ticker, "side": pos.get("side", "SHORT"),
@@ -315,8 +324,9 @@ class AutoBot:
                 summary["errors"] += 1
                 logger.warning(f"[Auto] bootstrap mimic failed: {e}")
                 continue
-            # Cap/floor skips are retried on later syncs (slots free up);
-            # everything else is terminal for this base id.
+            # Cap/floor/minimum skips are retried on later syncs (slots free
+            # up, equity resolves); everything else is terminal for this
+            # base id.
             if outcome != "cap-skipped":
                 self.store.mark_seen(f"sims-{base}")
         logger.info(f"[Auto] bootstrap: {summary}")
@@ -361,9 +371,10 @@ class AutoBot:
 
     def _mimic_open(self, ev: Dict[str, Any], summary: Dict[str, Any]) -> str:
         """Attempt one mimic. Returns the outcome: 'mimicked', 'dry',
-        'cap-skipped' (retryable when slots free up), 'empty' (no coin),
-        or 'hl-skipped' (terminal: wallet-held/under-minimum handled by
-        callers). Raises on execution failure."""
+        'cap-skipped' (retryable when slots free up or capital resolves),
+        'empty' (no coin), or 'hl-skipped' (terminal: bank-unknown or
+        zeroed risk caps — operator/config errors, never retried).
+        Raises on execution failure."""
         coin = (ev.get("ticker") or "").replace("USDT", "").replace("USDC", "")
         side = str(ev.get("side") or "LONG").upper()
         leverage = int(ev.get("leverage") or 10)
@@ -399,7 +410,9 @@ class AutoBot:
                              f"(${margin * leverage:.2f} notional)")
                 self._ev("WARN", "skip",
                          {"coin": coin, "reason": "under-hl-minimum"})
-                return "hl-skipped"
+                # Transient: equity frees up as positions close, so the
+                # bootstrap must retry this base id on later syncs.
+                return "cap-skipped"
         self._notify(f"Pariston {coin} {side} {leverage}x -> mimic ${margin} "
                      f"(acct ${self._account_usd():.2f}) "
                      f"[{reason}] {'LIVE' if self.cfg.live else 'DRY-RUN'}")

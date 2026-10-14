@@ -495,6 +495,74 @@ def test_cap_skipped_base_retries_when_slot_frees(tmp_path):
         _feed.fetch_open_positions = _feed_orig
 
 
+def test_under_hl_minimum_is_retryable(tmp_path):
+    """Capital skips must not bury a coin: under-hl-minimum returns the
+    retryable outcome so the base id stays unmarked."""
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()
+    bot = AutoBot(mc, _cfg(live=True, account_usd=6.0, max_usd_per_mimic=5.0,
+                           max_pct_per_mimic=25.0, min_remaining_usd=3.0),
+                  hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    from mirror import auto as _auto
+    ev = {"action": "open", "post_id": "p1", "base_id": "B1",
+          "ticker": "DOGE", "side": "SHORT", "leverage": 3,
+          "owner_id": _auto.PARISTON_OWNER_ID,
+          "portfolio_id": _auto.PARISTON_PORTFOLIO_ID}
+    summary = {"mimicked": 0, "closed": 0, "skipped": 0, "alerts": 0,
+               "errors": 0}
+    assert bot._mimic_open(ev, summary) == "cap-skipped"
+    assert summary["skipped"] == 1 and hl.opens == []
+
+
+def test_bootstrap_retries_seen_but_unmirrored_in_live(tmp_path):
+    """HYPE scenario: buried as seen by an old capital skip, affordable
+    now -> one fresh attempt per sync, mimicked."""
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    bot.store.mark_seen("sims-B-HYPE")
+    import mirror.feed as _feed
+    _feed_orig = _feed.fetch_open_positions
+    _feed.fetch_open_positions = lambda *a, **k: [
+        {"baseId": "B-HYPE", "ticker": "HYPE", "side": "SHORT", "leverage": 4}]
+    try:
+        out = bot.bootstrap_from_sims(object(), "tok")
+        assert out["mimicked"] == 1
+        assert [c for c, _, _, _ in hl.opens] == ["HYPE"]
+    finally:
+        _feed.fetch_open_positions = _feed_orig
+
+
+def test_bootstrap_keeps_seen_in_dry_run(tmp_path):
+    """Dry mode never un-buries: no orders, no ledger churn."""
+    got = []
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl = FakeHl()
+    bot = AutoBot(mc, _cfg(live=False), hl=hl, session=FakeSession(),
+                  watcher=FeedWatcher(fetch_fn=lambda token: []),
+                  notify_fn=got.append)
+    bot.store.mark_seen("sims-B-HYPE")
+    import mirror.feed as _feed
+    _feed_orig = _feed.fetch_open_positions
+    _feed.fetch_open_positions = lambda *a, **k: [
+        {"baseId": "B-HYPE", "ticker": "HYPE", "side": "SHORT", "leverage": 4}]
+    try:
+        out = bot.bootstrap_from_sims(object(), "tok")
+        assert out["mimicked"] == 0 and hl.opens == []
+        assert "sims-B-HYPE" in bot.store.seen_ids()
+    finally:
+        _feed.fetch_open_positions = _feed_orig
+
+
 def test_backfill_attaches_resolved_tpsl(tmp_path, monkeypatch):
     import json as _json
     main = tmp_path / "main_data"
