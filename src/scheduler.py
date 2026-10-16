@@ -152,8 +152,15 @@ class BotScheduler:
                 rank = len(published_signals) + 1
                 msg = TelegramFormatter.format_signal(signal_obj, rank=rank)
 
-                # 3. Broadcast
-                self.bot.send_message(msg)
+                # 3. Broadcast (ledger only on actual delivery: a failed
+                # or disabled send must retry next cycle, not burn the
+                # 6h dedup window)
+                delivered = self.bot.send_message(msg)
+                if not delivered:
+                    logger.warning(
+                        f"[Scheduler] Telegram send failed for "
+                        f"{symbol} {side}; not ledgered, will retry.")
+                    continue
 
                 # 4. Update state ledger
                 state["published_signals"][f"{symbol}_{side}"] = signal_obj.timestamp

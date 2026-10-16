@@ -30,10 +30,10 @@ def test_rank_candidates_top_n_still_caps_when_asked():
     assert [c["confidence"] for c in out] == [90, 80]
 
 
-def _full_cand():
+def _full_cand(timestamp="2026-10-11T12:00:00Z"):
     return {
         "signal_id": "SIG-WIRE-1",
-        "timestamp": "2026-10-11T12:00:00Z",
+        "timestamp": timestamp,
         "symbol": "SOLUSDT",
         "side": "LONG",
         "strategy_id": "donchian_20",
@@ -71,7 +71,7 @@ def test_scan_cycle_routes_published_signals_to_paper_share(tmp_path):
             return [_full_cand()]
 
     sched = BotScheduler(pipeline=OnePipeline(), state_file=state_file)
-    sched.bot = SimpleNamespace(send_message=lambda msg: None)
+    sched.bot = SimpleNamespace(send_message=lambda msg: True)
     sched.persistence = SimpleNamespace(save_signal=lambda sig: None)
     sched._track_outcomes = lambda: None
     seen = {}
@@ -125,3 +125,179 @@ def test_empty_cycle_still_runs_maintenance_hooks(tmp_path):
     assert "supervise" in calls
     assert "sync" in calls
     assert ("share", []) not in calls  # nothing published: nothing to share
+
+
+def _wired_sched(tmp_path, send_fn):
+    """Scheduler with one fixed candidate, stubbed sink + persistence."""
+    from types import SimpleNamespace
+
+    state_file = str(tmp_path / "sched_state.json")
+
+    class OnePipeline:
+        def run_pipeline(self):
+            return [_full_cand()]
+
+    sched = BotScheduler(pipeline=OnePipeline(), state_file=state_file)
+    sched.bot = SimpleNamespace(send_message=send_fn)
+    sched.persistence = SimpleNamespace(save_signal=lambda sig: None)
+    sched._track_outcomes = lambda: None
+    sched._supervise_exits = lambda: None
+    sched._sync_exits_to_invo = lambda: None
+    sched._share_paper_to_invo = lambda published: None
+    return sched
+
+
+def _ledger_keys(tmp_path):
+    with open(tmp_path / "sched_state.json", encoding="utf-8") as f:
+        return json.load(f).get("published_signals", {})
+
+
+def test_failed_send_not_ledgered(tmp_path):
+    """F3: a failed broadcast must not burn the 6h dedup window."""
+    sched = _wired_sched(tmp_path, send_fn=lambda msg: False)
+    assert sched.run_scan_cycle() == []
+    assert _ledger_keys(tmp_path) == {}
+
+
+def test_disabled_send_not_ledgered(tmp_path, monkeypatch):
+    """F3: TELEGRAM_ENABLED=false surfaces as send_message False."""
+    monkeypatch.setenv("TELEGRAM_ENABLED", "false")
+    from src.utils.telegram_bot import TelegramBot
+    assert TelegramBot.enabled() is False
+    sched = _wired_sched(tmp_path, send_fn=lambda msg: False)
+    assert sched.run_scan_cycle() == []
+    assert _ledger_keys(tmp_path) == {}
+
+
+def test_successful_send_ledgered(tmp_path):
+    sched = _wired_sched(tmp_path, send_fn=lambda msg: True)
+    out = sched.run_scan_cycle()
+    assert len(out) == 1
+    assert _ledger_keys(tmp_path) == {"SOLUSDT_LONG": "2026-10-11T12:00:00Z"}
+
+
+def test_failed_send_retries_next_cycle(tmp_path):
+    """F3: fail once (no ledger), succeed next cycle (published)."""
+    from types import SimpleNamespace
+
+    calls = {"n": 0}
+
+    def _flaky(msg):
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    sched = _wired_sched(tmp_path, send_fn=_flaky)
+    assert sched.run_scan_cycle() == []  # failed: nothing published
+    assert _ledger_keys(tmp_path) == {}
+    out = sched.run_scan_cycle()  # send works now: published
+    assert len(out) == 1
+    assert "SOLUSDT_LONG" in _ledger_keys(tmp_path)
+
+
+def test_successful_send_suppressed_within_cooldown(tmp_path):
+    """Unchanged policy: a delivered signal stays deduplicated for 6h."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    class NowPipeline:
+        def run_pipeline(self):
+            return [_full_cand(timestamp=now)]
+
+    from types import SimpleNamespace
+
+    sched = BotScheduler(pipeline=NowPipeline(),
+                         state_file=str(tmp_path / "sched_state.json"))
+    sched.bot = SimpleNamespace(send_message=lambda msg: True)
+    sched.persistence = SimpleNamespace(save_signal=lambda sig: None)
+    sched._track_outcomes = lambda: None
+    sched._supervise_exits = lambda: None
+    sched._sync_exits_to_invo = lambda: None
+    sched._share_paper_to_invo = lambda published: None
+    assert len(sched.run_scan_cycle()) == 1
+    assert sched.run_scan_cycle() == []  # same symbol_side, within cooldown
+
+
+def _run_main(monkeypatch, cands, send_fn=None, use_real_bot=False):
+    """Run src.main.main with stubbed pipeline/sinks. Returns (result, sent)."""
+    import src.main as _main
+    from types import SimpleNamespace
+
+    sent = []
+
+    class FakePipeline:
+        def run_pipeline(self):
+            return list(cands)
+
+    if use_real_bot:
+        from src.utils.telegram_bot import TelegramBot
+        bot = TelegramBot()
+    else:
+        def _send(msg):
+            sent.append(msg)
+            return send_fn(msg) if send_fn is not None else True
+        bot = SimpleNamespace(send_message=_send)
+    monkeypatch.setattr(_main, "SignalPipeline", lambda: FakePipeline())
+    monkeypatch.setattr(_main, "TelegramBot", lambda: bot)
+    monkeypatch.setattr(_main, "SignalPersistence",
+                        lambda: SimpleNamespace(save_signal=lambda sig: None))
+    return _main.main(), sent
+
+
+def test_main_counts_delivered_on_success(monkeypatch):
+    result, sent = _run_main(monkeypatch, [_full_cand()])
+    assert result == {"delivered": 1, "failed": 0, "candidates": 1}
+    assert len(sent) == 1
+
+
+def test_main_failed_send_not_counted_delivered(monkeypatch):
+    result, sent = _run_main(monkeypatch, [_full_cand()],
+                             send_fn=lambda msg: False)
+    assert result == {"delivered": 0, "failed": 1, "candidates": 1}
+    assert len(sent) == 1  # attempted once; no retry in one-shot path
+
+
+def test_main_mixed_delivery(monkeypatch):
+    other = _full_cand()
+    other.update({"signal_id": "SIG-WIRE-2", "symbol": "ETHUSDT"})
+    result, _ = _run_main(monkeypatch, [_full_cand(), other],
+                          send_fn=lambda msg: "ETHUSDT" not in msg)
+    assert result == {"delivered": 1, "failed": 1, "candidates": 2}
+
+
+def test_main_disabled_send_reports_failure(monkeypatch):
+    """TELEGRAM_ENABLED=false with the real bot: no network (no creds in
+    this env), returns False, counted as failed not delivered."""
+    import os
+    monkeypatch.setenv("TELEGRAM_ENABLED", "false")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    result, _ = _run_main(monkeypatch, [_full_cand()], use_real_bot=True)
+    assert result == {"delivered": 0, "failed": 1, "candidates": 1}
+
+
+def test_main_empty_candidates(monkeypatch):
+    result, sent = _run_main(monkeypatch, [])
+    assert result == {"delivered": 0, "failed": 0, "candidates": 0}
+    assert sent == []
+
+
+def test_main_formatter_error_counts_failed(monkeypatch):
+    import src.main as _main
+    from types import SimpleNamespace
+
+    class FakePipeline:
+        def run_pipeline(self):
+            return [_full_cand()]
+
+    def _broken_format(*a, **k):
+        raise RuntimeError("bad format")
+
+    monkeypatch.setattr(_main, "SignalPipeline", lambda: FakePipeline())
+    monkeypatch.setattr(_main, "TelegramBot",
+                        lambda: SimpleNamespace(send_message=lambda msg: True))
+    monkeypatch.setattr(_main, "SignalPersistence",
+                        lambda: SimpleNamespace(save_signal=lambda sig: None))
+    monkeypatch.setattr(_main.TelegramFormatter, "format_signal",
+                        staticmethod(_broken_format))
+    assert _main.main() == {"delivered": 0, "failed": 1, "candidates": 1}
