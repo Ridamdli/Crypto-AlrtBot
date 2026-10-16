@@ -29,6 +29,27 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _price_trend_15m(klines_15m, lookback: int = 10) -> str:
+    """15m price direction over the OI window: 'up' | 'down' | 'neutral'.
+
+    Same comparison as MomentumFilterStrategy._get_trend (last close vs
+    close ``lookback`` bars back, completed candles only, scan-time data).
+    Anything unreadable degrades to 'neutral' (half credit, no OI
+    confirmation) — never raises into the scan.
+    """
+    try:
+        closes = [float(k.get("close", 0)) for k in (klines_15m or [])]
+    except (TypeError, ValueError, AttributeError):
+        return "neutral"
+    if len(closes) < lookback + 1:
+        return "neutral"
+    if closes[-1] > closes[-(lookback + 1)]:
+        return "up"
+    if closes[-1] < closes[-(lookback + 1)]:
+        return "down"
+    return "neutral"
+
+
 class SignalPipeline:
     def __init__(
         self,
@@ -262,7 +283,8 @@ class SignalPipeline:
                 oi_hist = self.client.get_open_interest_hist(
                     symbol, period="15m", limit=10, end_time=as_of_ts
                 )
-                oi_data = self.oi_engine.analyze_oi(oi_hist, "up")  # placeholder, will be updated per candidate
+                price_trend = _price_trend_15m(klines_15m)
+                oi_data = self.oi_engine.analyze_oi(oi_hist, price_trend)
 
                 # OI rejection check (for OI_REQUIRED mode)
                 if self.oi_engine.should_reject_candidate(oi_data):
@@ -311,8 +333,9 @@ class SignalPipeline:
                         if len(klines_entry) < 25:
                             continue
 
-                        # Update OI analysis with actual price trend from strategy
-                        oi_data = self.oi_engine.analyze_oi(oi_hist, "up")  # placeholder
+                        # OI uses the symbol's 15m trend computed above (same
+                        # completed candles the strategies see — no look-ahead).
+                        oi_data = self.oi_engine.analyze_oi(oi_hist, price_trend)
 
                         # Generate candidates from strategy
                         strategy_candidates = strategy.generate_candidates(
@@ -413,6 +436,7 @@ class SignalPipeline:
                                 "invalidation_conditions": rules["invalidation_conditions"],
                                 "management_rules": rules["management_rules"],
                                 "btc_regime": global_regime,
+                                "price_trend": price_trend,
                                 "volume_data": vol_data,
                                 "oi_data": oi_data,
                                 "risk_data": risk_data,

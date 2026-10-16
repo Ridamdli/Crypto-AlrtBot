@@ -87,6 +87,67 @@ class TestOIEngine:
         assert result["oi_change_pct"] == 0.0
 
 
+# ─── Price-trend wiring (P0.1: OI SHORT + momentum credit) ───
+
+class TestPriceTrendHelper:
+    def _kl(self, closes):
+        return [{"close": c, "open": c, "high": c, "low": c, "volume": 1.0}
+                for c in closes]
+
+    def test_rising_is_up(self):
+        from src.pipeline import _price_trend_15m
+        assert _price_trend_15m(self._kl([100.0] * 10 + [101.0])) == "up"
+
+    def test_falling_is_down(self):
+        from src.pipeline import _price_trend_15m
+        assert _price_trend_15m(self._kl([100.0] * 10 + [99.0])) == "down"
+
+    def test_flat_is_neutral(self):
+        from src.pipeline import _price_trend_15m
+        assert _price_trend_15m(self._kl([100.0] * 15)) == "neutral"
+
+    def test_insufficient_or_garbage_is_neutral(self):
+        from src.pipeline import _price_trend_15m
+        assert _price_trend_15m(self._kl([100.0])) == "neutral"
+        assert _price_trend_15m([]) == "neutral"
+        assert _price_trend_15m([{"close": "junk"}] * 12) == "neutral"
+        assert _price_trend_15m(None) == "neutral"
+
+
+def _scored(side, price_trend, oi_status, oi_signal):
+    from src.config import CONFIG
+    eng = ScoringEngine(config=CONFIG)
+    cand = {"side": side, "btc_regime": "neutral",
+            "volume_data": {"ratio": 3.0},
+            "oi_data": {"status": oi_status, "signal": oi_signal},
+            "funding_penalty": 0,
+            "risk_data": {"risk_reward_ratios": {"rr_tp": 2.0}}}
+    if price_trend is not None:
+        cand["price_trend"] = price_trend
+    return eng.score_candidate(cand, CONFIG)
+
+
+class TestTrendAwareScoring:
+    def test_short_down_bearish_full_credit(self):
+        assert _scored("SHORT", "down", "CONFIRMED", "bearish") == 85
+
+    def test_short_up_bullish_half_momentum_and_oi(self):
+        assert _scored("SHORT", "up", "CONFIRMED", "bullish") == 69
+
+    def test_long_up_bullish_full_credit(self):
+        assert _scored("LONG", "up", "CONFIRMED", "bullish") == 85
+
+    def test_missing_trend_halves_momentum_only(self):
+        assert _scored("LONG", None, "CONFIRMED", "bullish") == 77
+
+    def test_neutral_trend_halves_momentum_only(self):
+        assert _scored("SHORT", "neutral", "CONFIRMED", "bearish") == 77
+
+    def test_rejected_oi_penalized_both_sides(self):
+        assert _scored("SHORT", "down", "REJECTED", "bullish_divergence") == 63
+        assert _scored("LONG", "up", "REJECTED", "bearish_divergence") == 63
+
+
 # ─── Entry Engine ────────────────────────────────────────────────────────────
 
 class TestEntryEngine:
