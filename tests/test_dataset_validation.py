@@ -5,6 +5,7 @@ Regression tests for dataset validation and research runner.
 import pytest
 import os
 import json
+import shutil
 import sqlite3
 from datetime import datetime, timezone
 
@@ -16,12 +17,25 @@ from scripts.run_strategy_research import (
 )
 
 
+_REPO_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "data_store", "historical", "historical_data.db")
+
+
+@pytest.fixture(scope="module")
+def dataset_db(tmp_path_factory):
+    """Copy the production dataset so tests never open (or create) the repo's
+    SQLite file — sqlite3.connect would silently create an empty DB if missing."""
+    dst = tmp_path_factory.mktemp("historical") / "historical_data.db"
+    shutil.copy(_REPO_DB, dst)
+    return str(dst)
+
+
 class TestDatasetValidation:
     """Tests for dataset validation logic."""
     
     @pytest.fixture
-    def validator(self):
-        return DatasetValidator()
+    def validator(self, dataset_db):
+        return DatasetValidator(db_path=dataset_db)
     
     def test_btc_regime_data_exists(self, validator):
         """BTCUSDT 4h data must exist for regime evaluation."""
@@ -87,19 +101,19 @@ class TestHistoricalDataCache:
     """Tests for HistoricalDataCache correctness."""
     
     @pytest.fixture
-    def cache(self):
+    def cache(self, dataset_db):
         from src.data.cached_client import CachedFuturesClient
-        client = CachedFuturesClient()
+        client = CachedFuturesClient(db_path=dataset_db)
         return HistoricalDataCache(client)
     
-    def test_cache_matches_sqlite(self, cache):
+    def test_cache_matches_sqlite(self, cache, dataset_db):
         """Cache results should exactly match SQLite query results."""
         # Load BTCUSDT 15m
         cache.load_symbol_intervals("BTCUSDT", ["15m"])
         
         # Query SQLite directly
         import sqlite3
-        conn = sqlite3.connect("data_store/historical/historical_data.db")
+        conn = sqlite3.connect(dataset_db)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("""
