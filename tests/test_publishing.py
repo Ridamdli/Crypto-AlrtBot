@@ -74,6 +74,9 @@ def test_scan_cycle_routes_published_signals_to_paper_share(tmp_path):
     sched.bot = SimpleNamespace(send_message=lambda msg: True)
     sched.persistence = SimpleNamespace(save_signal=lambda sig: None)
     sched._track_outcomes = lambda: None
+    sched._supervise_exits = lambda: None
+    sched._sync_exits_to_invo = lambda: None
+    sched._archive_old_signals = lambda: None
     seen = {}
     sched._share_paper_to_invo = lambda published: seen.setdefault("n", len(published))
     out = sched.run_scan_cycle()
@@ -90,6 +93,12 @@ def test_empty_scan_cycle_writes_heartbeat(tmp_path):
             return []
 
     sched = BotScheduler(pipeline=EmptyPipeline(), state_file=state_file)
+    # Maintenance hooks stubbed: this test pins heartbeat output only and
+    # must not read or write the real repository data_store/.
+    sched._track_outcomes = lambda: None
+    sched._supervise_exits = lambda: None
+    sched._sync_exits_to_invo = lambda: None
+    sched._archive_old_signals = lambda: None
     out = sched.run_scan_cycle()
     assert out == []
     hb_path = os.path.join(str(tmp_path), "scan_history.json")
@@ -120,10 +129,12 @@ def test_empty_cycle_still_runs_maintenance_hooks(tmp_path):
     sched._share_paper_to_invo = lambda published: calls.append(("share", list(published)))
     sched._supervise_exits = lambda: calls.append("supervise")
     sched._sync_exits_to_invo = lambda: calls.append("sync")
+    sched._archive_old_signals = lambda: calls.append("archive")
     assert sched.run_scan_cycle() == []
     assert "track" in calls
     assert "supervise" in calls
     assert "sync" in calls
+    assert "archive" in calls  # quiet branch reaches archival, stubbed off real data
     assert ("share", []) not in calls  # nothing published: nothing to share
 
 
@@ -144,6 +155,7 @@ def _wired_sched(tmp_path, send_fn):
     sched._supervise_exits = lambda: None
     sched._sync_exits_to_invo = lambda: None
     sched._share_paper_to_invo = lambda published: None
+    sched._archive_old_signals = lambda: None
     return sched
 
 
@@ -214,8 +226,31 @@ def test_successful_send_suppressed_within_cooldown(tmp_path):
     sched._supervise_exits = lambda: None
     sched._sync_exits_to_invo = lambda: None
     sched._share_paper_to_invo = lambda published: None
+    sched._archive_old_signals = lambda: None
     assert len(sched.run_scan_cycle()) == 1
     assert sched.run_scan_cycle() == []  # same symbol_side, within cooldown
+
+
+def test_normal_cycle_invokes_archival(tmp_path):
+    """Publishing branch must reach archival without touching real data."""
+    from types import SimpleNamespace
+
+    class OnePipeline:
+        def run_pipeline(self):
+            return [_full_cand()]
+
+    sched = BotScheduler(pipeline=OnePipeline(),
+                         state_file=str(tmp_path / "sched_state.json"))
+    sched.bot = SimpleNamespace(send_message=lambda msg: True)
+    sched.persistence = SimpleNamespace(save_signal=lambda sig: None)
+    sched._track_outcomes = lambda: None
+    sched._supervise_exits = lambda: None
+    sched._sync_exits_to_invo = lambda: None
+    sched._share_paper_to_invo = lambda published: None
+    calls = []
+    sched._archive_old_signals = lambda: calls.append("archive")
+    assert len(sched.run_scan_cycle()) == 1
+    assert calls == ["archive"]
 
 
 def _run_main(monkeypatch, cands, send_fn=None, use_real_bot=False):

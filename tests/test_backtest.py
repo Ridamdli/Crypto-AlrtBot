@@ -853,7 +853,7 @@ class TestSchedulerDuplicatePrevention:
         assert sched.is_duplicate("BTCUSDT", "LONG", state) is True
         assert sched.is_duplicate("BTCUSDT", "SHORT", state) is False
 
-    def test_scan_cycle_suppresses_duplicate_on_invalid_signal(self):
+    def test_scan_cycle_suppresses_duplicate_on_invalid_signal(self, tmp_path):
         """
         If pipeline returns a candidate that fails SignalModel validation,
         it must not be published (no Telegram call).
@@ -867,21 +867,28 @@ class TestSchedulerDuplicatePrevention:
             mock_pipeline_instance.run_pipeline.return_value = [
                 {"symbol": "BADUSDT", "side": "LONG"}  # missing many required fields
             ]
-            sched = BotScheduler(state_file="data_store/test_state_invalid.json")
+            sched = BotScheduler(state_file=str(tmp_path / "test_state_invalid.json"))
             sched.pipeline = mock_pipeline_instance
+            # Maintenance hooks stubbed: assertions below concern publishing
+            # only; tracking/supervision/sync/archival must not touch the
+            # real repository data_store/.
+            sched._track_outcomes = lambda: None
+            sched._supervise_exits = lambda: None
+            sched._sync_exits_to_invo = lambda: None
+            sched._archive_old_signals = lambda: None
 
             published = sched.run_scan_cycle()
             # Should return empty because SignalModel validation fails
             assert published == []
             MockBot.return_value.send_message.assert_not_called()
 
-    def test_scan_cycle_api_failure_returns_empty(self):
+    def test_scan_cycle_api_failure_returns_empty(self, tmp_path):
         """Transient pipeline failure must not crash — returns []."""
         with patch("src.scheduler.SignalPipeline"), \
              patch("src.scheduler.TelegramBot"), \
              patch("src.scheduler.SignalPersistence"):
 
-            sched = BotScheduler(state_file="data_store/test_state_err.json")
+            sched = BotScheduler(state_file=str(tmp_path / "test_state_err.json"))
             sched.pipeline = MagicMock()
             sched.pipeline.run_pipeline.side_effect = ConnectionError("API timeout")
 
