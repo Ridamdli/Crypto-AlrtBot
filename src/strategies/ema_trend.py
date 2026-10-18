@@ -140,7 +140,7 @@ class EMATrendStrategy(BaseStrategy):
                 swing_high, swing_low = self._get_swing_extremes(df_15m, 20)
                 structural_sl = swing_low * 0.999
                 atr_sl = current_price - (self._calculate_atr(pd.DataFrame(klines_15m), self.params["atr_period"]) * self.params["atr_multiplier"]) if self.params["atr_stop"] else 0
-                sl_price = max(structural_sl, current_price - atr_sl) if atr_sl > 0 else structural_sl
+                sl_price = max(structural_sl, atr_sl) if atr_sl > 0 else structural_sl
                 sl_price = min(sl_price, current_price - min_risk_dist)
                 
                 risk_dist = current_price - sl_price
@@ -191,7 +191,7 @@ class EMATrendStrategy(BaseStrategy):
                 swing_high, swing_low = self._get_swing_extremes(pd.DataFrame(klines_15m), 20)
                 structural_sl = swing_high * 1.001
                 atr_sl = current_price + (self._calculate_atr(pd.DataFrame(klines_15m), self.params["atr_period"]) * self.params["atr_multiplier"]) if self.params["atr_stop"] else 0
-                sl_price = min(structural_sl, current_price + atr_sl) if atr_sl > 0 else structural_sl
+                sl_price = min(structural_sl, atr_sl) if atr_sl > 0 else structural_sl
                 sl_price = max(sl_price, current_price + min_risk_dist)
                 
                 risk_dist = sl_price - current_price
