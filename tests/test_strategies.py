@@ -1028,3 +1028,192 @@ class TestEMATrendATRStopLevels:
             cd.entry_price, cd.stop_loss, {"tp": cd.tp})
         assert "error" not in out
         assert out["position_size"] == pytest.approx(round(10.0 / risk, 4))
+
+
+class TestDonchianATRStopLevels:
+    """ATR stop must compare price-to-price (the 674c86b reference form).
+
+    Donchian was never defective — these are regression pins matching the
+    three sibling strategies fixed in 674c86b, so the double-subtraction
+    class cannot be reintroduced silently. Reference numbers hand-checked
+    against the formulas; the ATR-wins cases fail under a double-
+    subtracting implementation (which would select structural instead).
+    """
+
+    def test_long_atr_stop_wins_over_structural(self):
+        strategy = DonchianBreakoutStrategy({"params": {}}, "BTCUSDT")
+        closes = [100.0 + 0.12 * i for i in range(29)] + [104.5]
+        cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
+                 if c.side == "LONG"]
+        assert len(cands) == 1
+        cd = cands[0]
+        atr = cd.metadata["atr"]
+        # TRs: 13 x 0.52 (linear) + 1.54 (breakout candle) = 8.30
+        assert atr == pytest.approx(8.30 / 14, abs=1e-9)
+        assert cd.stop_loss == pytest.approx(103.610714, abs=1e-6)
+        # Price-to-price: ATR stop is a level near entry, not a distance.
+        assert cd.stop_loss == pytest.approx(
+            cd.entry_price - 1.5 * atr, abs=1e-9)
+        assert cd.stop_loss > cd.metadata["lower_channel"] * 0.999
+        risk = cd.entry_price - cd.stop_loss
+        assert risk == pytest.approx(0.889286, abs=1e-6)
+        assert cd.tp == pytest.approx(cd.entry_price + 2.0 * risk, abs=1e-9)
+
+    def test_short_atr_stop_wins_over_structural(self):
+        strategy = DonchianBreakoutStrategy({"params": {}}, "BTCUSDT")
+        closes = [103.6 - 0.12 * i for i in range(29)] + [99.5]
+        cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
+                 if c.side == "SHORT"]
+        assert len(cands) == 1
+        cd = cands[0]
+        atr = cd.metadata["atr"]
+        # TRs: 13 x 0.52 + 1.14 = 7.90
+        assert atr == pytest.approx(7.90 / 14, abs=1e-9)
+        assert cd.stop_loss == pytest.approx(100.346429, abs=1e-6)
+        assert cd.stop_loss == pytest.approx(
+            cd.entry_price + 1.5 * atr, abs=1e-9)
+        assert cd.stop_loss < cd.metadata["upper_channel"] * 1.001
+        risk = cd.stop_loss - cd.entry_price
+        assert risk == pytest.approx(0.846429, abs=1e-6)
+        assert cd.tp == pytest.approx(cd.entry_price - 2.0 * risk, abs=1e-9)
+
+    def test_long_structural_stop_wins_when_tighter(self):
+        # Flat channel (~0.4 wide) with a just-above-channel breakout:
+        # structural (99.8 x 0.999) sits above the ATR level, so max()
+        # selects it. Pins the fallback branch and its exact form.
+        strategy = DonchianBreakoutStrategy({"params": {}}, "BTCUSDT")
+        closes = [100.0] * 29 + [100.31]
+        cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
+                 if c.side == "LONG"]
+        assert len(cands) == 1
+        cd = cands[0]
+        atr = cd.metadata["atr"]
+        assert cd.stop_loss == pytest.approx(99.7002, abs=1e-6)
+        assert cd.stop_loss == pytest.approx(
+            cd.metadata["lower_channel"] * 0.999, abs=1e-9)
+        assert cd.stop_loss > cd.entry_price - 1.5 * atr
+        assert cd.entry_price - cd.stop_loss > 0
+
+    def test_atr_filter_off_falls_back_to_structural(self):
+        strategy = DonchianBreakoutStrategy(
+            {"params": {"atr_filter": False}}, "BTCUSDT")
+        closes = [100.0 + 0.12 * i for i in range(29)] + [104.5]
+        cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
+                 if c.side == "LONG"]
+        assert len(cands) == 1
+        cd = cands[0]
+        # ATR stop level (~103.61) exists but must NOT be chosen.
+        # Channel window is rows 9..28: lower = close[8] - 0.2 = 100.76.
+        assert cd.stop_loss == pytest.approx(100.65924, abs=1e-6)
+        assert cd.stop_loss == pytest.approx(
+            cd.metadata["lower_channel"] * 0.999, abs=1e-9)
+        assert cd.stop_loss < cd.entry_price - 1.5 * cd.metadata["atr"]
+        risk = cd.entry_price - cd.stop_loss
+        assert cd.tp == pytest.approx(cd.entry_price + 2.0 * risk, abs=1e-9)
+
+    def test_min_risk_clamp_bounds_tight_stops(self):
+        # Flat channel, breakout candle with a 12.0 up-wick: the wick is
+        # outside the channel window but inside the ATR window, inflating
+        # ATR to 17.72/14. Structural wins max() (gap 0.6198 < 1.5*ATR),
+        # then the 0.5*ATR minimum-distance clamp binds exactly.
+        closes = [100.0] * 29 + [100.32]
+        klines = []
+        prev = float(closes[0])
+        for i, c in enumerate(closes):
+            c = float(c)
+            wu = 12.0 if i == len(closes) - 1 else 0.2
+            klines.append({"timestamp": 1700000000000 + i * 900000,
+                           "open": prev, "high": max(prev, c) + wu,
+                           "low": min(prev, c) - 0.2, "close": c,
+                           "volume": 3000.0 if i == len(closes) - 1 else 1000.0})
+            prev = c
+        strategy = DonchianBreakoutStrategy({"params": {}}, "BTCUSDT")
+        cands = [c for c in _gen(strategy, klines, closes[-1])
+                 if c.side == "LONG"]
+        assert len(cands) == 1
+        cd = cands[0]
+        atr = cd.metadata["atr"]
+        assert atr == pytest.approx(17.72 / 14, abs=1e-9)
+        assert cd.stop_loss == pytest.approx(
+            cd.entry_price - 0.5 * atr, abs=1e-9)
+        assert cd.stop_loss == pytest.approx(99.687143, abs=1e-6)
+        # Clamp pushed the stop BELOW structural (enforced min distance).
+        assert cd.stop_loss < cd.metadata["lower_channel"] * 0.999
+        assert cd.entry_price - cd.stop_loss > 0
+
+
+class TestBollingerATRStopLevels:
+    """ATR stop must compare price-to-price (the 674c86b reference form).
+
+    Bollinger was never defective — regression pins matching the three
+    sibling strategies fixed in 674c86b. Bollinger has no atr_filter
+    param (the ATR stop is always active), so there is no filter-off
+    case here. Reference numbers hand-checked against the formulas.
+    """
+
+    def test_long_atr_stop_wins_over_structural(self):
+        strategy = BollingerATRStrategy({"params": {}}, "ETHUSDT")
+        closes = [100.0 + 0.12 * i for i in range(29)] + [104.5]
+        cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
+                 if c.side == "LONG"]
+        assert len(cands) == 1
+        cd = cands[0]
+        atr = cd.metadata["atr"]
+        assert atr == pytest.approx(8.30 / 14, abs=1e-9)
+        # atr_multiplier is 2.0 for this strategy.
+        assert cd.stop_loss == pytest.approx(103.314286, abs=1e-6)
+        assert cd.stop_loss == pytest.approx(
+            cd.entry_price - 2.0 * atr, abs=1e-9)
+        assert cd.stop_loss > cd.metadata["middle_band"] * 0.995
+        risk = cd.entry_price - cd.stop_loss
+        assert risk == pytest.approx(1.185714, abs=1e-6)
+        assert cd.tp == pytest.approx(cd.entry_price + 2.0 * risk, abs=1e-9)
+
+    def test_short_atr_stop_wins_over_structural(self):
+        strategy = BollingerATRStrategy({"params": {}}, "ETHUSDT")
+        closes = [103.6 - 0.12 * i for i in range(29)] + [99.0]
+        cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
+                 if c.side == "SHORT"]
+        assert len(cands) == 1
+        cd = cands[0]
+        atr = cd.metadata["atr"]
+        # TRs: 13 x 0.52 + 1.64 = 8.40
+        assert atr == pytest.approx(0.6, abs=1e-9)
+        assert cd.stop_loss == pytest.approx(100.2, abs=1e-9)
+        assert cd.stop_loss == pytest.approx(
+            cd.entry_price + 2.0 * atr, abs=1e-9)
+        assert cd.stop_loss < cd.metadata["middle_band"] * 1.005
+        risk = cd.stop_loss - cd.entry_price
+        assert risk == pytest.approx(1.2, abs=1e-9)
+        assert cd.tp == pytest.approx(cd.entry_price - 2.0 * risk, abs=1e-9)
+
+    def test_long_structural_stop_wins_when_tighter(self):
+        # Bands are close-based, so a 12.0 down-wick on the breakout
+        # candle inflates ATR (20.10/14) without moving the bands:
+        # the ATR level falls below structural and max() selects
+        # sma * 0.995.
+        closes = [100.0 + 0.12 * i for i in range(29)] + [104.5]
+        klines = []
+        prev = float(closes[0])
+        for i, c in enumerate(closes):
+            c = float(c)
+            wd = 12.0 if i == len(closes) - 1 else 0.2
+            klines.append({"timestamp": 1700000000000 + i * 900000,
+                           "open": prev, "high": max(prev, c) + 0.2,
+                           "low": min(prev, c) - wd, "close": c,
+                           "volume": 3000.0 if i == len(closes) - 1 else 1000.0})
+            prev = c
+        strategy = BollingerATRStrategy({"params": {}}, "ETHUSDT")
+        cands = [c for c in _gen(strategy, klines, closes[-1])
+                 if c.side == "LONG"]
+        assert len(cands) == 1
+        cd = cands[0]
+        atr = cd.metadata["atr"]
+        assert atr == pytest.approx(20.10 / 14, abs=1e-9)
+        assert cd.stop_loss == pytest.approx(101.879045, abs=1e-6)
+        assert cd.stop_loss == pytest.approx(
+            cd.metadata["middle_band"] * 0.995, abs=1e-9)
+        # Structural (101.879) is tighter than the inflated ATR level
+        # (101.629): max() must keep structural.
+        assert cd.stop_loss > cd.entry_price - 2.0 * atr
+        assert cd.entry_price - cd.stop_loss > 0
