@@ -98,7 +98,12 @@ class OutcomeTracker:
         except OSError as e:
             logger.error(f"[Tracker] Failed to save outcomes ledger: {e}")
 
-    def load_all_signals(self) -> List[Dict[str, Any]]:
+    def load_all_signals(self, include_archive: bool = False) -> List[Dict[str, Any]]:
+        """Persisted signals, oldest first. Active files only by default
+        (outcome tracking and supervision must never see archived
+        records); pass include_archive=True for full history views
+        (dashboard). Archive records already present under an active
+        file are skipped so an interrupted move can never double-count."""
         signals = []
         for path in sorted(glob.glob(os.path.join(self.storage_dir, "signals_*.json"))):
             try:
@@ -109,6 +114,19 @@ class OutcomeTracker:
             for s in data if isinstance(data, list) else []:
                 if isinstance(s, dict) and s.get("signal_id"):
                     signals.append(s)
+        if include_archive:
+            seen = {s["signal_id"] for s in signals}
+            archive_glob = os.path.join(self.storage_dir, "archive", "signals_*.json")
+            for path in sorted(glob.glob(archive_glob)):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except (json.JSONDecodeError, OSError):
+                    continue
+                for s in data if isinstance(data, list) else []:
+                    if isinstance(s, dict) and s.get("signal_id") and s["signal_id"] not in seen:
+                        seen.add(s["signal_id"])
+                        signals.append(s)
         return signals
 
     # ── evaluation ──────────────────────────────────────────────────────

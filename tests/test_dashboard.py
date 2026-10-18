@@ -316,3 +316,94 @@ def test_page_script_braces_balanced():
     js = dash.PAGE.split("<script>", 1)[1].rsplit("</script>", 1)[0]
     assert js.count("{") == js.count("}")
     assert js.count("(") == js.count(")")
+
+
+# ── Regression (F1): merged active+archive history is globally chronological ──
+
+
+def _write_signals(d, name, recs):
+    import os as _os
+    p = _os.path.join(d, name)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(recs, f)
+    return p
+
+
+def _histsig(sid, ts):
+    return {"signal_id": sid, "symbol": "BTCUSDT", "side": "LONG",
+            "confidence": 70, "timestamp": ts, "strategy_id": "momentum"}
+
+
+def test_history_merge_interleaved_is_chronological(tmp_path, monkeypatch):
+    import os as _os
+    monkeypatch.setattr(dash, "DATA_DIR", str(tmp_path))
+    _write_signals(str(tmp_path), "signals_2026-10-10.json",
+                   [_histsig("NEW", "2026-10-10T00:00:00Z"),
+                    _histsig("OLD", "2026-09-01T00:00:00Z")])
+    _os.makedirs(_os.path.join(str(tmp_path), "archive"))
+    _write_signals(str(tmp_path), "archive/signals_2026-09-05.json",
+                   [_histsig("MID", "2026-09-05T00:00:00Z")])
+    got = [s["signal_id"] for s in dash.load_all_signals(include_archive=True)]
+    assert got == ["OLD", "MID", "NEW"]
+    # active-only path untouched and still file-ordered
+    assert [s["signal_id"] for s in dash.load_all_signals()] == ["NEW", "OLD"]
+
+
+def test_history_duplicate_ids_active_wins(tmp_path, monkeypatch):
+    import os as _os
+    monkeypatch.setattr(dash, "DATA_DIR", str(tmp_path))
+    _write_signals(str(tmp_path), "signals_2026-10-10.json",
+                   [_histsig("DUP", "2026-10-10T00:00:00Z")])
+    _os.makedirs(_os.path.join(str(tmp_path), "archive"))
+    _write_signals(str(tmp_path), "archive/signals_2026-09-01.json",
+                   [{"signal_id": "DUP", "symbol": "STALE", "side": "SHORT",
+                     "confidence": 1, "timestamp": "2026-09-01T00:00:00Z",
+                     "strategy_id": "x"}])
+    got = dash.load_all_signals(include_archive=True)
+    assert [s["signal_id"] for s in got] == ["DUP"]
+    assert got[0]["symbol"] == "BTCUSDT"  # active copy wins
+
+
+def test_history_bad_timestamps_neither_crash_nor_drop(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "DATA_DIR", str(tmp_path))
+    _write_signals(str(tmp_path), "signals_2026-10-10.json",
+                   [_histsig("GOOD", "2026-10-10T00:00:00Z"),
+                    _histsig("BADTS", "not-a-time"),
+                    {"signal_id": "NOTS", "symbol": "BTCUSDT"},
+                    _histsig("EPOCHMS", 1_727_000_000_000),
+                    _histsig("EPOCHS", 1_727_000_000),
+                    _histsig("BOOLTS", True)])
+    got = dash.load_all_signals(include_archive=True)
+    assert sorted(s["signal_id"] for s in got) == \
+        ["BADTS", "BOOLTS", "EPOCHMS", "EPOCHS", "GOOD", "NOTS"]
+    parseable = [s["signal_id"] for s in got
+                 if s["signal_id"] in ("EPOCHMS", "EPOCHS", "GOOD")]
+    # EPOCHMS == EPOCHS as instants (ms vs s); stable sort keeps file order
+    assert parseable == ["EPOCHMS", "EPOCHS", "GOOD"]  # chronological
+
+
+def test_api_signals_newest_first_after_archival(server, tmp_path):
+    import os as _os
+    _write_signals(str(tmp_path), "signals_2026-10-10.json",
+                   [_histsig("NEW", "2026-10-10T00:00:00Z")])
+    _os.makedirs(_os.path.join(str(tmp_path), "archive"))
+    _write_signals(str(tmp_path), "archive/signals_2026-09-01.json",
+                   [_histsig("OLD", "2026-09-01T00:00:00Z")])
+    code, body = _get(server, "/api/signals?limit=50", token="test-token")
+    assert code == 200
+    ids = [s["signal_id"] for s in json.loads(body)]
+    assert ids == ["NEW", "OLD"]  # stale archive must not headline
+
+
+def test_status_selects_genuinely_latest_signal(server, tmp_path):
+    import os as _os
+    _write_signals(str(tmp_path), "signals_2026-10-10.json",
+                   [_histsig("NEW", "2026-10-10T00:00:00Z")])
+    _os.makedirs(_os.path.join(str(tmp_path), "archive"))
+    _write_signals(str(tmp_path), "archive/signals_2026-09-01.json",
+                   [_histsig("OLD", "2026-09-01T00:00:00Z")])
+    code, body = _get(server, "/api/status", token="test-token")
+    assert code == 200
+    st = json.loads(body)
+    assert st["total_signals_persisted"] == 2
+    assert st["last_signal"]["signal_id"] == "NEW"

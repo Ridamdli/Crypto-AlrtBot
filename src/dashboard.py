@@ -63,13 +63,55 @@ def _json_safe(obj):
     return obj
 
 
-def load_all_signals():
-    """Load every persisted signal across daily files, oldest first."""
+def _signal_sort_key(s):
+    """Order key for the merged history: unparseable timestamps sort
+    first as (0, 0.0) in stable original order — never dropped, nothing
+    invented — then parseable signals chronologically as (1, epoch_s).
+    Tolerance mirrors the tracker's (epoch ms/s numbers, ISO strings;
+    bools rejected). get_status() therefore always sees the genuinely
+    latest parseable signal at signals[-1]."""
+    ts = s.get("timestamp")
+    if isinstance(ts, bool):
+        return (0, 0.0)
+    if isinstance(ts, (int, float)):
+        try:
+            return (1, float(ts) / 1000.0 if ts > 100_000_000_000 else float(ts))
+        except (TypeError, ValueError):
+            return (0, 0.0)
+    if isinstance(ts, str):
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (1, dt.timestamp())
+        except ValueError:
+            return (0, 0.0)
+    return (0, 0.0)
+
+
+def load_all_signals(include_archive: bool = False):
+    """Every persisted signal across daily files, oldest first.
+
+    Active files only by default. Pass include_archive=True for full
+    history views (/api/signals, /api/analytics, status totals):
+    archive records already present under an active file are skipped so
+    an interrupted move can never double-count, and the merged list is
+    sorted globally chronological (stable) so newest-first slices and
+    last-signal selection stay correct after archival. Archived records
+    are read-only history — never mutated here."""
     signals = []
     for path in sorted(glob.glob(os.path.join(DATA_DIR, "signals_*.json"))):
         for s in _read_json(path, []):
             if isinstance(s, dict) and s.get("signal_id"):
                 signals.append(s)
+    if include_archive:
+        seen = {s["signal_id"] for s in signals}
+        for path in sorted(glob.glob(os.path.join(DATA_DIR, "archive", "signals_*.json"))):
+            for s in _read_json(path, []):
+                if isinstance(s, dict) and s.get("signal_id") and s["signal_id"] not in seen:
+                    seen.add(s["signal_id"])
+                    signals.append(s)
+        signals.sort(key=_signal_sort_key)
     return signals
 
 
@@ -247,7 +289,7 @@ def _scan_cadence_s():
 
 def get_status():
     state = load_scheduler_state()
-    signals = load_all_signals()
+    signals = load_all_signals(include_archive=True)
     scans = load_scan_history(10)
     last = signals[-1] if signals else None
     now = datetime.now(timezone.utc)
@@ -575,10 +617,10 @@ class Handler(BaseHTTPRequestHandler):
                 limit = max(1, min(int(query.get("limit", ["50"])[0]), 500))
             except ValueError:
                 limit = 50
-            signals = load_all_signals()
+            signals = load_all_signals(include_archive=True)
             self._send(200, json.dumps(list(reversed(signals[-limit:]))))
         elif path == "/api/analytics":
-            self._send(200, json.dumps(compute_analytics(load_all_signals())))
+            self._send(200, json.dumps(compute_analytics(load_all_signals(include_archive=True))))
         elif path == "/api/invo":
             self._send(200, json.dumps(load_invo_status()))
         elif path == "/api/paper":

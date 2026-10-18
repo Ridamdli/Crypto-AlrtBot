@@ -130,6 +130,7 @@ class BotScheduler:
             self._track_outcomes()
             self._supervise_exits()
             self._sync_exits_to_invo()
+            self._archive_old_signals()
             return []
 
         state = self._load_state()
@@ -183,6 +184,7 @@ class BotScheduler:
         self._share_paper_to_invo(published_signals)
         self._supervise_exits()
         self._sync_exits_to_invo()
+        self._archive_old_signals()
         return published_signals
 
     def _share_paper_to_invo(self, published: list) -> None:  # noqa: C901 (gated bridge)
@@ -599,6 +601,23 @@ class BotScheduler:
             logger.warning(f"[Scheduler] Sim reconcile skipped (remote unknown): {e}")
         except Exception as e:
             logger.warning(f"[Scheduler] Invo exit-sync skipped: {e}")
+
+    def _archive_old_signals(self) -> None:
+        """Move fully-settled daily signal files out of the active glob.
+
+        Bounded file hygiene (≤5 moves/cycle), never raises: archival
+        failures are logged by the archival module and skipped, never
+        breaking scans. The warned-set persists across cycles so pinned
+        files log once per reason, not once per 15m cycle."""
+        try:
+            from src.data import archival as _archival
+            if not hasattr(self, "_archival_warned"):
+                self._archival_warned = set()
+            _archival.archive_old_signals(
+                getattr(self.persistence, "storage_dir", "data_store"),
+                warned=self._archival_warned)
+        except Exception as e:
+            logger.warning(f"[Scheduler] Signal archival skipped: {e}")
 
     def _track_outcomes(self) -> None:
         """Update live outcome ledger + paper portfolio. Must never break scans."""
