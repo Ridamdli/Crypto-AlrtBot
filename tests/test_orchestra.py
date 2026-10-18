@@ -5,9 +5,8 @@ BTC must trade with its doc-aligned picks, and research must stay gated
 to the validated-history subset.
 """
 from src.config import CONFIG
-from src.data.symbol_registry import get_symbol_registry
-from src.strategies import STRATEGY_REGISTRY
 from src.pipeline import SignalPipeline
+from src.strategies import STRATEGY_REGISTRY
 
 
 def test_tradable_universe_is_14_coins():

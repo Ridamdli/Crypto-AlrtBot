@@ -3,7 +3,6 @@ import datetime
 import json
 import os
 
-from src.data import archival
 from src.data.archival import (
     archive_old_signals,
     file_eligibility,

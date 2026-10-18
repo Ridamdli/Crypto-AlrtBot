@@ -1,21 +1,20 @@
 """
 Tests for all strategy families.
 """
+
 import pytest
-import pandas as pd
-from datetime import datetime, timezone
 
 from src.strategies import (
-    DonchianBreakoutStrategy,
-    MomentumFilterStrategy,
-    EMATrendStrategy,
     BollingerATRStrategy,
+    DonchianBreakoutStrategy,
+    EMATrendStrategy,
+    MomentumFilterStrategy,
     RSIMeanReversionStrategy,
     VolumeBreakoutStrategy,
 )
 
 
-def _make_klines(count: int = 50, base_price: float = 100.0, trend: str = "neutral") -> List[Dict]:
+def _make_klines(count: int = 50, base_price: float = 100.0, trend: str = "neutral") -> list[dict]:
     """Generate synthetic klines for testing."""
     klines = []
     price = base_price
@@ -53,7 +52,7 @@ def _make_oi_data() -> dict:
     return {"status": "UNKNOWN", "signal": "neutral", "oi_change_pct": 0.0, "reason": "test"}
 
 
-def _make_klines_1h(count: int = 50, base_price: float = 100.0, trend: str = "up") -> List[Dict]:
+def _make_klines_1h(count: int = 50, base_price: float = 100.0, trend: str = "up") -> list[dict]:
     """Generate 1h klines with proper volume."""
     klines = []
     price = base_price
@@ -76,7 +75,7 @@ def _make_klines_1h(count: int = 50, base_price: float = 100.0, trend: str = "up
     return klines
 
 
-def _make_klines_4h(count: int = 50, base_price: float = 100.0, trend: str = "up") -> List[Dict]:
+def _make_klines_4h(count: int = 50, base_price: float = 100.0, trend: str = "up") -> list[dict]:
     """Generate 4h klines with proper volume."""
     klines = []
     price = base_price

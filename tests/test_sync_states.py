@@ -4,7 +4,6 @@ Faults are injected deterministically (scripted fakes, fake clock). No network,
 no randomness, no production access. Covers transient/permanent/ambiguous/
 restart/concurrency scenarios from the hardening spec.
 """
-import pytest
 import requests
 
 from src.invo import exit_sync as sync
@@ -196,7 +195,7 @@ def test_modify_timeout_replays_identical_values_safely():
     tr.note_attempt("S1", "modify")
     try:
         fake_post(_levels())
-    except requests.exceptions.ConnectTimeout as e:
+    except requests.exceptions.ConnectTimeout:
         tr.note_result("S1", "modify", "retryable",
                        {"error": "timeout-ambiguous", "prior_ambiguous": True,
                         "plan_version": 1, "levels": _levels()})
@@ -315,9 +314,10 @@ def test_tracker_tolerates_legacy_state_without_records():
 
 
 def test_sync_state_save_is_atomic_on_failure(tmp_path, monkeypatch):
-    from src.invo import exit_sync as _sync
     import json as _json
     import os as _os
+
+    from src.invo import exit_sync as _sync
     good = {"synced_levels": {"S1": {"stop_loss": 1.0, "tp1": 2.0}},
             "closed": [], "records": {}}
     _sync.save_sync_state(str(tmp_path), good)
@@ -335,9 +335,10 @@ def test_sync_state_save_is_atomic_on_failure(tmp_path, monkeypatch):
 
 
 def test_sync_state_save_replaces_atomically(tmp_path):
-    from src.invo import exit_sync as _sync
     import json as _json
     import os as _os
+
+    from src.invo import exit_sync as _sync
     _sync.save_sync_state(str(tmp_path), {"a": 1})
     _sync.save_sync_state(str(tmp_path), {"a": 2})
     with open(_os.path.join(str(tmp_path), "invo_exit_sync.json"),

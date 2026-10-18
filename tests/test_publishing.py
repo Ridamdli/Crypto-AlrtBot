@@ -190,7 +190,6 @@ def test_successful_send_ledgered(tmp_path):
 
 def test_failed_send_retries_next_cycle(tmp_path):
     """F3: fail once (no ledger), succeed next cycle (published)."""
-    from types import SimpleNamespace
 
     calls = {"n": 0}
 
@@ -255,8 +254,9 @@ def test_normal_cycle_invokes_archival(tmp_path):
 
 def _run_main(monkeypatch, cands, send_fn=None, use_real_bot=False):
     """Run src.main.main with stubbed pipeline/sinks. Returns (result, sent)."""
-    import src.main as _main
     from types import SimpleNamespace
+
+    import src.main as _main
 
     sent = []
 
@@ -303,7 +303,6 @@ def test_main_mixed_delivery(monkeypatch):
 def test_main_disabled_send_reports_failure(monkeypatch):
     """TELEGRAM_ENABLED=false with the real bot: no network (no creds in
     this env), returns False, counted as failed not delivered."""
-    import os
     monkeypatch.setenv("TELEGRAM_ENABLED", "false")
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
@@ -318,8 +317,9 @@ def test_main_empty_candidates(monkeypatch):
 
 
 def test_main_formatter_error_counts_failed(monkeypatch):
-    import src.main as _main
     from types import SimpleNamespace
+
+    import src.main as _main
 
     class FakePipeline:
         def run_pipeline(self):

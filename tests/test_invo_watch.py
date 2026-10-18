@@ -4,7 +4,6 @@ Nothing here touches production: main() runs against tmp data dirs with
 1-2s windows. Live-read paths are unit-tested via _confirm_absent_closes
 with synthetic snapshots only.
 """
-import io
 import json
 import os
 import sys
@@ -14,6 +13,8 @@ from scripts.invo_watch import (
     _confirm_absent_closes,
     _corr_kind,
     _pct,
+)
+from scripts.invo_watch import (
     main as watch_main,
 )
 

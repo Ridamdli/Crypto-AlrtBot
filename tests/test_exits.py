@@ -472,7 +472,6 @@ def test_classify_position_states():
 
 # ── §7: ledger persistence + restart ─────────────────────────────
 def test_ledger_apply_and_restart_recovery(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path), max_decisions=3)
     s = sig("LONG", entry=100.0, sl=98.0)
     closes = [100.0] * 24 + [99.4, 99.0, 99.2, 99.5, 99.6, 99.5]
@@ -490,7 +489,6 @@ def test_ledger_apply_and_restart_recovery(tmp_path):
 
 
 def test_ledger_monitor_only_freezes_plans(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     s = sig("LONG")
     d = _decide(s, bars([100.0] * 30), PositionState.OPEN)
@@ -503,14 +501,12 @@ def test_ledger_corrupt_file_fails_safe(tmp_path):
     p = os.path.join(str(tmp_path), "exit_decisions.json")
     with open(p, "w", encoding="utf-8") as f:
         f.write("{not json")
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     assert led.healthy is False
     assert led.active_plan(sig("LONG")).version == 0
 
 
 def test_ledger_outcome_link(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     d = _decide(sig("LONG"), bars([100.0] * 30), PositionState.OPEN)
     led.record(d, apply=False)
@@ -528,7 +524,6 @@ def _pin_decision(sid, key, action="NO_CHANGE"):
 
 def test_seen_keys_survive_decision_eviction(tmp_path):
     """R2-1: evicting old audit records must not resurrect their keys."""
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path), max_decisions=3)
     for i in range(5):
         assert led.record(_pin_decision("S", f"K{i}"), apply=False) is True
@@ -539,7 +534,6 @@ def test_seen_keys_survive_decision_eviction(tmp_path):
 
 
 def test_duplicate_suppressed_after_restart(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path), max_decisions=3)
     closes = [100.0] * 24 + [99.4, 99.0, 99.2, 99.5, 99.6, 99.5]
     d = _decide(sig("LONG", entry=100.0, sl=98.0),
@@ -553,7 +547,6 @@ def test_duplicate_suppressed_after_restart(tmp_path):
 
 
 def test_repeat_record_keeps_suppression_without_key_dupes(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     d = _pin_decision("S", "K-same")
     assert led.record(d, apply=False) is True
@@ -563,7 +556,6 @@ def test_repeat_record_keeps_suppression_without_key_dupes(tmp_path):
 
 
 def test_proposal_only_decisions_unchanged(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     d = _pin_decision("S", "K-flag", action="FLAG_CONFLICT")
     assert led.record(d, apply=False) is True
@@ -573,7 +565,6 @@ def test_proposal_only_decisions_unchanged(tmp_path):
 
 
 def test_legacy_file_backfills_keys_without_rewrite(tmp_path):
-    import json
     from src.exits.ledger import ExitDecisionLedger
     path = os.path.join(str(tmp_path), "exit_decisions.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -590,7 +581,6 @@ def test_legacy_file_backfills_keys_without_rewrite(tmp_path):
 
 
 def test_corrupt_file_keys_fail_safe_empty(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     p = os.path.join(str(tmp_path), "exit_decisions.json")
     with open(p, "w", encoding="utf-8") as f:
         f.write("{not json")
@@ -624,7 +614,6 @@ class _FakeTracker:
 
 
 def _monitor(tmp_path, klines, signals, outcomes, now_ms, **kw):
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     mon = ExitMonitor(cfg=ExitConfig(), tracker=_FakeTracker(signals, outcomes),
                       ledger=led, fetcher=_FakeFetcher(klines),
@@ -636,7 +625,6 @@ def test_monitor_records_no_change_and_skips_repeat(tmp_path):
     kl = flat(30)
     now = policy.last_close_ts(kl, TF) + 1000
     s = sig("LONG")
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     mon = ExitMonitor(cfg=ExitConfig(), tracker=_FakeTracker([s], {}),
                       ledger=led, fetcher=_FakeFetcher(kl),
@@ -652,7 +640,6 @@ def test_monitor_never_raises_and_leaves_outcomes_untouched(tmp_path):
     class _Boom:
         def fetch_standardized_klines(self, *a, **k):
             raise ConnectionError("feed down")
-    from src.exits.ledger import ExitDecisionLedger
     s = sig("LONG")
     outcomes = {"SIG-TEST": {"final": False, "entry_triggered": True}}
     tracker = _FakeTracker([s], outcomes)
@@ -670,7 +657,6 @@ def test_monitor_applies_close_on_breach(tmp_path):
     now = policy.last_close_ts(kl, TF) + 1000
     s = sig("SHORT", entry=100.0, sl=102.0, tp1=98.0, tp2=97.0, tp3=96.0)
     outcomes = {"SIG-TEST": {"final": False, "entry_triggered": True}}
-    from src.exits.ledger import ExitDecisionLedger
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     mon = ExitMonitor(cfg=ExitConfig(), tracker=_FakeTracker([s], outcomes),
                       ledger=led, fetcher=_FakeFetcher(kl),
@@ -681,7 +667,6 @@ def test_monitor_applies_close_on_breach(tmp_path):
 
 
 def test_monitor_skips_final_and_invalidated(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     kl = flat(30)
     now = policy.last_close_ts(kl, TF) + 1000
     s1 = sig("LONG", sid="A")
@@ -697,7 +682,6 @@ def test_monitor_skips_final_and_invalidated(tmp_path):
 
 
 def test_monitor_out_of_order_feed_skipped(tmp_path):
-    from src.exits.ledger import ExitDecisionLedger
     kl = flat(30)
     now = policy.last_close_ts(kl, TF) + 1000
     s = sig("LONG")
@@ -857,7 +841,6 @@ def test_monitor_no_data_evaluates_on_cadence_only(tmp_path):
         def fetch_standardized_klines(self, *a, **k):
             return []
 
-    from src.exits.ledger import ExitDecisionLedger
     s = sig("LONG")
     led = ExitDecisionLedger(storage_dir=str(tmp_path))
     now = [T0 + 100 * TF]
@@ -947,7 +930,7 @@ def test_gate_cooldown_blocks_repeat_reduce():
                           last_change_ts_ms=last_change), c
 
     now1 = kl[79]["timestamp"] + TF
-    d1, c1 = consult(kl[:80], ExitPlan.genesis(s), now1, 0)
+    d1, _ = consult(kl[:80], ExitPlan.genesis(s), now1, 0)
     assert d1.action == ExitAction.REDUCE_PAPER_POSITION.value
     assert len(d1.events_applied) == 1
     # 1000s later with the identical proposal: cooling down, plan retained.
@@ -1104,7 +1087,7 @@ def test_pending_setup_cannot_be_tightened_or_closed():
     assert not ok
     ok, _ = g.validate(view, "CLOSE_PAPER_POSITION", {})
     assert not ok
-    ok, reasons = g.validate(view, "INVALIDATE_PENDING_SETUP", {})
+    ok, _ = g.validate(view, "INVALIDATE_PENDING_SETUP", {})
     assert ok
 
 

@@ -1,5 +1,4 @@
 """EventLog tests: append/cap/filter/summary. No I/O outside tmp."""
-import time
 
 from mirror.eventlog import EventLog
 
@@ -49,8 +48,8 @@ def test_bot_emits_key_events(tmp_path):
     """Spot-check the wiring: skip + mimic + close land in the log."""
     from mirror.auto import AutoBot, MimicConfig
     from mirror.config import MirrorConfig
-    from mirror.feedmon import FeedWatcher
     from mirror.eventlog import EventLog as _EventLog
+    from mirror.feedmon import FeedWatcher
     mc = MirrorConfig(email="", app_password="", device_id="d",
                       data_dir=str(tmp_path))
 

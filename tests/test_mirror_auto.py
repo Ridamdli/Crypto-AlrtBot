@@ -3,10 +3,8 @@
 HL bridge and trading session are faked; the cycle runs end to end
 against synthetic Pariston feed posts.
 """
-import pytest
 
-from mirror.auto import (AutoBot, MimicConfig, build_record_open,
-                         decide_live_size, is_pariston)
+from mirror.auto import AutoBot, MimicConfig, build_record_open, decide_live_size, is_pariston
 from mirror.config import MirrorConfig
 from mirror.feedmon import FeedWatcher, classify_post
 
@@ -180,6 +178,7 @@ def test_account_falls_back_to_env_without_wallet(tmp_path):
 
 def test_decrypt_layout_roundtrip(tmp_path):
     import importlib.util
+
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     spec = importlib.util.spec_from_file_location(
         "decrypt_refresh", "scripts/decrypt_refresh.py")
@@ -340,7 +339,6 @@ def test_bootstrap_mimics_unmirrored_opens_once(tmp_path):
     class _Client:
         pass
 
-    import mirror.auto as _auto
     import mirror.feed as _feed
     _feed_orig = _feed.fetch_open_positions
     _feed.fetch_open_positions = lambda *a, **k: [
@@ -365,7 +363,6 @@ def test_bootstrap_skips_wallet_held_coin(tmp_path):
     bot = AutoBot(mc, _cfg(live=True), hl=hl, session=FakeSession(),
                   watcher=FeedWatcher(fetch_fn=lambda token: []),
                   notify_fn=got.append)
-    import mirror.auto as _auto
     import mirror.feed as _feed
     _feed_orig = _feed.fetch_open_positions
     _feed.fetch_open_positions = lambda *a, **k: [
@@ -476,7 +473,6 @@ def test_cap_skipped_base_retries_when_slot_frees(tmp_path):
     bot = AutoBot(mc, _cfg(live=True, max_concurrent=1), hl=hl,
                   session=FakeSession(), watcher=FeedWatcher(fetch_fn=feed),
                   notify_fn=got.append)
-    import mirror.auto as _auto
     import mirror.feed as _feed
     _feed_orig = _feed.fetch_open_positions
     opens = [
@@ -567,9 +563,9 @@ def test_backfill_attaches_resolved_tpsl(tmp_path, monkeypatch):
     import json as _json
     main = tmp_path / "main_data"
     main.mkdir()
-    _json.dump({"SIG-1": {"symbol": "HYPEUSDT", "side": "SHORT",
-                          "entry": 85.1, "tp": 79.8, "stop_loss": 87.8}},
-               open(main / "outcomes.json", "w"))
+    with open(main / "outcomes.json", "w") as f:
+        _json.dump({"SIG-1": {"symbol": "HYPEUSDT", "side": "SHORT",
+                              "entry": 85.1, "tp": 79.8, "stop_loss": 87.8}}, f)
     monkeypatch.setenv("MIMIC_MAIN_DATA_DIR", str(main))
     got = []
     mc = MirrorConfig(email="", app_password="", device_id="d",
@@ -589,9 +585,9 @@ def test_resolve_rejects_loose_match(tmp_path, monkeypatch):
     import json as _json
     main = tmp_path / "main_data"
     main.mkdir()
-    _json.dump({"SIG-1": {"symbol": "HYPEUSDT", "side": "SHORT",
-                          "entry": 90.0, "tp": 79.8, "stop_loss": 87.8}},
-               open(main / "outcomes.json", "w"))
+    with open(main / "outcomes.json", "w") as f:
+        _json.dump({"SIG-1": {"symbol": "HYPEUSDT", "side": "SHORT",
+                              "entry": 90.0, "tp": 79.8, "stop_loss": 87.8}}, f)
     monkeypatch.setenv("MIMIC_MAIN_DATA_DIR", str(main))
     mc = MirrorConfig(email="", app_password="", device_id="d",
                       data_dir=str(tmp_path))
@@ -735,7 +731,7 @@ def test_adoption_brings_wallet_holding_into_lifecycle(tmp_path):
                 {"baseId": "B-LINK", "ticker": "LINK",
                  "directionLong": False}]}
 
-    out = bot._sims_sync(_Client(), "tok")
+    bot._sims_sync(_Client(), "tok")
     assert "LINK" in bot.mirrored_coins()
     assert any("ADOPTED LINK" in n for n in got)
     # Second sync: adopted, not duplicated, not closed.

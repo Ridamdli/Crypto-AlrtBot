@@ -88,7 +88,8 @@ def test_session_persists_rotated_refresh(tmp_path, monkeypatch):
     monkeypatch.setattr(_req, "urlopen", lambda *a, **k: _CM())
     assert s.refresh() is True
     assert s.access_token == "a-new" and s.refresh_token == "r-new"
-    saved = _json.loads(open(state, encoding="utf-8").read())
+    with open(state, encoding="utf-8") as f:
+        saved = _json.loads(f.read())
     assert saved["refresh_token"] == "r-new"
     # reload resumes
     s2 = TradingSession(state_path=state)
@@ -103,7 +104,6 @@ def test_session_post_without_session_raises():
 
 def test_cancel_coin_triggers_sweeps_coin_only(monkeypatch):
     from mirror.hl import HlBridge
-    import mirror.hl as _hlmod
     orders = [
         {"coin": "LINK", "oid": 11},
         {"coin": "LINK", "oid": 22},
@@ -130,8 +130,8 @@ def test_cancel_coin_triggers_sweeps_coin_only(monkeypatch):
 def test_session_lazy_loads_dropped_in_file(tmp_path, monkeypatch):
     import json as _json
     state = str(tmp_path / "trading_session.json")
-    _json.dump({"refresh_token": "r-late",
-                "access_token": ""}, open(state, "w"))
+    with open(state, "w") as f:
+        _json.dump({"refresh_token": "r-late", "access_token": ""}, f)
     s = TradingSession(state_path=state)
     monkeypatch.setattr(s, "refresh", lambda: True)
     s.access_token = ""
@@ -223,7 +223,7 @@ def test_place_tpsl_long_sells():
 
 
 def test_cancel_tpsl_best_effort():
-    b, ex = _tpsl_bridge()
+    b, _ = _tpsl_bridge()
     assert b.cancel_tpsl("HYPE", ["0x" + "a" * 32, "0x" + "b" * 32]) == 2
     assert b.cancel_tpsl("HYPE", []) == 0
     assert b.cancel_tpsl("HYPE", ["bogus"]) == 0  # invalid cloid skipped

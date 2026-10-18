@@ -7,7 +7,7 @@ and the API rejected messages with 400 Bad Request.
 import re
 
 from src.models.signal import SignalModel
-from src.utils.telegram_formatter import escape_markdown, TelegramFormatter
+from src.utils.telegram_formatter import TelegramFormatter, escape_markdown
 
 
 def _make_signal(**overrides):

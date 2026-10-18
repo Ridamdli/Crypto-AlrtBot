@@ -47,8 +47,9 @@ def test_entrypoint_defaults_to_watch():
 
 
 def test_auto_live_defaults_off():
-    from mirror.auto import MimicConfig
     import os
+
+    from mirror.auto import MimicConfig
     for var in ("MIMIC_LIVE", "MIMIC_CDP_URL", "MIMIC_ACCOUNT_USD",
                 "MIMIC_MAX_USD", "MIMIC_MAX_PCT", "MIMIC_MAX_CONCURRENT",
                 "MIMIC_MIN_REMAINING_USD"):

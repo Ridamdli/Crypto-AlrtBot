@@ -194,7 +194,7 @@ def test_unknown_remote_state_is_explicit(tmp_path):
 
 
 def test_prune_drops_only_old_resolved_records(tmp_path):
-    from src.invo.sim_ledger import SimLedger, SIM_RESOLVED_TTL_MS
+    from src.invo.sim_ledger import SIM_RESOLVED_TTL_MS, SimLedger
     led = _ledger(tmp_path)
     now_ms = 200_000_000_000
     # Ledger stamps are seconds-epoch (time.time()); TTL is milliseconds.
@@ -235,7 +235,7 @@ def test_prune_keeps_unstamped_and_reserved_records(tmp_path):
 
 
 def test_reconcile_prunes_stale_history_but_keeps_books(tmp_path):
-    from src.invo.sim_ledger import SIM_RESOLVED_TTL_MS, SimLedger
+    from src.invo.sim_ledger import SIM_RESOLVED_TTL_MS
     led = _ledger(tmp_path)
     led.reserve("OPEN", "BTCUSDT", 10.0)
     led.reserve("OLD", "ETHUSDT", 5.0)

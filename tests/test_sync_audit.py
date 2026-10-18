@@ -158,7 +158,7 @@ def test_genuine_gap_survives_paging(tmp_path):
     import os as _os
     path = _os.path.join(str(tmp_path), audit.AUDIT_NAME)
     with open(path, encoding="utf-8") as f:
-        lines = [ln for ln in f.readlines()
+        lines = [ln for ln in f
                  if '"seq": 3,' not in ln and '"seq":3' not in ln.replace(" ", "")]
     assert len(lines) == 3
     with open(path, "w", encoding="utf-8") as f:

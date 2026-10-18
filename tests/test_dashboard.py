@@ -5,7 +5,6 @@ server against a tmp DATA_DIR. Dummy tokens only, never real secrets.
 """
 import json
 import threading
-import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -138,7 +137,7 @@ def test_healthz_open_no_auth(server):
 
 
 def test_root_requires_token(server):
-    code, body = _get(server, "/")
+    code, _ = _get(server, "/")
     assert code == 401
     code, _ = _get(server, "/", token="test-token")
     assert code == 200
