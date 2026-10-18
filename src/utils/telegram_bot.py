@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timezone
 
 import requests
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -18,13 +18,13 @@ touches outcome/portfolio/Invo ledgers and never emits orders. With
 EXITS_APPLY=false (default) even plan overlays stay frozen — decisions are
 recorded as proposals for audit and for the offline candidate harness.
 """
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from src.exits import policy
 from src.exits.config import ExitConfig, load_exit_config
 from src.exits.ledger import ExitDecisionLedger
 from src.exits.models import (
-    ExitAction,
     PositionState,
     PositionView,
     classify_position,
@@ -40,12 +40,12 @@ logger = get_logger(__name__)
 class ExitMonitor:
     def __init__(
         self,
-        cfg: Optional[ExitConfig] = None,
-        tracker: Optional[OutcomeTracker] = None,
-        ledger: Optional[ExitDecisionLedger] = None,
+        cfg: ExitConfig | None = None,
+        tracker: OutcomeTracker | None = None,
+        ledger: ExitDecisionLedger | None = None,
         fetcher: Any = None,
-        now_ms_fn: Optional[Callable[[], int]] = None,
-        apply: Optional[bool] = None,
+        now_ms_fn: Callable[[], int] | None = None,
+        apply: bool | None = None,
     ):
         # NOTE: fetcher is injected (duck-typed: fetch_standardized_klines).
         # This package never constructs network/trading clients itself — the
@@ -76,10 +76,10 @@ class ExitMonitor:
         return int(time.time() * 1000)
 
     # ── main cycle ────────────────────────────────────────────────
-    def run_cycle(self) -> Dict[str, Any]:
+    def run_cycle(self) -> dict[str, Any]:
         """Supervise all due setups. Returns a summary; never raises."""
         now_ms = self._now_ms()
-        summary: Dict[str, Any] = {"evaluated": 0, "skipped": 0,
+        summary: dict[str, Any] = {"evaluated": 0, "skipped": 0,
                                    "actions": {}, "errors": 0}
         try:
             outcomes = self.tracker.load_ledger()
@@ -115,8 +115,8 @@ class ExitMonitor:
 
     # ── per-signal ────────────────────────────────────────────────
     def _supervise_one(
-        self, signal: Dict[str, Any], outcomes: Dict[str, Dict[str, Any]], now_ms: int
-    ) -> Optional[str]:
+        self, signal: dict[str, Any], outcomes: dict[str, dict[str, Any]], now_ms: int
+    ) -> str | None:
         """Returns the decided action, or None when no evaluation was due."""
         sid = signal.get("signal_id", "?")
         outcome = outcomes.get(signal.get("signal_id", ""))
@@ -171,7 +171,7 @@ class ExitMonitor:
                     f"(plan v{plan.version}, data_ts={data_ts}, apply={apply})")
         return decision.action
 
-    def _fetch(self, symbol: str, now_ms: int) -> List[Dict[str, Any]]:
+    def _fetch(self, symbol: str, now_ms: int) -> list[dict[str, Any]]:
         if self.fetcher is None:
             return []  # fail safe: workers abstain -> INSUFFICIENT_DATA
         try:
@@ -183,8 +183,8 @@ class ExitMonitor:
 
     def _is_due(
         self, plan: Any,
-        completed: List[Dict[str, Any]], data_ts: int,
-        last: Dict[str, int], now_ms: int,
+        completed: list[dict[str, Any]], data_ts: int,
+        last: dict[str, int], now_ms: int,
     ) -> bool:
         """Event-driven gating: evaluate only when something merits it."""
         if not completed:

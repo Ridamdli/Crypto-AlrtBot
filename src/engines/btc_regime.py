@@ -1,5 +1,7 @@
-from typing import List, Dict, Any
+from typing import Any
+
 import pandas as pd
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -9,7 +11,7 @@ class BTCRegimeEngine:
         self.ema_fast = ema_fast
         self.ema_slow = ema_slow
 
-    def evaluate_regime(self, klines_4h: List[Dict[str, Any]]) -> str:
+    def evaluate_regime(self, klines_4h: list[dict[str, Any]]) -> str:
         """
         Evaluate market regime based on BTC 4H data using simple EMAs.
         Returns: "bullish", "bearish", or "neutral".

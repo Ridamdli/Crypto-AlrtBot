@@ -3,8 +3,8 @@ config.py – Central configuration for the Signal Engine.
 All thresholds are set here; nothing is hardcoded in engine logic.
 """
 from dataclasses import dataclass, field
-from typing import List, Dict, Any
 from enum import Enum
+from typing import Any
 
 
 class DataAvailability(str, Enum):
@@ -19,20 +19,20 @@ class SymbolConfig:
     symbol: str
     data_availability: DataAvailability = DataAvailability.AVAILABLE
     enabled: bool = True
-    priority_strategies: List[str] = field(default_factory=list)
+    priority_strategies: list[str] = field(default_factory=list)
 
 
 @dataclass
 class StrategyFamilyConfig:
     enabled: bool = True
-    default_params: Dict[str, Any] = field(default_factory=dict)
-    param_grid: Dict[str, List[Any]] = field(default_factory=dict)
+    default_params: dict[str, Any] = field(default_factory=dict)
+    param_grid: dict[str, list[Any]] = field(default_factory=dict)
 
 
 @dataclass
 class UniverseConfig:
     min_volume_usdt: float = 10_000_000    # minimum 24h USDT volume
-    symbols: List[SymbolConfig] = field(default_factory=lambda: [
+    symbols: list[SymbolConfig] = field(default_factory=lambda: [
         SymbolConfig(symbol="BTCUSDT", priority_strategies=["momentum", "ema_trend", "rsi_mean_reversion"]),
         SymbolConfig(symbol="ETHUSDT", priority_strategies=["donchian", "momentum", "ema_trend"]),
         SymbolConfig(symbol="SOLUSDT", priority_strategies=["bollinger_atr", "momentum", "volume_breakout"]),
@@ -117,8 +117,8 @@ class ManagementConfig:
 @dataclass
 class StrategyFamilyConfig:
     enabled: bool = True
-    default_params: Dict[str, Any] = field(default_factory=dict)
-    param_grid: Dict[str, List[Any]] = field(default_factory=dict)
+    default_params: dict[str, Any] = field(default_factory=dict)
+    param_grid: dict[str, list[Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -151,14 +151,14 @@ class AppConfig:
         serialized = json.dumps(config_dict, sort_keys=True)
         return hashlib.sha256(serialized.encode()).hexdigest()[:12]
 
-    def get_available_symbols(self) -> List[str]:
+    def get_available_symbols(self) -> list[str]:
         """Get list of symbols with AVAILABLE data (validated historical dataset).
 
         Research/backtest gate — only these have verified local history.
         """
         return [s.symbol for s in self.universe.symbols if s.enabled and s.data_availability == DataAvailability.AVAILABLE]
 
-    def get_tradable_symbols(self) -> List[str]:
+    def get_tradable_symbols(self) -> list[str]:
         """Get list of all enabled symbols for LIVE trading.
 
         Live scans use live Binance data, so coins without validated
@@ -167,7 +167,7 @@ class AppConfig:
         """
         return [s.symbol for s in self.universe.symbols if s.enabled]
 
-    def get_all_symbols(self) -> List[str]:
+    def get_all_symbols(self) -> list[str]:
         """Get list of all configured symbols."""
         return [s.symbol for s in self.universe.symbols if s.enabled]
 

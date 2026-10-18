@@ -29,7 +29,7 @@ import json as _json
 import os as _os
 import threading as _threading
 import time as _time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.utils.logger import get_logger
 
@@ -56,10 +56,10 @@ class SimLedger:
         self._state = self._load()
 
     # ── persistence ─────────────────────────────────────────────
-    def _blank(self) -> Dict[str, Any]:
+    def _blank(self) -> dict[str, Any]:
         return {"version": 1, "reservations": {}, "baseline": None}
 
-    def _load(self) -> Dict[str, Any]:
+    def _load(self) -> dict[str, Any]:
         try:
             with open(self.ledger_path, "r", encoding="utf-8") as f:
                 data = _json.load(f)
@@ -88,7 +88,7 @@ class SimLedger:
 
     # ── lifecycle ───────────────────────────────────────────────
     def reserve(self, signal_id: str, symbol: str, amount: float,
-                note: str = "") -> Dict[str, Any]:
+                note: str = "") -> dict[str, Any]:
         """Record a share's fund commitment. Idempotent by signal_id.
 
         ALWAYS succeeds locally (advisory only). A duplicate returns the
@@ -110,7 +110,7 @@ class SimLedger:
             return rec
 
     def release(self, signal_id: str, credit: Any = 0.0, fee: float = 0.0,
-                note: str = "") -> Dict[str, Any]:
+                note: str = "") -> dict[str, Any]:
         """Release a reservation (close / expiry / rejected open).
 
         Idempotent: second release is a no-op returning released=False.
@@ -137,7 +137,7 @@ class SimLedger:
             self._save()
             return {"released": True, "record": rec}
 
-    def mark_gone(self, signal_id: str, evidence: str = "") -> Dict[str, Any]:
+    def mark_gone(self, signal_id: str, evidence: str = "") -> dict[str, Any]:
         """Terminal: server says the position is gone. Frees the reservation
         without crediting (credit unknown) — reported, not assumed."""
         with self._mu:
@@ -152,7 +152,7 @@ class SimLedger:
             return {"status": "gone", "changed": True}
 
     # ── views ───────────────────────────────────────────────────
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """Pure totals over unreleased reservations. No remote data."""
         with self._mu:
             recs = [r for r in self._state["reservations"].values()
@@ -176,8 +176,8 @@ class SimLedger:
             "healthy": self.healthy,
         }
 
-    def advisory_available(self, remote_remaining: Optional[float],
-                           next_amount: float = 0.0) -> Dict[str, Any]:
+    def advisory_available(self, remote_remaining: float | None,
+                           next_amount: float = 0.0) -> dict[str, Any]:
         """Advisory only: compare remote snapshot against local reservations.
 
         Returns a would_overdraft FLAG — callers must treat it as monitoring
@@ -202,8 +202,8 @@ class SimLedger:
                 "would_overdraft": implied < float(next_amount),
                 "stale": False}
 
-    def reconcile(self, remote_remaining: Optional[float],
-                  remote_open: Optional[Dict[str, float]]) -> Dict[str, Any]:
+    def reconcile(self, remote_remaining: float | None,
+                  remote_open: dict[str, float] | None) -> dict[str, Any]:
         """Compare local mirror against an authoritative remote snapshot.
 
         - remote_open maps our signal_ids (or symbols) to open sim amounts.
@@ -240,9 +240,9 @@ class SimLedger:
                 "reserved_total": local_reserved}
 
     @staticmethod
-    def _prune_resolved(recs: Dict[str, Any],
+    def _prune_resolved(recs: dict[str, Any],
                         ttl_ms: int = SIM_RESOLVED_TTL_MS,
-                        now_ms: Optional[float] = None) -> int:
+                        now_ms: float | None = None) -> int:
         """Drop released/gone records older than the TTL. Returns count.
 
         Safety rules (all load-bearing):
@@ -270,7 +270,7 @@ class SimLedger:
             del recs[sid]
         return len(doomed)
 
-    def _snapshot_locked(self) -> Dict[str, Any]:
+    def _snapshot_locked(self) -> dict[str, Any]:
         recs = [r for r in self._state["reservations"].values()
                 if isinstance(r, dict)]
         reserved = [r for r in recs if r.get("status") == "reserved"]

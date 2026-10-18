@@ -33,7 +33,7 @@ Every decision carries `rationale` (why this action) and `rejected`
 """
 import hashlib
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.exits import policy
 from src.exits.config import ExitConfig, config_version
@@ -51,7 +51,7 @@ from src.exits.workers import WorkerCtx
 
 
 def decision_key(
-    signal_id: str, plan_version: int, data_ts_ms: int, action: str, params: Dict[str, Any]
+    signal_id: str, plan_version: int, data_ts_ms: int, action: str, params: dict[str, Any]
 ) -> str:
     """Idempotency key: identical inputs always collide (dedupe), distinct
     evaluations never do."""
@@ -72,7 +72,7 @@ def decision_key(
 class ExitSupervisor:
     SUPERVISOR_VERSION = "1.0.0"
 
-    def __init__(self, cfg: Optional[ExitConfig] = None):
+    def __init__(self, cfg: ExitConfig | None = None):
         self.cfg = cfg or ExitConfig()
         self.guard = RiskGuard(self.cfg)
 
@@ -80,7 +80,7 @@ class ExitSupervisor:
     def decide(
         self,
         view: PositionView,
-        assessments: List[WorkerAssessment],
+        assessments: list[WorkerAssessment],
         ctx: WorkerCtx,
         now_ms: int,
         seen_keys: frozenset = frozenset(),
@@ -178,7 +178,7 @@ class ExitSupervisor:
             )
 
         # Rule 4 — adjustments last, each gated on state + stability + RiskGuard.
-        skipped: List[Dict[str, str]] = []
+        skipped: list[dict[str, str]] = []
         for worker, action in (
             (stop, ExitAction.TIGHTEN_STOP.value),
             (target, ExitAction.ADJUST_TAKE_PROFITS.value),
@@ -246,7 +246,7 @@ class ExitSupervisor:
         ctx: WorkerCtx,
         now_ms: int,
         action: str,
-        proposal: Dict[str, Any],
+        proposal: dict[str, Any],
         last_change_ts_ms: int,
     ) -> "tuple[bool, str]":
         """Plan-stability gate: material move + cooldown elapsed.
@@ -301,7 +301,7 @@ class ExitSupervisor:
 
     @staticmethod
     def _merged_tp(view: PositionView, ctx: WorkerCtx,
-                   proposal: Dict[str, Any]) -> float:
+                   proposal: dict[str, Any]) -> float:
         """Fill-aware TP merge shared by the stability gate and application.
 
         An already-hit TP keeps its traded level; otherwise the proposal
@@ -313,7 +313,7 @@ class ExitSupervisor:
         return float(proposal["tp"])
 
     @staticmethod
-    def _invalidation_evidence(struct: Optional[WorkerAssessment]) -> Optional[str]:
+    def _invalidation_evidence(struct: WorkerAssessment | None) -> str | None:
         if struct is None or struct.verdict != "THESIS_INVALIDATED":
             return None
         ev = struct.evidence or {}
@@ -328,8 +328,8 @@ class ExitSupervisor:
 
     @staticmethod
     def _shared_indicators(
-        counter: Optional[WorkerAssessment], struct: Optional[WorkerAssessment]
-    ) -> List[str]:
+        counter: WorkerAssessment | None, struct: WorkerAssessment | None
+    ) -> list[str]:
         if counter is None or struct is None:
             return []
         return sorted(set(counter.indicators or []) & set(struct.indicators or []))
@@ -350,13 +350,13 @@ class ExitSupervisor:
     def _apply_adjustment(
         self,
         view: PositionView,
-        assessments: List[WorkerAssessment],
+        assessments: list[WorkerAssessment],
         ctx: WorkerCtx,
         now_ms: int,
         worker: WorkerAssessment,
         action: str,
-        proposal: Dict[str, Any],
-        guard_reasons: List[str],
+        proposal: dict[str, Any],
+        guard_reasons: list[str],
     ) -> SupervisorDecision:
         plan = view.plan
         nxt = plan.version + 1
@@ -381,7 +381,7 @@ class ExitSupervisor:
         new_plan = ExitPlan(new_plan.signal_id, new_plan.version, new_plan.stop_loss,
                             new_plan.tp,
                             new_plan.decided_at_ms, key)
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         if action == ExitAction.REDUCE_PAPER_POSITION.value:
             events.append({"kind": "reduce",
                            "fraction": float(proposal.get("fraction", self.cfg.reduce_fraction)),
@@ -402,7 +402,7 @@ class ExitSupervisor:
         return d
 
     def _no_change_rationale(
-        self, view: PositionView, by_id: Dict[str, WorkerAssessment]
+        self, view: PositionView, by_id: dict[str, WorkerAssessment]
     ) -> str:
         bits = []
         for wid in ("structure", "target", "stop", "counter", "riskreward"):
@@ -416,8 +416,8 @@ class ExitSupervisor:
         )
 
     def _no_change_rejections(
-        self, view: PositionView, by_id: Dict[str, WorkerAssessment]
-    ) -> List[Dict[str, str]]:
+        self, view: PositionView, by_id: dict[str, WorkerAssessment]
+    ) -> list[dict[str, str]]:
         out = []
         for wid, w in by_id.items():
             if w.proposed_action and w.proposed_action not in (
@@ -436,15 +436,15 @@ class ExitSupervisor:
     def _finish(
         self,
         view: PositionView,
-        assessments: List[WorkerAssessment],
+        assessments: list[WorkerAssessment],
         ctx: WorkerCtx,
         now_ms: int,
         action: str,
         rationale: str,
-        rejected: Optional[List[Dict[str, str]]] = None,
-        plan_after: Optional[Dict[str, Any]] = None,
-        events: Optional[List[Dict[str, Any]]] = None,
-        params: Optional[Dict[str, Any]] = None,
+        rejected: list[dict[str, str]] | None = None,
+        plan_after: dict[str, Any] | None = None,
+        events: list[dict[str, Any]] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> SupervisorDecision:
         clean_params = {k: v for k, v in (params or {}).items()
                         if not str(k).startswith("_")}

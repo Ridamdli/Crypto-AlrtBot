@@ -11,12 +11,11 @@ Isolated SHORT liquidates when:
 
 mmr = maintenance-margin rate (Binance tier-1 notional bracket: 0.4%).
 """
-from typing import Optional
 
 MMR_DEFAULT = 0.004
 
 
-def estimate_liq_price(entry: float, side: str, leverage: float, mmr: float = MMR_DEFAULT) -> Optional[float]:
+def estimate_liq_price(entry: float, side: str, leverage: float, mmr: float = MMR_DEFAULT) -> float | None:
     """Estimated liquidation price, or None if inputs are unusable."""
     try:
         entry = float(entry)
@@ -32,7 +31,7 @@ def estimate_liq_price(entry: float, side: str, leverage: float, mmr: float = MM
     return None
 
 
-def liq_distance_pct(entry: float, liq_price: float, side: str) -> Optional[float]:
+def liq_distance_pct(entry: float, liq_price: float, side: str) -> float | None:
     """Adverse distance to liquidation, in percent of entry."""
     try:
         if side == "LONG":

@@ -27,8 +27,9 @@ import hashlib as _hashlib
 import json as _json
 import os as _os
 import time as _time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import requests as _requests
 
@@ -79,7 +80,7 @@ def _action_id(sid: str, kind: str, plan_version: Any, levels: Any) -> str:
     return _hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def classify_sync_error(exc: BaseException) -> Dict[str, Any]:
+def classify_sync_error(exc: BaseException) -> dict[str, Any]:
     """Map an execution failure to a retry policy. Pure function.
 
     Kinds: timeout (ambiguous, retryable), rate_limited (honor Retry-After),
@@ -96,7 +97,7 @@ def classify_sync_error(exc: BaseException) -> Dict[str, Any]:
     if isinstance(exc, _requests.exceptions.HTTPError):
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status == 429:
-            retry_after: Optional[int] = None
+            retry_after: int | None = None
             try:
                 headers = getattr(getattr(exc, "response", None), "headers", {}) or {}
                 retry_after = int(headers.get("Retry-After", ""))
@@ -131,7 +132,7 @@ def classify_sync_error(exc: BaseException) -> Dict[str, Any]:
     return {"retryable": True, "kind": "unknown", "retry_after_s": None}
 
 
-def load_sync_state(storage_dir: str = "data_store") -> Dict[str, Any]:
+def load_sync_state(storage_dir: str = "data_store") -> dict[str, Any]:
     """{synced_levels: {signal_id: {stop_loss, tp}}, closed: [signal_ids]}."""
     path = _os.path.join(storage_dir, SYNC_STATE_NAME)
     try:
@@ -146,7 +147,7 @@ def load_sync_state(storage_dir: str = "data_store") -> Dict[str, Any]:
     return {"synced_levels": {}, "closed": []}
 
 
-def save_sync_state(storage_dir: str, state: Dict[str, Any]) -> None:
+def save_sync_state(storage_dir: str, state: dict[str, Any]) -> None:
     """Atomic publish (tmp + os.replace): readers never see a torn file.
 
     A crash mid-write leaves the previous valid state in place; the tmp
@@ -166,12 +167,12 @@ def save_sync_state(storage_dir: str, state: Dict[str, Any]) -> None:
             pass
 
 
-def _plan_tp(plan: Dict[str, Any]) -> Any:
+def _plan_tp(plan: dict[str, Any]) -> Any:
     """The plan's single TP, tolerant of legacy tp1-keyed rows."""
     return plan.get("tp", plan.get("tp1"))
 
 
-def _same_levels(stored: Any, cur: Dict[str, Any]) -> bool:
+def _same_levels(stored: Any, cur: dict[str, Any]) -> bool:
     """Level equality across the tp/tp1 key rename (one corrective sync at
     most after the rename, then the stored row carries the new key)."""
     if not isinstance(stored, dict):
@@ -181,11 +182,11 @@ def _same_levels(stored: Any, cur: Dict[str, Any]) -> bool:
 
 
 def compute_sync_actions(
-    plans: List[Dict[str, Any]],
-    close_signal_ids: List[str],
-    share_ledger: Dict[str, Any],
-    sync_state: Dict[str, Any],
-) -> List[Dict[str, Any]]:
+    plans: list[dict[str, Any]],
+    close_signal_ids: list[str],
+    share_ledger: dict[str, Any],
+    sync_state: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Pure function: applied exit-ledger state -> Invo actions.
 
     plans: active ExitPlan dicts (only version > 0 can differ from create).
@@ -193,7 +194,7 @@ def compute_sync_actions(
     share_ledger: signal_id -> {baseIds: [...]} from the share path.
     Returns [{kind: modify|close, signal_id, base_ids, price_target?, stop_loss?}].
     """
-    actions: List[Dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
     synced_levels = sync_state.get("synced_levels", {}) or {}
     closed = set(sync_state.get("closed", []) or [])
 
@@ -244,9 +245,9 @@ def compute_sync_actions(
     return actions
 
 
-def summarize_sync(plans: List[Dict[str, Any]],
-                   share_ledger: Dict[str, Any],
-                   sync_state: Dict[str, Any]) -> Dict[str, Any]:
+def summarize_sync(plans: list[dict[str, Any]],
+                   share_ledger: dict[str, Any],
+                   sync_state: dict[str, Any]) -> dict[str, Any]:
     """Observability split for one cycle: what is in-sync, pending, or
     untargetable. A quiet cycle logs this INSTEAD of silence, so monitoring
     can distinguish 'nothing to do' from 'sync missing'.
@@ -305,10 +306,10 @@ class SyncTracker:
     raising — an audit/persistence failure must never corrupt accounting.
     """
 
-    def __init__(self, state: Optional[Dict[str, Any]] = None,
-                 now_ms_fn: Optional[Callable[[], int]] = None,
-                 cfg: Optional[SyncRetryConfig] = None,
-                 save_fn: Optional[Callable[[Dict[str, Any]], None]] = None):
+    def __init__(self, state: dict[str, Any] | None = None,
+                 now_ms_fn: Callable[[], int] | None = None,
+                 cfg: SyncRetryConfig | None = None,
+                 save_fn: Callable[[dict[str, Any]], None] | None = None):
         self.state = state if state is not None else {}
         if not isinstance(self.state, dict):
             self.state = {}
@@ -334,7 +335,7 @@ class SyncTracker:
             self.persisted = False
             self.audit_gap = True
 
-    def _rec(self, sid: str, kind: str) -> Dict[str, Any]:
+    def _rec(self, sid: str, kind: str) -> dict[str, Any]:
         recs = self.state.setdefault("records", {})
         key = f"{sid}:{kind}"
         rec = recs.get(key)
@@ -349,7 +350,7 @@ class SyncTracker:
     def gate(self, sid: str, kind: str,
              plan_version: Any = None,
              levels: Any = None,
-             force_after_backoff: bool = False) -> Dict[str, Any]:
+             force_after_backoff: bool = False) -> dict[str, Any]:
         """Decide whether an action may execute now. Pure w.r.t. attempts
         (never mutates): execution bookkeeping belongs to note_attempt.
 
@@ -385,7 +386,7 @@ class SyncTracker:
                 "levels": levels}
 
     # ── bookkeeping ─────────────────────────────────────────────
-    def note_attempt(self, sid: str, kind: str) -> Dict[str, Any]:
+    def note_attempt(self, sid: str, kind: str) -> dict[str, Any]:
         rec = self._rec(sid, kind)
         rec["attempts"] = int(rec.get("attempts", 0) or 0) + 1
         rec["status"] = "in_flight"
@@ -394,7 +395,7 @@ class SyncTracker:
         return {"status": rec["status"], "attempts": rec["attempts"]}
 
     def note_result(self, sid: str, kind: str, outcome: str,
-                    evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                    evidence: dict[str, Any] | None = None) -> dict[str, Any]:
         """outcome in confirmed|gone|retryable|permanent|already-applied."""
         ev = dict(evidence or {})
         rec = self._rec(sid, kind)
@@ -419,9 +420,7 @@ class SyncTracker:
             # a malformed giant value cannot park a position forever. The
             # attempt budget still bounds total retries either way.
             hint = ev.get("retry_after_s")
-            if isinstance(hint, bool) or not isinstance(hint, (int, float)):
-                hint = None
-            elif not (hint > 0):
+            if isinstance(hint, bool) or not isinstance(hint, (int, float)) or not (hint > 0):
                 hint = None
             if hint is not None:
                 delay_s = min(float(hint), float(SYNC_RETRY_AFTER_CEIL_S))
@@ -438,7 +437,7 @@ class SyncTracker:
         self._flush()
         return {"status": rec["status"], "attempts": rec.get("attempts", 0)}
 
-    def record(self, sid: str, kind: str) -> Dict[str, Any]:
+    def record(self, sid: str, kind: str) -> dict[str, Any]:
         """Report view: in_flight (crashed mid-attempt) reads as retryable."""
         rec = self._rec(sid, kind)
         status = rec.get("status", "pending")
@@ -448,7 +447,7 @@ class SyncTracker:
                 "plan_version": rec.get("plan_version"),
                 "next_retry_at_ms": rec.get("next_retry_at_ms", 0)}
 
-    def prune(self, now_ms: Optional[int] = None,
+    def prune(self, now_ms: int | None = None,
               ttl_ms: int = TERMINAL_RECORD_TTL_MS) -> int:
         """Drop terminal records older than ttl_ms. Returns pruned count.
 

@@ -1,4 +1,5 @@
-from typing import Dict, Any
+from typing import Any
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -9,7 +10,7 @@ class RiskEngine:
         self.max_risk_pct = max_risk_pct / 100.0
         self.max_leverage = max_leverage
 
-    def calculate_risk_parameters(self, entry: float, sl: float, tp_dict: Dict[str, float]) -> Dict[str, Any]:
+    def calculate_risk_parameters(self, entry: float, sl: float, tp_dict: dict[str, float]) -> dict[str, Any]:
         """
         Calculate R:R, position size, leverage, and margin.
         """

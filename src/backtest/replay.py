@@ -1,10 +1,10 @@
-import os
 import json
-from typing import Dict, Any, List, Optional, Union
+import os
 from datetime import datetime, timezone
+from typing import Any
 
-from src.pipeline import SignalPipeline
 from src.config import CONFIG, AppConfig
+from src.pipeline import SignalPipeline
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,8 +19,8 @@ class ReplayHarness:
 
     def __init__(
         self,
-        config: Optional[AppConfig] = None,
-        pipeline: Optional[SignalPipeline] = None,
+        config: AppConfig | None = None,
+        pipeline: SignalPipeline | None = None,
         storage_dir: str = "data_store/replay",
     ):
         self.config = config or CONFIG
@@ -31,9 +31,9 @@ class ReplayHarness:
 
     def replay_timestamp(
         self,
-        as_of_time: Union[int, str, datetime],
-        symbols: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        as_of_time: int | str | datetime,
+        symbols: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Runs the production signal pipeline as of a specific historical timestamp.
         Only data available on or before as_of_time is fetched and used.
@@ -45,9 +45,9 @@ class ReplayHarness:
 
     def replay_range(
         self,
-        timestamps: List[Union[int, str, datetime]],
-        symbols: Optional[List[str]] = None,
-    ) -> Dict[str, List[Dict[str, Any]]]:
+        timestamps: list[int | str | datetime],
+        symbols: list[str] | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
         """
         Replays a chronological series of historical timestamps.
         Returns a dict mapping timestamp string to generated signals.
@@ -61,8 +61,8 @@ class ReplayHarness:
 
     def save_replay_results(
         self,
-        results: Dict[str, Any],
-        filename: Optional[str] = None,
+        results: dict[str, Any],
+        filename: str | None = None,
     ) -> str:
         """Serializes replay outputs to local JSON file for auditing/evaluation."""
         if not filename:
@@ -75,16 +75,16 @@ class ReplayHarness:
         logger.info(f"[ReplayHarness] Saved replay results to {file_path}")
         return file_path
 
-    def load_replay_results(self, filepath: str) -> Dict[str, Any]:
+    def load_replay_results(self, filepath: str) -> dict[str, Any]:
         """Loads serialized replay results from disk."""
         with open(filepath, "r") as f:
             return json.load(f)
 
     @staticmethod
     def assert_deterministic(
-        run1: List[Dict[str, Any]],
-        run2: List[Dict[str, Any]],
-        fields_to_check: Optional[List[str]] = None,
+        run1: list[dict[str, Any]],
+        run2: list[dict[str, Any]],
+        fields_to_check: list[str] | None = None,
     ) -> bool:
         """
         Verifies that two runs produce the exact identical outputs.

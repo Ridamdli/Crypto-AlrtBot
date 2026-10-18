@@ -1,10 +1,9 @@
-from typing import List, Dict, Any
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 class InvalidationEngine:
-    def generate_rules(self, side: str, entry: float, sl: float, timeframe: str = "15m") -> Dict[str, List[str]]:
+    def generate_rules(self, side: str, entry: float, sl: float, timeframe: str = "15m") -> dict[str, list[str]]:
         """
         Generates explicit validation, invalidation, and management rules
         per PRD §25 and §27.
@@ -18,13 +17,13 @@ class InvalidationEngine:
             invalidation_conditions = [
                 f"{timeframe} candle closes below {sl:.6g} (Stop Loss)",
                 "BTC loses 4H bullish structure",
-                f"Entry not triggered within 6 candles",
+                "Entry not triggered within 6 candles",
             ]
         else:
             invalidation_conditions = [
                 f"{timeframe} candle closes above {sl:.6g} (Stop Loss)",
                 "BTC loses 4H bearish structure",
-                f"Entry not triggered within 6 candles",
+                "Entry not triggered within 6 candles",
             ]
 
         management_rules = [

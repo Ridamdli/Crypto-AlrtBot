@@ -6,8 +6,10 @@ Short: Price breaks below lower Bollinger Band after valid compression
 
 Includes bandwidth/compression filter, ATR stop, volume confirmation.
 """
-from typing import List, Dict, Any
+from typing import Any
+
 import pandas as pd
+
 from src.strategies.base import BaseStrategy, SignalCandidate
 from src.utils.logger import get_logger
 
@@ -77,14 +79,14 @@ class BollingerATRStrategy(BaseStrategy):
     
     def generate_candidates(
         self,
-        klines_15m: List[Dict[str, Any]],
-        klines_1h: List[Dict[str, Any]],
-        klines_4h: List[Dict[str, Any]],
+        klines_15m: list[dict[str, Any]],
+        klines_1h: list[dict[str, Any]],
+        klines_4h: list[dict[str, Any]],
         btc_regime: str,
-        oi_data: Dict[str, Any],
+        oi_data: dict[str, Any],
         funding_rate: float,
         current_price: float,
-    ) -> List[SignalCandidate]:
+    ) -> list[SignalCandidate]:
         from src.strategies.base import SignalCandidate
         
         candidates = []

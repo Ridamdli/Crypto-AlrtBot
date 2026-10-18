@@ -1,9 +1,8 @@
-import os
 import json
-from typing import Dict, Any, List, Optional
+import os
 from enum import Enum
+from typing import Any
 
-from src.models.signal import SignalModel
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -43,9 +42,9 @@ class SignalOutcomeEvaluator:
 
     def evaluate_signal(
         self,
-        signal: Dict[str, Any],
-        subsequent_klines: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        signal: dict[str, Any],
+        subsequent_klines: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         """
         Evaluates a signal across subsequent OHLCV candles (typically 15m).
         """
@@ -162,10 +161,8 @@ class SignalOutcomeEvaluator:
                 bar_favorable = max(0.0, actual_entry_price - k_low)
                 bar_adverse = max(0.0, k_high - actual_entry_price)
 
-            if bar_favorable > mfe:
-                mfe = bar_favorable
-            if bar_adverse > mae:
-                mae = bar_adverse
+            mfe = max(mfe, bar_favorable)
+            mae = max(mae, bar_adverse)
 
             # Check liquidation FIRST (liq engine closes before TP/SL prints)
             if liq_price is not None and liq_loss_r is not None:
@@ -289,9 +286,9 @@ class SignalOutcomeEvaluator:
 
     def evaluate_batch(
         self,
-        signals: List[Dict[str, Any]],
-        market_klines: Dict[str, List[Dict[str, Any]]],
-    ) -> List[Dict[str, Any]]:
+        signals: list[dict[str, Any]],
+        market_klines: dict[str, list[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
         """Evaluates a batch of signals against their respective subsequent market klines."""
         evaluations = []
         for sig in signals:
@@ -302,7 +299,7 @@ class SignalOutcomeEvaluator:
         return evaluations
 
     def save_evaluations(
-        self, evaluations: List[Dict[str, Any]], filename: str = "evaluations.json"
+        self, evaluations: list[dict[str, Any]], filename: str = "evaluations.json"
     ) -> str:
         """Persists evaluated outcomes to storage directory."""
         filepath = os.path.join(self.storage_dir, filename)

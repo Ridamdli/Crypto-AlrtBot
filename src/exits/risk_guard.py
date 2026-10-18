@@ -24,7 +24,7 @@ A tighter stop raises premature-exit risk; that tradeoff is the Stop
 worker's documented concern and the supervisor's rationale — RiskGuard only
 certifies that the change is *safe* (risk never up), never that it is wise.
 """
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from src.exits import policy
 from src.exits.config import ExitConfig
@@ -39,13 +39,13 @@ class RiskGuard:
         self,
         view: PositionView,
         action: str,
-        proposal: Dict[str, Any],
+        proposal: dict[str, Any],
         seen_keys: frozenset = frozenset(),
         last_data_ts_ms: int = 0,
         data_ts_ms: int = 0,
-    ) -> Tuple[bool, List[str]]:
+    ) -> tuple[bool, list[str]]:
         """Returns (ok, reasons). Reasons explain acceptance or every rejection."""
-        reasons: List[str] = []
+        reasons: list[str] = []
         ok, why = self._check(proposal, view, action, seen_keys, last_data_ts_ms, data_ts_ms)
         reasons.extend(why)
         return ok, reasons
@@ -53,13 +53,13 @@ class RiskGuard:
     # ── internals ───────────────────────────────────────────────────
     def _check(
         self,
-        proposal: Dict[str, Any],
+        proposal: dict[str, Any],
         view: PositionView,
         action: str,
         seen_keys: frozenset,
         last_data_ts_ms: int,
         data_ts_ms: int,
-    ) -> Tuple[bool, List[str]]:
+    ) -> tuple[bool, list[str]]:
         sig = view.signal
         plan = view.plan
         side = str(sig.get("side", "")).upper()
@@ -97,10 +97,10 @@ class RiskGuard:
         return False, [f"unknown action {action}"]
 
     def _check_tighten(
-        self, proposal: Dict[str, Any], view: PositionView,
+        self, proposal: dict[str, Any], view: PositionView,
         side: str, entry: float, plan: ExitPlan,
-    ) -> Tuple[bool, List[str]]:
-        reasons: List[str] = []
+    ) -> tuple[bool, list[str]]:
+        reasons: list[str] = []
         if view.state not in (PositionState.OPEN, PositionState.PARTIAL):
             return False, [f"TIGHTEN_STOP inadmissible for {view.state.value} (no exposure to protect)"]
         try:
@@ -131,10 +131,10 @@ class RiskGuard:
         return True, reasons
 
     def _check_targets(
-        self, proposal: Dict[str, Any], view: PositionView,
+        self, proposal: dict[str, Any], view: PositionView,
         side: str, entry: float, plan: ExitPlan,
-    ) -> Tuple[bool, List[str]]:
-        reasons: List[str] = []
+    ) -> tuple[bool, list[str]]:
+        reasons: list[str] = []
         if view.state not in (PositionState.OPEN, PositionState.PARTIAL):
             return False, [f"ADJUST_TAKE_PROFITS inadmissible for {view.state.value}"]
         try:
@@ -170,8 +170,8 @@ class RiskGuard:
 
     @staticmethod
     def _check_non_plan(
-        action: str, proposal: Dict[str, Any], view: PositionView
-    ) -> Tuple[bool, List[str]]:
+        action: str, proposal: dict[str, Any], view: PositionView
+    ) -> tuple[bool, list[str]]:
         if action == ExitAction.REDUCE_PAPER_POSITION.value:
             if view.state not in (PositionState.OPEN, PositionState.PARTIAL):
                 return False, [f"REDUCE inadmissible for {view.state.value}"]

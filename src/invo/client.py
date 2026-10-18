@@ -25,7 +25,7 @@ import base64
 import os
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 
@@ -190,11 +190,11 @@ class InvoClient:
         self._log = lambda event, detail=None: log_activity(storage_dir, event, detail)
         # Resume the persisted session so tokens live across restarts.
         saved = self.store.load()
-        self.access_token: Optional[str] = saved.get("access_token")
-        self.refresh_token: Optional[str] = saved.get("refresh_token")
+        self.access_token: str | None = saved.get("access_token")
+        self.refresh_token: str | None = saved.get("refresh_token")
 
     # ── email + OTP self-login (Invo is OTP-only; no passwords exist) ───
-    def start_email_login(self, email: str) -> Dict[str, Any]:
+    def start_email_login(self, email: str) -> dict[str, Any]:
         """Trigger an OTP code to the inbox. Returns the raw server reply."""
         resp = self.session.post(
             f"{self.base_url}/auth/login/email/start",
@@ -208,7 +208,7 @@ class InvoClient:
         except ValueError:
             return {"raw": resp.text}
 
-    def verify_email_code(self, email: str, code: str, device_id: str = "") -> Dict[str, Any]:
+    def verify_email_code(self, email: str, code: str, device_id: str = "") -> dict[str, Any]:
         """Exchange an inbox OTP code for Bearer tokens. Stores them on success.
 
         Body shape verbatim from the app bundle (f9E serializer):
@@ -239,7 +239,7 @@ class InvoClient:
         logger.info("Invo email-OTP login ok.")
         return {"user_id": data.get("userId"), "username": data.get("username")}
 
-    def login(self) -> Dict[str, Any]:
+    def login(self) -> dict[str, Any]:
         """Password login — NOT supported by Invo (OTP-only platform).
 
         Use start_email_login() + verify_email_code(), or the fully
@@ -247,10 +247,10 @@ class InvoClient:
         """
         raise InvoAuthError("Invo has no password login; use start_email_login/verify_email_code")
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.access_token}", "Content-Type": "application/json"}
 
-    def _post(self, path: str, payload: Dict[str, Any], retry: bool = True) -> Dict[str, Any]:
+    def _post(self, path: str, payload: dict[str, Any], retry: bool = True) -> dict[str, Any]:
         resp = self.session.post(f"{self.base_url}{path}", json=payload,
                                  headers=self._headers(), timeout=self.timeout)
         if resp.status_code == 401 and retry and self.refresh_token:
@@ -333,7 +333,7 @@ class InvoClient:
 
     # ── paper share (no real money) ───────────────────────────────────
     @staticmethod
-    def _paper_headers(token: str) -> Dict[str, str]:
+    def _paper_headers(token: str) -> dict[str, str]:
         """Exact header set the app sends with the paper-share POST."""
         nonce = base64.b64encode(os.urandom(16)).decode()
         headers = {
@@ -351,11 +351,11 @@ class InvoClient:
         long: bool,
         leverage: float,
         entry_sim: float,
-        price_target: Optional[float],
-        stop_loss: Optional[float],
-        liquidation_price: Optional[float],
+        price_target: float | None,
+        stop_loss: float | None,
+        liquidation_price: float | None,
         portfolio_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Paper-share body, field-for-field as captured live from the app.
 
         entry_sim / price_target semantics are taken from the caller's
@@ -374,7 +374,7 @@ class InvoClient:
         }
 
     def already_shared_open(self, symbol: str, portfolio_id: str,
-                            outcomes: Optional[Dict[str, Dict[str, Any]]] = None,
+                            outcomes: dict[str, dict[str, Any]] | None = None,
                             max_age_s: int = SHARE_STALE_AFTER_S) -> bool:
         """True if we already shared this coin and its outcome isn't final.
 
@@ -406,13 +406,13 @@ class InvoClient:
 
     def share_paper_trade(
         self,
-        signal: Dict[str, Any],
+        signal: dict[str, Any],
         token: str,
         portfolio_id: str,
         entry_sim: float,
-        price_target: Optional[float],
+        price_target: float | None,
         dry_run: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Share one signal as a PAPER trade (no real money).
 
         Field mapping (verified live 2026-10-08 against the test portfolio):
@@ -498,10 +498,10 @@ class InvoClient:
     @staticmethod
     def build_paper_modify_payload(
         base_id: str,
-        price_target: Optional[float],
-        stop_loss: Optional[float],
-        liquidation_price: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        price_target: float | None,
+        stop_loss: float | None,
+        liquidation_price: float | None = None,
+    ) -> dict[str, Any]:
         """Modify body, field-for-field per the app's faG serializer.
 
         simDifference=0 / simIncrease=True: a TP/SL-only edit moves no sim
@@ -526,7 +526,7 @@ class InvoClient:
             "notes": None,
         }
 
-    def _paper_post(self, url: str, payload: Dict[str, Any], token: str) -> Dict[str, Any]:
+    def _paper_post(self, url: str, payload: dict[str, Any], token: str) -> dict[str, Any]:
         """POST to a paper endpoint with the 401-refresh-and-retry dance."""
         resp = self.session.post(url, json=payload,
                                  headers=self._paper_headers(token),
@@ -554,12 +554,12 @@ class InvoClient:
     def update_paper_trade(
         self,
         base_id: str,
-        price_target: Optional[float],
-        stop_loss: Optional[float],
+        price_target: float | None,
+        stop_loss: float | None,
         token: str,
-        liquidation_price: Optional[float] = None,
+        liquidation_price: float | None = None,
         dry_run: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Move TP/SL on one paper investment. No real money.
 
         dry_run=True (default): build + validate payload, POST nothing.
@@ -592,7 +592,7 @@ class InvoClient:
         base_id: str,
         token: str,
         dry_run: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Market-close one paper investment (customClosingPrice=null).
         No real money. dry_run=True (default): build + validate, POST nothing.
         """
@@ -616,7 +616,7 @@ class InvoClient:
         )
         return {"dry_run": False, "payload": payload, "response": result}
 
-    def list_paper_investments(self, token: str, portfolio_id: str) -> Dict[str, Any]:
+    def list_paper_investments(self, token: str, portfolio_id: str) -> dict[str, Any]:
         """Read-only: paper investments + remaining sim for one portfolio.
 
         Never writes. Per the app's cBf flow this is POST {portfolioId}.
@@ -638,7 +638,7 @@ class InvoClient:
         except ValueError:
             raise InvoApiError(resp.status_code, resp.text)
 
-    def fetch_position_history(self, base_id: str, token: str) -> Dict[str, Any]:
+    def fetch_position_history(self, base_id: str, token: str) -> dict[str, Any]:
         """Read-only: full detail of one investment via its history post.
 
         Returns the newest history item (carries priceTarget, stopLoss,
@@ -692,11 +692,11 @@ class InvoClient:
         symbol: str,
         side: str,
         leverage: float,
-        tp_px: Optional[float] = None,
-        sl_px: Optional[float] = None,
+        tp_px: float | None = None,
+        sl_px: float | None = None,
         margin_mode: str = "isolated",
-        portfolio_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        portfolio_id: str | None = None,
+    ) -> dict[str, Any]:
         """Exact body the app sends to /dex/position/create (minus hlOrder).
 
         The live app ALSO attaches submission.hlOrder (a wallet-signed
@@ -708,7 +708,7 @@ class InvoClient:
         s = side.upper()
         if s not in ("LONG", "SHORT"):
             raise ValueError(f"side must be LONG/SHORT, got {side!r}")
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "clientTxId": str(uuid.uuid4()),
             "coin": coin,
             "assetIndex": asset_index,
@@ -726,8 +726,8 @@ class InvoClient:
             payload["summary"] = {"portfolioId": portfolio_id}
         return payload
 
-    def share_position(self, signal: Dict[str, Any], dry_run: bool = True,
-                       portfolio_id: Optional[str] = None) -> Dict[str, Any]:
+    def share_position(self, signal: dict[str, Any], dry_run: bool = True,
+                       portfolio_id: str | None = None) -> dict[str, Any]:
         """Share one bot signal to the Invo portfolio.
 
         dry_run=True (default): build + validate payload, log it, POST nothing.

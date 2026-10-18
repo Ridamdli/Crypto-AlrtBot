@@ -20,7 +20,7 @@ stated uncertainty. Missing OPTIONAL inputs (OI — which the live pipeline
 does not feed to supervision at all) are documented in the uncertainty note
 and discount quality by 0.8x; they are never treated as neutral evidence.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.exits import policy
 from src.exits.config import ExitConfig
@@ -32,15 +32,15 @@ class WorkerCtx:
 
     def __init__(
         self,
-        signal: Dict[str, Any],
+        signal: dict[str, Any],
         plan_stop: float,
-        plan_tps: List[float],
+        plan_tps: list[float],
         state: PositionState,
-        completed: List[Dict[str, Any]],
+        completed: list[dict[str, Any]],
         now_ms: int,
         cfg: ExitConfig,
         data_ts_ms: int = 0,
-        outcome: Optional[Dict[str, Any]] = None,
+        outcome: dict[str, Any] | None = None,
         fresh: bool = True,
         freshness_reason: str = "ok",
     ):
@@ -65,7 +65,7 @@ class WorkerCtx:
         return float(self.signal["entry"])
 
     @property
-    def last_close(self) -> Optional[float]:
+    def last_close(self) -> float | None:
         if not self.completed:
             return None
         try:
@@ -166,7 +166,7 @@ class StructureWorker:
         truncated data — require >= max_entry_bars completed bars after the
         signal timestamp before calling the window.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         try:
             ts = ctx.signal.get("timestamp")
@@ -229,15 +229,15 @@ class TargetWorker:
         a.evidence_quality = _quality(ctx)
         return a
 
-    def _remaining_tps(self, ctx: WorkerCtx) -> List[float]:
+    def _remaining_tps(self, ctx: WorkerCtx) -> list[float]:
         """TP not yet filled. Fill state comes from the outcome record."""
         if (ctx.outcome or {}).get("tp1_hit"):
             return []
         return list(ctx.plan_tps)
 
     def _pull_to_cap(
-        self, ctx: WorkerCtx, tps: List[float], atr: float
-    ) -> Optional[List[float]]:
+        self, ctx: WorkerCtx, tps: list[float], atr: float
+    ) -> list[float] | None:
         """Pull an over-cap target back to the ATR cap.
 
         Single-TP version: one pull, then the economics gate. If economics
@@ -444,7 +444,7 @@ class RiskRewardWorker:
         a.evidence_quality = _quality(ctx)
         return a
 
-    def _remaining_tps(self, ctx: WorkerCtx) -> List[float]:
+    def _remaining_tps(self, ctx: WorkerCtx) -> list[float]:
         if (ctx.outcome or {}).get("tp1_hit"):
             return []
         return list(ctx.plan_tps)

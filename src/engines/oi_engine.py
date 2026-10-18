@@ -1,4 +1,5 @@
-from typing import List, Dict, Any, Literal
+from typing import Any, Literal
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,7 +15,7 @@ class OIEngine:
         self.min_oi_change_pct = min_oi_change_pct
         self.oi_mode = oi_mode  # "required" or "optional"
 
-    def analyze_oi(self, oi_hist: List[Dict[str, Any]], price_trend: str) -> Dict[str, Any]:
+    def analyze_oi(self, oi_hist: list[dict[str, Any]], price_trend: str) -> dict[str, Any]:
         """
         Analyze open interest history to detect percentage change and divergence.
         Returns tri-state status: CONFIRMED, REJECTED, UNKNOWN
@@ -76,7 +77,7 @@ class OIEngine:
             "reason": reason,
         }
 
-    def should_reject_candidate(self, oi_result: Dict[str, Any]) -> bool:
+    def should_reject_candidate(self, oi_result: dict[str, Any]) -> bool:
         """
         Determine if candidate should be rejected based on OI mode.
         """

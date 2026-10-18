@@ -2,9 +2,8 @@
 Symbol Registry
 Tracks data availability and manages the 14-coin universe.
 """
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-from enum import Enum
+from typing import Any
+
 from src.config import AppConfig, DataAvailability, SymbolConfig
 from src.utils.logger import get_logger
 
@@ -16,10 +15,10 @@ class SymbolRegistry:
     Manages the symbol universe with data availability tracking.
     """
     
-    def __init__(self, config: Optional[AppConfig] = None):
+    def __init__(self, config: AppConfig | None = None):
         from src.config import CONFIG
         self.config = config or CONFIG
-        self._symbols: Dict[str, SymbolConfig] = {}
+        self._symbols: dict[str, SymbolConfig] = {}
         self._load_from_config()
     
     def _load_from_config(self):
@@ -27,11 +26,11 @@ class SymbolRegistry:
         for sym_config in self.config.universe.symbols:
             self._symbols[sym_config.symbol] = sym_config
     
-    def get_available_symbols(self) -> List[str]:
+    def get_available_symbols(self) -> list[str]:
         """Get list of symbols with AVAILABLE data."""
         return [s for s in self._symbols if self._symbols[s].data_availability == DataAvailability.AVAILABLE and self._symbols[s].enabled]
     
-    def get_all_symbols(self) -> List[str]:
+    def get_all_symbols(self) -> list[str]:
         """Get all enabled symbols."""
         return [s for s in self._symbols if self._symbols[s].enabled]
     
@@ -54,7 +53,7 @@ class SymbolRegistry:
             return False
         return self._symbols[symbol].enabled
 
-    def get_tradable_symbols(self) -> List[str]:
+    def get_tradable_symbols(self) -> list[str]:
         """Get all enabled symbols for LIVE trading (all 14 coins)."""
         return [s for s in self._symbols if self._symbols[s].enabled]
     
@@ -70,7 +69,7 @@ class SymbolRegistry:
             self._symbols[symbol].data_availability = availability
             logger.info(f"Updated {symbol} data availability to {availability.value}")
     
-    def get_priority_strategies(self, symbol: str) -> List[str]:
+    def get_priority_strategies(self, symbol: str) -> list[str]:
         """Get priority strategies for a symbol."""
         if symbol not in self._symbols:
             return []
@@ -86,7 +85,7 @@ class SymbolRegistry:
         if symbol in self._symbols:
             self._symbols[symbol].enabled = False
     
-    def get_all_symbols_status(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_symbols_status(self) -> dict[str, dict[str, Any]]:
         """Get status of all symbols."""
         return {
             sym: {
@@ -101,7 +100,7 @@ class SymbolRegistry:
 # Global registry instance
 SYMBOL_REGISTRY = None
 
-def get_symbol_registry(config: Optional[AppConfig] = None) -> SymbolRegistry:
+def get_symbol_registry(config: AppConfig | None = None) -> SymbolRegistry:
     """Get or create the global symbol registry."""
     global SYMBOL_REGISTRY
     if SYMBOL_REGISTRY is None:

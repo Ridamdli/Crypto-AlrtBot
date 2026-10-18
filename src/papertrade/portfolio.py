@@ -20,7 +20,7 @@ State: data_store/paper_portfolio.json
 import json
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.utils.logger import get_logger
 
@@ -45,7 +45,7 @@ class PaperPortfolio:
         os.makedirs(self.storage_dir, exist_ok=True)
 
     # ── ledger ──────────────────────────────────────────────────────────
-    def load(self) -> Dict[str, Any]:
+    def load(self) -> dict[str, Any]:
         try:
             with open(self.ledger_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -60,7 +60,7 @@ class PaperPortfolio:
             "booked": {},  # signal_id -> settled trade record
         }
 
-    def save(self, ledger: Dict[str, Any]) -> None:
+    def save(self, ledger: dict[str, Any]) -> None:
         try:
             from src.utils.atomic import atomic_write_json
             atomic_write_json(self.ledger_path, ledger)
@@ -68,7 +68,7 @@ class PaperPortfolio:
             logger.error(f"[Paper] Failed to save portfolio ledger: {e}")
 
     # ── settlement ──────────────────────────────────────────────────────
-    def settle(self, outcomes: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def settle(self, outcomes: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """Book all newly-final outcomes. Idempotent. Returns run summary."""
         ledger = self.load()
         booked = ledger.get("booked", {})
@@ -129,7 +129,7 @@ class PaperPortfolio:
             logger.info(f"[Paper] {summary}")
         return summary
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Portfolio stats for the dashboard."""
         ledger = self.load()
         trades = list(ledger.get("booked", {}).values())

@@ -1,6 +1,7 @@
 import logging
 import sys
 
+
 def get_logger(name: str) -> logging.Logger:
     """Returns a configured logger instance."""
     logger = logging.getLogger(name)

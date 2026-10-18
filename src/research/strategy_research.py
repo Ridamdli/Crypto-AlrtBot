@@ -3,18 +3,20 @@ Strategy Research Runner
 Orchestrates strategy research across all coins, strategies, and parameter combinations.
 Implements walk-forward validation and parameter robustness analysis.
 """
-import os
 import json
-import copy
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
+import os
+from typing import Any
+
+from src.backtest.evaluator import SignalOutcomeEvaluator
+from src.backtest.tuner import ThresholdTuner
 from src.config import AppConfig
 from src.data.cached_client import CachedFuturesClient
-from src.pipeline import SignalPipeline
-from src.backtest.evaluator import SignalOutcomeEvaluator
-from src.backtest.tuner import ThresholdTuner, DatasetSplit
-from src.strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES, COIN_PRIORITY_STRATEGIES, create_strategy
 from src.data.symbol_registry import get_symbol_registry
+from src.pipeline import SignalPipeline
+from src.strategies import (
+    STRATEGY_REGISTRY,
+    create_strategy,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,13 +34,13 @@ class StrategyResearchRunner:
         for name, cls in STRATEGY_REGISTRY._families.items():
             STRATEGY_REGISTRY.register_family(name, cls)
     
-    def _get_strategies_for_symbol(self, symbol: str) -> List[str]:
+    def _get_strategies_for_symbol(self, symbol: str) -> list[str]:
         """Get strategy families to test for a symbol."""
         from src.config import CONFIG
         symbol_cfg = CONFIG.get_symbol_config(symbol)
         return symbol_cfg.priority_strategies or list(STRATEGY_REGISTRY._families.keys())
     
-    def _get_klines_for_timeframe(self, client: CachedFuturesClient, symbol: str, timeframe: str, end_ts: int, limit: int = 200) -> List[Dict]:
+    def _get_klines_for_timeframe(self, client: CachedFuturesClient, symbol: str, timeframe: str, end_ts: int, limit: int = 200) -> list[dict]:
         """Fetch klines for a specific timeframe."""
         return client.store.get_connection().execute(
             "SELECT timestamp, open, high, low, close, volume FROM klines WHERE symbol=? AND interval=? AND timestamp <= ? ORDER BY timestamp DESC LIMIT ?",
@@ -49,14 +51,13 @@ class StrategyResearchRunner:
         self,
         strategy_family: str,
         symbol: str,
-        param_grid: Dict[str, List[Any]],
-        train_timestamps: List[int],
-        val_timestamps: List[int],
+        param_grid: dict[str, list[Any]],
+        train_timestamps: list[int],
+        val_timestamps: list[int],
         client: CachedFuturesClient,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Run parameter sweep for a single strategy/symbol on TRAIN/VALIDATION."""
         from src.backtest.tuner import ThresholdTuner
-        from src.strategies import create_strategy
         
         tuner = ThresholdTuner()
         
@@ -107,12 +108,12 @@ class StrategyResearchRunner:
         self,
         strategy_family: str,
         symbol: str,
-        config: Dict[str, Any],
-        timestamps: List[int],
+        config: dict[str, Any],
+        timestamps: list[int],
         n_windows: int = 3,
         train_ratio: float = 0.6,
         client: Any = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Run walk-forward evaluation for a strategy configuration."""
         from src.backtest.tuner import ThresholdTuner
         
@@ -136,7 +137,7 @@ class StrategyResearchRunner:
         self.evaluator = SignalOutcomeEvaluator()
         self.tuner = ThresholdTuner()
     
-    def _generate_timestamps(self, start_ts: int, end_ts: int) -> List[int]:
+    def _generate_timestamps(self, start_ts: int, end_ts: int) -> list[int]:
         """Generate 15-minute timestamps between start and end."""
         ts = start_ts
         remainder = ts % 900000
@@ -148,7 +149,7 @@ class StrategyResearchRunner:
             ts += 900000
         return timestamps
     
-    def _fetch_future_klines(self, symbol: str, start_ts: int, limit: int = 100) -> List[Dict]:
+    def _fetch_future_klines(self, symbol: str, start_ts: int, limit: int = 100) -> list[dict]:
         """Fetch future 15m klines for evaluation."""
         with self.client.store.get_connection() as conn:
             query = """
@@ -174,9 +175,9 @@ class StrategyResearchRunner:
     def _generate_evaluations_for_config(
         self,
         config: AppConfig,
-        timestamps: List[int],
-        target_symbols: List[str],
-    ) -> List[Dict[str, Any]]:
+        timestamps: list[int],
+        target_symbols: list[str],
+    ) -> list[dict[str, Any]]:
         """Generate evaluations for a specific config on given timestamps."""
         import logging
         for mod in ["src.pipeline", "src.engines.volume_engine", "src.engines.oi_engine", 
@@ -210,13 +211,13 @@ class StrategyResearchRunner:
     
     def run_research(
         self,
-        symbols: Optional[List[str]] = None,
-        strategy_families: Optional[List[str]] = None,
-        param_grids: Optional[Dict[str, Dict[str, List]]] = None,
+        symbols: list[str] | None = None,
+        strategy_families: list[str] | None = None,
+        param_grids: dict[str, dict[str, list]] | None = None,
         walk_forward_windows: int = 3,
         train_ratio: float = 0.6,
         output_dir: str = "reports",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run complete strategy research pipeline.
         
@@ -296,7 +297,6 @@ class StrategyResearchRunner:
                 
                 # Run parameter sweep on TRAIN
                 # ... (detailed implementation would go here)
-                pass
             
             all_results[family] = family_results
         

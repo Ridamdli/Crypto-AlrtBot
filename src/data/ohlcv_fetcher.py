@@ -1,4 +1,5 @@
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from src.data.binance_client import BinanceFuturesClient
 from src.utils.logger import get_logger
 
@@ -8,7 +9,7 @@ class OHLCVFetcher:
     def __init__(self, client: BinanceFuturesClient):
         self.client = client
 
-    def fetch_standardized_klines(self, symbol: str, interval: str, limit: int = 500, end_time: Optional[int] = None) -> List[Dict[str, Any]]:
+    def fetch_standardized_klines(self, symbol: str, interval: str, limit: int = 500, end_time: int | None = None) -> list[dict[str, Any]]:
         """
         Fetches OHLCV data and returns it in a standardized list of dictionaries.
         Binance Kline layout:

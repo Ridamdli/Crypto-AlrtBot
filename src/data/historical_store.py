@@ -1,6 +1,7 @@
-import sqlite3
 import os
-from typing import List, Dict, Any, Optional
+import sqlite3
+from typing import Any
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -66,7 +67,7 @@ class HistoricalStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_oi_sym_per_time ON open_interest(symbol, period, timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_fr_sym_time ON funding_rate(symbol, timestamp)")
 
-    def insert_klines(self, symbol: str, interval: str, klines: List[List[Any]]):
+    def insert_klines(self, symbol: str, interval: str, klines: list[list[Any]]):
         """Binance raw format: [ts, open, high, low, close, volume, ...]"""
         if not klines: return
         query = """
@@ -80,7 +81,7 @@ class HistoricalStore:
         with self.get_connection() as conn:
             conn.executemany(query, rows)
 
-    def insert_open_interest(self, symbol: str, period: str, data: List[Dict[str, Any]]):
+    def insert_open_interest(self, symbol: str, period: str, data: list[dict[str, Any]]):
         if not data: return
         query = """
             INSERT OR IGNORE INTO open_interest (symbol, period, timestamp, sumOpenInterestValue)
@@ -93,7 +94,7 @@ class HistoricalStore:
         with self.get_connection() as conn:
             conn.executemany(query, rows)
 
-    def insert_funding_rate(self, symbol: str, data: List[Dict[str, Any]]):
+    def insert_funding_rate(self, symbol: str, data: list[dict[str, Any]]):
         if not data: return
         query = """
             INSERT OR IGNORE INTO funding_rate (symbol, timestamp, fundingRate)
@@ -106,7 +107,7 @@ class HistoricalStore:
         with self.get_connection() as conn:
             conn.executemany(query, rows)
 
-    def get_latest_kline_timestamp(self, symbol: str, interval: str) -> Optional[int]:
+    def get_latest_kline_timestamp(self, symbol: str, interval: str) -> int | None:
         with self.get_connection() as conn:
             cur = conn.execute("SELECT MAX(timestamp) FROM klines WHERE symbol=? AND interval=?", (symbol, interval))
             res = cur.fetchone()

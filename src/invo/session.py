@@ -11,7 +11,7 @@ Invo session store: tokens live as long as possible, OTP is last resort.
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.utils.logger import get_logger
 
@@ -28,7 +28,7 @@ class SessionStore:
         self.path = os.path.join(storage_dir, name)
         os.makedirs(storage_dir, exist_ok=True)
 
-    def load(self) -> Dict[str, Any]:
+    def load(self) -> dict[str, Any]:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -36,7 +36,7 @@ class SessionStore:
         except (FileNotFoundError, ValueError, OSError):
             return {}
 
-    def save(self, patch: Dict[str, Any]) -> Dict[str, Any]:
+    def save(self, patch: dict[str, Any]) -> dict[str, Any]:
         data = self.load()
         data.update(patch)
         data["updated_at"] = int(time.time())
@@ -63,7 +63,7 @@ class SessionStore:
         self.save({"last_otp_at": int(time.time())})
 
 
-def log_activity(storage_dir: str, event: str, detail: Optional[Dict[str, Any]] = None,
+def log_activity(storage_dir: str, event: str, detail: dict[str, Any] | None = None,
                  cap: int = ACTIVITY_CAP) -> None:
     """Append-only activity history for the Invo bridge (debugging/audit)."""
     os.makedirs(storage_dir, exist_ok=True)

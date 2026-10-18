@@ -17,8 +17,7 @@ execution code — enforced by a unit test.
 """
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 EXITS_CODE_VERSION = "0.1.0"
 
@@ -59,7 +58,7 @@ class ExitPlan:
     decided_at_ms: int
     basis_decision_key: str = "genesis"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "signal_id": self.signal_id,
             "version": self.version,
@@ -70,7 +69,7 @@ class ExitPlan:
         }
 
     @staticmethod
-    def from_dict(d: Dict[str, Any]) -> "ExitPlan":
+    def from_dict(d: dict[str, Any]) -> "ExitPlan":
         return ExitPlan(
             signal_id=d["signal_id"],
             version=int(d.get("version", 0)),
@@ -81,7 +80,7 @@ class ExitPlan:
         )
 
     @staticmethod
-    def genesis(signal: Dict[str, Any]) -> "ExitPlan":
+    def genesis(signal: dict[str, Any]) -> "ExitPlan":
         return ExitPlan(
             signal_id=signal["signal_id"],
             version=0,
@@ -95,8 +94,8 @@ class ExitPlan:
 @dataclass(frozen=True)
 class PositionView:
     """Everything the workers/supervisor need, derived from existing ledgers."""
-    signal: Dict[str, Any]
-    outcome: Optional[Dict[str, Any]]
+    signal: dict[str, Any]
+    outcome: dict[str, Any] | None
     state: PositionState
     plan: ExitPlan
     invalidated_by_exits: bool = False
@@ -123,8 +122,8 @@ class PositionView:
 
 
 def classify_position(
-    signal: Dict[str, Any],
-    outcome: Optional[Dict[str, Any]],
+    signal: dict[str, Any],
+    outcome: dict[str, Any] | None,
     invalidated_by_exits: bool = False,
 ) -> PositionState:
     """Derive the lifecycle state. Pure function of existing records."""
@@ -156,14 +155,14 @@ class WorkerAssessment:
     assessed_at_ms: int
     data_ts_ms: int
     verdict: str
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    indicators: List[str] = field(default_factory=list)
-    proposed_action: Optional[str] = None
-    proposal: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
+    indicators: list[str] = field(default_factory=list)
+    proposed_action: str | None = None
+    proposal: dict[str, Any] = field(default_factory=dict)
     evidence_quality: float = 1.0
     uncertainty: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "worker_id": self.worker_id,
             "worker_version": self.worker_version,
@@ -185,18 +184,18 @@ class SupervisorDecision:
     signal_id: str
     action: str
     rationale: str
-    rejected: List[Dict[str, str]] = field(default_factory=list)
-    assessments: List[Dict[str, Any]] = field(default_factory=list)
-    risk_guard: Dict[str, Any] = field(default_factory=dict)
+    rejected: list[dict[str, str]] = field(default_factory=list)
+    assessments: list[dict[str, Any]] = field(default_factory=list)
+    risk_guard: dict[str, Any] = field(default_factory=dict)
     decision_key: str = ""
-    plan_after: Optional[Dict[str, Any]] = None
-    events_applied: List[Dict[str, Any]] = field(default_factory=list)
+    plan_after: dict[str, Any] | None = None
+    events_applied: list[dict[str, Any]] = field(default_factory=list)
     config_version: str = ""
     code_version: str = EXITS_CODE_VERSION
     decided_at_ms: int = 0
     data_ts_ms: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "signal_id": self.signal_id,
             "action": self.action,

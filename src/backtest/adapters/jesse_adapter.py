@@ -1,6 +1,7 @@
 import csv
 import os
-from typing import List, Dict, Any
+from typing import Any
+
 
 class JesseAdapter:
     """
@@ -11,7 +12,7 @@ class JesseAdapter:
 
     @staticmethod
     def export_candles_to_csv(
-        klines: List[Dict[str, Any]],
+        klines: list[dict[str, Any]],
         symbol: str,
         output_dir: str = "data_store/jesse_export",
     ) -> str:
@@ -38,7 +39,7 @@ class JesseAdapter:
 
     @staticmethod
     def export_signals_to_jesse_events(
-        signals: List[Dict[str, Any]],
+        signals: list[dict[str, Any]],
         output_dir: str = "data_store/jesse_export",
     ) -> str:
         """Exports signals as external event markers for Jesse strategy replay."""

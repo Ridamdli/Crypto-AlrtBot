@@ -1,5 +1,5 @@
-from typing import Dict, Any, List, Optional
 import time
+from typing import Any
 
 from src.data.binance_client import BinanceFuturesClient
 from src.data.historical_store import HistoricalStore
@@ -18,7 +18,7 @@ class CachedFuturesClient(BinanceFuturesClient):
         self.store = HistoricalStore(db_path=db_path)
         self._exchange_info_cache = None
 
-    def get_klines(self, symbol: str, interval: str, limit: int = 500, end_time: Optional[int] = None) -> list:
+    def get_klines(self, symbol: str, interval: str, limit: int = 500, end_time: int | None = None) -> list:
         if end_time is None:
             end_time = int(time.time() * 1000)
             
@@ -50,7 +50,7 @@ class CachedFuturesClient(BinanceFuturesClient):
             ])
         return formatted
 
-    def get_open_interest_hist(self, symbol: str, period: str = "15m", limit: int = 30, end_time: Optional[int] = None) -> list:
+    def get_open_interest_hist(self, symbol: str, period: str = "15m", limit: int = 30, end_time: int | None = None) -> list:
         if end_time is None:
             end_time = int(time.time() * 1000)
             
@@ -74,7 +74,7 @@ class CachedFuturesClient(BinanceFuturesClient):
             })
         return formatted
 
-    def get_funding_rate(self, symbol: str, limit: int = 100, end_time: Optional[int] = None) -> list:
+    def get_funding_rate(self, symbol: str, limit: int = 100, end_time: int | None = None) -> list:
         if end_time is None:
             end_time = int(time.time() * 1000)
             
@@ -98,7 +98,7 @@ class CachedFuturesClient(BinanceFuturesClient):
             })
         return formatted
 
-    def get_mark_price(self, symbol: str) -> Dict[str, Any]:
+    def get_mark_price(self, symbol: str) -> dict[str, Any]:
         """
         Mock the mark price using the most recent kline close and funding rate 
         so we don't need a separate mark price historical table.
@@ -114,13 +114,13 @@ class CachedFuturesClient(BinanceFuturesClient):
             "nextFundingTime": 0
         }
 
-    def get_exchange_info(self) -> Dict[str, Any]:
+    def get_exchange_info(self) -> dict[str, Any]:
         """We can just fetch this live once and cache it."""
         if not self._exchange_info_cache:
             self._exchange_info_cache = super().get_exchange_info()
         return self._exchange_info_cache
 
-    def get_ticker_24h(self) -> List[Dict[str, Any]]:
+    def get_ticker_24h(self) -> list[dict[str, Any]]:
         # Universe filtering is bypassed in historical runs by passing `symbols` directly 
         # to the pipeline. So this is not strictly needed.
         return []

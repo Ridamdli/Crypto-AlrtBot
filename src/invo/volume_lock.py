@@ -18,7 +18,6 @@ import json as _json
 import os as _os
 import time as _time
 import uuid as _uuid
-from typing import Optional
 
 from src.utils.logger import get_logger
 
@@ -48,7 +47,7 @@ def _age_s(path: str) -> float:
 
 
 def acquire_lock(storage_dir: str, name: str, owner: str,
-                 stale_after_s: int = 120) -> Optional[str]:
+                 stale_after_s: int = 120) -> str | None:
     """Acquire the named lock. Returns an opaque token, or None if held."""
     _os.makedirs(storage_dir, exist_ok=True)
     path = _path(storage_dir, name)

@@ -4,11 +4,11 @@ Exports all strategy families and the base interface.
 """
 from typing import Any, Dict
 
-from .base import BaseStrategy, Direction, Timeframe, SignalCandidate, StrategyRegistry
-from .donchian import DonchianBreakoutStrategy
-from .momentum import MomentumFilterStrategy
-from .ema_trend import EMATrendStrategy
+from .base import BaseStrategy, Direction, SignalCandidate, StrategyRegistry, Timeframe
 from .bollinger_atr import BollingerATRStrategy
+from .donchian import DonchianBreakoutStrategy
+from .ema_trend import EMATrendStrategy
+from .momentum import MomentumFilterStrategy
 from .rsi_mean_reversion import RSIMeanReversionStrategy
 from .volume_breakout import VolumeBreakoutStrategy
 
@@ -51,7 +51,7 @@ COIN_PRIORITY_STRATEGIES = {
     "DOTUSDT": ["volume_breakout", "donchian", "ema_trend"],
 }
 
-def create_strategy(family: str, config: Dict[str, Any], symbol: str) -> BaseStrategy:
+def create_strategy(family: str, config: dict[str, Any], symbol: str) -> BaseStrategy:
     """Factory function to create a strategy instance."""
     if family not in STRATEGY_REGISTRY:
         raise ValueError(f"Unknown strategy family: {family}")
@@ -66,20 +66,20 @@ def register_all_strategies(registry: StrategyRegistry) -> None:
 
 
 __all__ = [
-    "BaseStrategy",
-    "Direction", 
-    "Timeframe",
-    "SignalCandidate",
-    "StrategyRegistry",
-    "DonchianBreakoutStrategy",
-    "MomentumFilterStrategy",
-    "EMATrendStrategy",
-    "BollingerATRStrategy",
-    "RSIMeanReversionStrategy",
-    "VolumeBreakoutStrategy",
+    "COIN_PRIORITY_STRATEGIES",
     "STRATEGY_REGISTRY",
     "STRATEGY_TIMEFRAMES",
-    "COIN_PRIORITY_STRATEGIES",
+    "BaseStrategy",
+    "BollingerATRStrategy",
+    "Direction",
+    "DonchianBreakoutStrategy",
+    "EMATrendStrategy",
+    "MomentumFilterStrategy",
+    "RSIMeanReversionStrategy",
+    "SignalCandidate",
+    "StrategyRegistry",
+    "Timeframe",
+    "VolumeBreakoutStrategy",
     "create_strategy",
     "register_all_strategies",
 ]

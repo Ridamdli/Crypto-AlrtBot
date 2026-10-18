@@ -20,7 +20,7 @@ changes (fail safe) while still allowing record-only decisions.
 """
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.exits.models import ExitPlan, SupervisorDecision
 from src.utils.logger import get_logger
@@ -42,7 +42,7 @@ class ExitDecisionLedger:
         self._state = self._load()
 
     # ── load / save ───────────────────────────────────────────────
-    def _blank(self) -> Dict[str, Any]:
+    def _blank(self) -> dict[str, Any]:
         return {"version": LEDGER_VERSION, "decisions": [], "plans": {},
                 "events": {}, "invalidated": [], "last_eval": {},
                 # Durable idempotency keys, independent of the capped
@@ -50,7 +50,7 @@ class ExitDecisionLedger:
                 # decision must never resurrect it as "unseen".
                 "seen_keys": []}
 
-    def _load(self) -> Dict[str, Any]:
+    def _load(self) -> dict[str, Any]:
         try:
             with open(self.ledger_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -103,7 +103,7 @@ class ExitDecisionLedger:
         keys.discard("")
         return frozenset(keys)
 
-    def active_plan(self, signal: Dict[str, Any]) -> ExitPlan:
+    def active_plan(self, signal: dict[str, Any]) -> ExitPlan:
         rec = self._state["plans"].get(signal["signal_id"])
         if rec:
             try:
@@ -115,19 +115,19 @@ class ExitDecisionLedger:
     def is_invalidated(self, signal_id: str) -> bool:
         return signal_id in self._state["invalidated"]
 
-    def last_eval(self, signal_id: str) -> Dict[str, int]:
+    def last_eval(self, signal_id: str) -> dict[str, int]:
         rec = self._state["last_eval"].get(signal_id, {})
         return {"data_ts": int(rec.get("data_ts", 0)), "at": int(rec.get("at", 0))}
 
-    def decisions_for(self, signal_id: str) -> List[Dict[str, Any]]:
+    def decisions_for(self, signal_id: str) -> list[dict[str, Any]]:
         return [d for d in self._state["decisions"] if d.get("signal_id") == signal_id]
 
-    def active_plans(self) -> List[Dict[str, Any]]:
+    def active_plans(self) -> list[dict[str, Any]]:
         """All stored (applied) exit plans as plain dicts, for sync readers."""
         return [dict(p) for p in self._state["plans"].values()
                 if isinstance(p, dict) and p.get("signal_id")]
 
-    def close_signal_ids(self) -> List[str]:
+    def close_signal_ids(self) -> list[str]:
         """Signals with an applied supervisor-close event."""
         out = []
         for sid, evs in (self._state.get("events") or {}).items():
@@ -171,7 +171,7 @@ class ExitDecisionLedger:
         self._state["last_eval"][signal_id] = {"data_ts": data_ts_ms, "at": at_ms}
         self._save()
 
-    def outcome_link(self, signal_id: str, outcome: Dict[str, Any]) -> None:
+    def outcome_link(self, signal_id: str, outcome: dict[str, Any]) -> None:
         """Attach the eventual trade outcome to past decisions (audit trail)."""
         for d in self._state["decisions"]:
             if d.get("signal_id") == signal_id:
@@ -182,10 +182,10 @@ class ExitDecisionLedger:
                 }
         self._save()
 
-    def get_events(self, signal_id: str) -> List[Dict[str, Any]]:
+    def get_events(self, signal_id: str) -> list[dict[str, Any]]:
         return list(self._state["events"].get(signal_id, []))
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {"healthy": self.healthy, "path": self.ledger_path,
                 "decisions": len(self._state["decisions"]),
                 "plans": len(self._state["plans"]),

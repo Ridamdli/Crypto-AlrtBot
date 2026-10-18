@@ -1,9 +1,9 @@
 import copy
-from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from typing import Any
 
-from src.config import AppConfig, CONFIG
 from src.backtest.evaluator import SignalOutcomeEvaluator
+from src.config import AppConfig
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -15,9 +15,9 @@ class DatasetSplit:
     Strictly chronological: TRAIN -> VALIDATION -> UNSEEN TEST.
     Random shuffling across time series is strictly prohibited.
     """
-    train_timestamps: List[Any]
-    validation_timestamps: List[Any]
-    test_timestamps: List[Any]
+    train_timestamps: list[Any]
+    validation_timestamps: list[Any]
+    test_timestamps: list[Any]
 
     def validate_chronology(self) -> bool:
         """Verifies that splits are strictly chronological and non-overlapping."""
@@ -56,12 +56,12 @@ class ThresholdTuner:
     Tunes only existing configuration parameters without introducing indicator bloat.
     """
 
-    def __init__(self, evaluator: Optional[SignalOutcomeEvaluator] = None):
+    def __init__(self, evaluator: SignalOutcomeEvaluator | None = None):
         self.evaluator = evaluator or SignalOutcomeEvaluator()
 
     def calculate_metrics(
         self,
-        evaluations: List[Dict[str, Any]],
+        evaluations: list[dict[str, Any]],
         num_days: float = 1.0,
     ) -> PerformanceMetrics:
         """Computes comprehensive performance and risk-adjusted metrics from signal outcomes."""
@@ -135,16 +135,13 @@ class ThresholdTuner:
         for e in entered:
             r = e.get("net_realized_r", 0)
             cumulative_r += r
-            if cumulative_r > peak_r:
-                peak_r = cumulative_r
+            peak_r = max(peak_r, cumulative_r)
             dd = peak_r - cumulative_r
-            if dd > max_dd:
-                max_dd = dd
+            max_dd = max(max_dd, dd)
 
             if r <= 0:
                 current_losing_streak += 1
-                if current_losing_streak > worst_losing_streak:
-                    worst_losing_streak = current_losing_streak
+                worst_losing_streak = max(worst_losing_streak, current_losing_streak)
             else:
                 current_losing_streak = 0
 
@@ -171,7 +168,7 @@ class ThresholdTuner:
         self,
         config: AppConfig,
         pipeline_runner,  # Callable accepting (config, timestamps) -> List[Signal]
-        timestamps: List[Any],
+        timestamps: list[Any],
         subsequent_data_provider,  # Callable accepting (signal) -> List[Kline]
         num_days: float = 1.0,
     ) -> PerformanceMetrics:
@@ -221,11 +218,11 @@ class ThresholdTuner:
     def parameter_sweep(
         self,
         base_config: AppConfig,
-        param_grid: Dict[str, List[Any]],
+        param_grid: dict[str, list[Any]],
         evaluations_provider,  # Callable(config) -> List[evaluation_dicts]
         num_days: float = 1.0,
         sort_by: str = "expected_r",
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Runs a grid search over existing config parameters.
 
@@ -285,7 +282,7 @@ class ThresholdTuner:
 
     def sweep_report_markdown(
         self,
-        sweep_results: List[Dict[str, Any]],
+        sweep_results: list[dict[str, Any]],
         title: str = "Parameter Sweep Report",
     ) -> str:
         """
@@ -315,11 +312,11 @@ class ThresholdTuner:
 
     def walk_forward_evaluate(
         self,
-        all_evaluations: List[Dict[str, Any]],
+        all_evaluations: list[dict[str, Any]],
         n_windows: int = 3,
         train_ratio: float = 0.6,
         num_days_per_window: float = 30.0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Splits evaluations chronologically into n_windows rolling folds and
         computes metrics for each fold's train and test partitions.

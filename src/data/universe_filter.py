@@ -1,4 +1,3 @@
-from typing import List, Dict, Any
 from src.data.binance_client import BinanceFuturesClient
 from src.utils.logger import get_logger
 
@@ -9,7 +8,7 @@ class UniverseFilter:
         self.client = client
         self.min_volume_usdt = min_volume_usdt
 
-    def get_eligible_symbols(self) -> List[str]:
+    def get_eligible_symbols(self) -> list[str]:
         """
         Dynamically fetch symbols and exclude based on state and volume thresholds.
         """

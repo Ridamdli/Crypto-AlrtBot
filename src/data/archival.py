@@ -18,7 +18,7 @@ import glob as _glob
 import json as _json
 import logging as _logging
 import os as _os
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 logger = _logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ RETENTION_DAYS = 7
 MAX_MOVES_PER_RUN = 5
 
 
-def _parse_file_date(name: str) -> Optional[_datetime.date]:
+def _parse_file_date(name: str) -> _datetime.date | None:
     """YYYY-MM-DD from a signals_YYYY-MM-DD.json basename, else None."""
     base = _os.path.basename(name)
     if not base.startswith("signals_") or not base.endswith(".json"):
@@ -39,7 +39,7 @@ def _parse_file_date(name: str) -> Optional[_datetime.date]:
         return None
 
 
-def _parse_ts_ms(ts: Any) -> Optional[int]:
+def _parse_ts_ms(ts: Any) -> int | None:
     """Signal timestamp -> epoch ms, mirroring the tracker's tolerance."""
     if isinstance(ts, bool):
         return None
@@ -56,7 +56,7 @@ def _parse_ts_ms(ts: Any) -> Optional[int]:
     return None
 
 
-def _load_outcomes(storage_dir: str) -> Dict[str, Any]:
+def _load_outcomes(storage_dir: str) -> dict[str, Any]:
     path = _os.path.join(storage_dir, "outcomes.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -66,7 +66,7 @@ def _load_outcomes(storage_dir: str) -> Dict[str, Any]:
         return {}
 
 
-def _load_records(path: str) -> Tuple[Optional[List[Any]], str]:
+def _load_records(path: str) -> tuple[list[Any] | None, str]:
     """Returns (records-or-None, reason). None means unreadable."""
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -78,8 +78,8 @@ def _load_records(path: str) -> Tuple[Optional[List[Any]], str]:
     return data, ""
 
 
-def file_eligibility(path: str, outcomes: Dict[str, Any],
-                     today: _datetime.date) -> Tuple[bool, str]:
+def file_eligibility(path: str, outcomes: dict[str, Any],
+                     today: _datetime.date) -> tuple[bool, str]:
     """Decide whether one signal file may be archived.
 
     Returns (eligible, reason). `reason` is "eligible" or a short
@@ -106,11 +106,11 @@ def file_eligibility(path: str, outcomes: Dict[str, Any],
 
 def archive_old_signals(
     storage_dir: str,
-    outcomes: Optional[Dict[str, Any]] = None,
-    today: Optional[_datetime.date] = None,
+    outcomes: dict[str, Any] | None = None,
+    today: _datetime.date | None = None,
     max_moves: int = MAX_MOVES_PER_RUN,
-    warned: Optional[Set[str]] = None,
-) -> Dict[str, Any]:
+    warned: set[str] | None = None,
+) -> dict[str, Any]:
     """Move eligible signal files to `<storage_dir>/archive/`.
 
     Pure file hygiene: never raises (per-file isolation), moves at most
@@ -125,7 +125,7 @@ def archive_old_signals(
         outcomes = _load_outcomes(storage_dir)
     if warned is None:
         warned = set()
-    summary: Dict[str, Any] = {"archived": [], "skipped": {}, "errors": []}
+    summary: dict[str, Any] = {"archived": [], "skipped": {}, "errors": []}
     archive_dir = _os.path.join(storage_dir, ARCHIVE_DIR_NAME)
 
     def _note(path: str, reason: str) -> None:

@@ -26,8 +26,7 @@ See find_duplicates().
 import json as _json
 import os as _os
 import re as _re
-import time as _time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.utils.logger import get_logger
 
@@ -87,7 +86,7 @@ def _sanitize(obj: Any) -> Any:
     return obj
 
 
-def build_event(**kw: Any) -> Dict[str, Any]:
+def build_event(**kw: Any) -> dict[str, Any]:
     """Validate + normalize one audit event. Deterministic event_id.
 
     Raises ValueError on unknown event type or missing correlation/signal.
@@ -102,7 +101,7 @@ def build_event(**kw: Any) -> Dict[str, Any]:
             f"unknown confirmation {kw.get('confirmation')!r}; "
             f"expected one of {sorted(CONFIRMATIONS)} or None")
     attempt = int(kw.get("attempt", 1))
-    ev: Dict[str, Any] = {"event_id": f"{kw['correlation_id']}#{attempt}"}
+    ev: dict[str, Any] = {"event_id": f"{kw['correlation_id']}#{attempt}"}
     for field in REQUIRED_FIELDS:
         if field in ("event_id",):
             continue
@@ -116,7 +115,7 @@ def _paths(storage_dir: str):
             _os.path.join(storage_dir, META_NAME))
 
 
-def _read_meta(storage_dir: str) -> Dict[str, Any]:
+def _read_meta(storage_dir: str) -> dict[str, Any]:
     _, meta_path = _paths(storage_dir)
     try:
         with open(meta_path, encoding="utf-8") as f:
@@ -128,7 +127,7 @@ def _read_meta(storage_dir: str) -> Dict[str, Any]:
     return {"trimmed_lines": 0}
 
 
-def _write_meta(storage_dir: str, meta: Dict[str, Any]) -> None:
+def _write_meta(storage_dir: str, meta: dict[str, Any]) -> None:
     _, meta_path = _paths(storage_dir)
     try:
         with open(meta_path, "w", encoding="utf-8") as f:
@@ -137,8 +136,8 @@ def _write_meta(storage_dir: str, meta: Dict[str, Any]) -> None:
         logger.warning(f"[Audit] meta write failed ({e}) — counts may under-report trims.")
 
 
-def append_audit(storage_dir: str, event: Dict[str, Any],
-                 cap: int = AUDIT_CAP_LINES) -> Tuple[bool, Optional[int]]:
+def append_audit(storage_dir: str, event: dict[str, Any],
+                 cap: int = AUDIT_CAP_LINES) -> tuple[bool, int | None]:
     """Append one validated event. Returns (ok, seq). Never raises."""
     try:
         _os.makedirs(storage_dir, exist_ok=True)
@@ -176,13 +175,13 @@ def append_audit(storage_dir: str, event: Dict[str, Any],
         return False, None
 
 
-def find_duplicates(events) -> Dict[str, List[Dict[str, Any]]]:
+def find_duplicates(events) -> dict[str, list[dict[str, Any]]]:
     """Group truly-duplicate entries by (event_id, worker).
 
     Only groups with >1 member are returned; the key is rendered as
     "event_id @ worker" for readability.
     """
-    groups: Dict[str, List[Dict[str, Any]]] = {}
+    groups: dict[str, list[dict[str, Any]]] = {}
     for ev in events:
         if isinstance(ev, dict) and ev.get("event_id"):
             key = f"{ev['event_id']} @ {ev.get('worker', '?')}"
@@ -191,7 +190,7 @@ def find_duplicates(events) -> Dict[str, List[Dict[str, Any]]]:
 
 
 def read_audit(storage_dir: str, limit: int = 500
-               ) -> Tuple[List[Dict[str, Any]], List[Tuple[int, int]], Dict[str, Any]]:
+               ) -> tuple[list[dict[str, Any]], list[tuple[int, int]], dict[str, Any]]:
     """Returns (events newest-last, seq gaps, info). Malformed lines skipped.
 
     Gaps = sequence ranges present in neither the journal nor the disclosed
@@ -199,7 +198,7 @@ def read_audit(storage_dir: str, limit: int = 500
     meta sidecar) are reported via info, not as gaps.
     """
     path, _ = _paths(storage_dir)
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     try:
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -220,7 +219,7 @@ def read_audit(storage_dir: str, limit: int = 500
     # Gaps are computed over the COMPLETE retained sequence BEFORE the
     # presentation limit is applied: a limited page must never invent a gap
     # merely because earlier records were omitted from the returned page.
-    gaps: List[Tuple[int, int]] = []
+    gaps: list[tuple[int, int]] = []
     if events:
         lo = max(1, trimmed + 1)
         prev = lo - 1

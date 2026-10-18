@@ -4,8 +4,8 @@ Provides the foundation for all deterministic strategy families.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
 from enum import Enum
+from typing import Any
 
 
 class Direction(str, Enum):
@@ -32,11 +32,11 @@ class SignalCandidate:
     strategy_id: str
     strategy_version: str
     timeframe: str
-    parameters: Dict[str, Any]
-    conditions: List[str]
-    invalidation_conditions: List[str]
-    management_rules: List[str]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any]
+    conditions: list[str]
+    invalidation_conditions: list[str]
+    management_rules: list[str]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class BaseStrategy(ABC):
@@ -47,12 +47,12 @@ class BaseStrategy(ABC):
     
     # Class attributes to be overridden by subclasses
     family: str = "base"
-    supported_directions: List[str] = ["LONG", "SHORT"]
-    supported_timeframes: List[str] = ["15m", "1h", "4h"]
-    default_params: Dict[str, Any] = {}
-    param_schema: Dict[str, Dict[str, Any]] = {}
+    supported_directions: list[str] = ["LONG", "SHORT"]
+    supported_timeframes: list[str] = ["15m", "1h", "4h"]
+    default_params: dict[str, Any] = {}
+    param_schema: dict[str, dict[str, Any]] = {}
     
-    def __init__(self, config: Dict[str, Any], symbol: str):
+    def __init__(self, config: dict[str, Any], symbol: str):
         self.config = config
         self.symbol = symbol
         # Merge defaults with provided params
@@ -81,14 +81,14 @@ class BaseStrategy(ABC):
     @abstractmethod
     def generate_candidates(
         self,
-        klines_15m: List[Dict[str, Any]],
-        klines_1h: List[Dict[str, Any]],
-        klines_4h: List[Dict[str, Any]],
+        klines_15m: list[dict[str, Any]],
+        klines_1h: list[dict[str, Any]],
+        klines_4h: list[dict[str, Any]],
         btc_regime: str,
-        oi_data: Dict[str, Any],
+        oi_data: dict[str, Any],
         funding_rate: float,
         current_price: float,
-    ) -> List[SignalCandidate]:
+    ) -> list[SignalCandidate]:
         """
         Generate signal candidates from market data.
         
@@ -104,9 +104,8 @@ class BaseStrategy(ABC):
         Returns:
             List of SignalCandidate objects (empty if no setup)
         """
-        pass
     
-    def get_param_grid(self) -> Dict[str, List]:
+    def get_param_grid(self) -> dict[str, list]:
         """Return parameter grid for optimization. Override in subclass."""
         return {}
 
@@ -115,40 +114,40 @@ class StrategyRegistry:
     """Registry of all available strategy families and their instances."""
     
     def __init__(self):
-        self._families: Dict[str, type] = {}
-        self._instances: Dict[str, BaseStrategy] = {}
+        self._families: dict[str, type] = {}
+        self._instances: dict[str, BaseStrategy] = {}
     
     def register_family(self, family_name: str, strategy_class: type) -> None:
         """Register a strategy family."""
         if not issubclass(strategy_class, BaseStrategy):
-            raise ValueError(f"Strategy class must inherit from BaseStrategy")
+            raise ValueError("Strategy class must inherit from BaseStrategy")
         self._families[family_name] = strategy_class
     
-    def create_instance(self, family: str, config: Dict[str, Any], symbol: str) -> BaseStrategy:
+    def create_instance(self, family: str, config: dict[str, Any], symbol: str) -> BaseStrategy:
         """Create a strategy instance for a specific symbol."""
         if family not in self._families:
             raise ValueError(f"Unknown strategy family: {family}")
         return self._families[family](config, symbol)
     
-    def get_family(self, family: str) -> Optional[type]:
+    def get_family(self, family: str) -> type | None:
         return self._families.get(family)
     
-    def list_families(self) -> List[str]:
+    def list_families(self) -> list[str]:
         """Return list of registered strategy family names."""
         return list(self._families.keys())
     
-    def families(self) -> List[str]:
+    def families(self) -> list[str]:
         """Return list of registered strategy family names (alias for list_families)."""
         return self.list_families()
     
     def __contains__(self, family: str) -> bool:
         return family in self._families
     
-    def get(self, family: str) -> Optional[type]:
+    def get(self, family: str) -> type | None:
         """Get strategy class by family name."""
         return self._families.get(family)
     
-    def create(self, family: str, config: Dict[str, Any], symbol: str) -> 'BaseStrategy':
+    def create(self, family: str, config: dict[str, Any], symbol: str) -> 'BaseStrategy':
         """Create a strategy instance."""
         if family not in self._families:
             raise ValueError(f"Unknown strategy family: {family}")

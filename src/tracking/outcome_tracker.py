@@ -18,7 +18,7 @@ import glob
 import json
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.backtest.evaluator import SignalOutcomeEvaluator
 from src.data.binance_client import BinanceFuturesClient
@@ -68,8 +68,8 @@ def holding_info(entry_ts_ms, holding_bars: int, is_final: bool, now_ms: int):
 class OutcomeTracker:
     def __init__(
         self,
-        client: Optional[BinanceFuturesClient] = None,
-        evaluator: Optional[SignalOutcomeEvaluator] = None,
+        client: BinanceFuturesClient | None = None,
+        evaluator: SignalOutcomeEvaluator | None = None,
         storage_dir: str = "data_store",
         ledger_name: str = "outcomes.json",
         future_limit: int = 200,
@@ -83,7 +83,7 @@ class OutcomeTracker:
         os.makedirs(self.storage_dir, exist_ok=True)
 
     # ── ledger ──────────────────────────────────────────────────────────
-    def load_ledger(self) -> Dict[str, Dict[str, Any]]:
+    def load_ledger(self) -> dict[str, dict[str, Any]]:
         try:
             with open(self.ledger_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -91,14 +91,14 @@ class OutcomeTracker:
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return {}
 
-    def save_ledger(self, ledger: Dict[str, Dict[str, Any]]) -> None:
+    def save_ledger(self, ledger: dict[str, dict[str, Any]]) -> None:
         try:
             from src.utils.atomic import atomic_write_json
             atomic_write_json(self.ledger_path, ledger)
         except OSError as e:
             logger.error(f"[Tracker] Failed to save outcomes ledger: {e}")
 
-    def load_all_signals(self, include_archive: bool = False) -> List[Dict[str, Any]]:
+    def load_all_signals(self, include_archive: bool = False) -> list[dict[str, Any]]:
         """Persisted signals, oldest first. Active files only by default
         (outcome tracking and supervision must never see archived
         records); pass include_archive=True for full history views
@@ -131,7 +131,7 @@ class OutcomeTracker:
 
     # ── evaluation ──────────────────────────────────────────────────────
     @staticmethod
-    def _signal_ts_ms(signal: Dict[str, Any]) -> Optional[int]:
+    def _signal_ts_ms(signal: dict[str, Any]) -> int | None:
         ts = signal.get("timestamp")
         if isinstance(ts, (int, float)):
             return int(ts) if ts > 100_000_000_000 else int(ts * 1000)
@@ -143,11 +143,11 @@ class OutcomeTracker:
                 return None
         return None
 
-    def _future_klines(self, symbol: str, signal_ts_ms: int) -> List[Dict[str, Any]]:
+    def _future_klines(self, symbol: str, signal_ts_ms: int) -> list[dict[str, Any]]:
         klines = self.fetcher.fetch_standardized_klines(symbol, "15m", limit=self.future_limit)
         return [k for k in klines if k.get("timestamp", 0) > signal_ts_ms]
 
-    def _is_final(self, result: Dict[str, Any], future_bars: int, elapsed_bars: int) -> bool:
+    def _is_final(self, result: dict[str, Any], future_bars: int, elapsed_bars: int) -> bool:
         status = result.get("status")
         if status in TERMINAL_STATUSES:
             return True
@@ -159,7 +159,7 @@ class OutcomeTracker:
             return True
         return False
 
-    def track_signal(self, signal: Dict[str, Any], ledger: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def track_signal(self, signal: dict[str, Any], ledger: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
         """Evaluate one signal; returns updated record, or None if skipped."""
         sid = signal.get("signal_id")
         symbol = signal.get("symbol")
@@ -224,7 +224,7 @@ class OutcomeTracker:
         ledger[sid] = record
         return record
 
-    def track_all(self) -> Dict[str, Any]:
+    def track_all(self) -> dict[str, Any]:
         """Evaluate all open signals; returns a run summary."""
         ledger = self.load_ledger()
         signals = self.load_all_signals()

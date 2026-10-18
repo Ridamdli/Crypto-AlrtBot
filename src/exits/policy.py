@@ -10,14 +10,14 @@ Candle convention (matches src/data/ohlcv_fetcher.py):
 A candle is COMPLETED when close_time <= now_ms. The forming candle is
 always excluded from decisions.
 """
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.exits.config import ExitConfig
 
 
 def split_completed(
-    klines: List[Dict[str, Any]], now_ms: int, timeframe_ms: int
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    klines: list[dict[str, Any]], now_ms: int, timeframe_ms: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split klines into (completed, not-yet-completed).
 
     Falls back to timestamp+timeframe when close_time is absent, so the
@@ -35,7 +35,7 @@ def split_completed(
     return done, forming
 
 
-def last_close_ts(completed: List[Dict[str, Any]], timeframe_ms: int) -> int:
+def last_close_ts(completed: list[dict[str, Any]], timeframe_ms: int) -> int:
     """Close timestamp of the latest completed candle, 0 when empty."""
     if not completed:
         return 0
@@ -47,10 +47,10 @@ def last_close_ts(completed: List[Dict[str, Any]], timeframe_ms: int) -> int:
 
 
 def check_freshness(
-    completed: List[Dict[str, Any]],
+    completed: list[dict[str, Any]],
     now_ms: int,
     cfg: ExitConfig,
-) -> Tuple[bool, str, int]:
+) -> tuple[bool, str, int]:
     """Returns (fresh, reason, data_ts). Stale or thin data fails loudly —
     callers must abstain, never silently proceed."""
     data_ts = last_close_ts(completed, cfg.timeframe_ms)
@@ -66,11 +66,11 @@ def check_freshness(
     return True, "ok", data_ts
 
 
-def _f(k: Dict[str, Any], field: str) -> float:
+def _f(k: dict[str, Any], field: str) -> float:
     return float(k[field])
 
 
-def atr_wilder(completed: List[Dict[str, Any]], period: int = 14) -> Optional[float]:
+def atr_wilder(completed: list[dict[str, Any]], period: int = 14) -> float | None:
     """Wilder ATR over completed candles. None when history too short."""
     if len(completed) < period + 1:
         return None
@@ -89,8 +89,8 @@ def atr_wilder(completed: List[Dict[str, Any]], period: int = 14) -> Optional[fl
 
 
 def swing_levels(
-    completed: List[Dict[str, Any]], lookback: int
-) -> Tuple[Optional[float], Optional[float]]:
+    completed: list[dict[str, Any]], lookback: int
+) -> tuple[float | None, float | None]:
     """(highest high, lowest low) over the last `lookback` completed bars."""
     window = completed[-lookback:] if len(completed) >= lookback else completed
     if not window:
@@ -101,7 +101,7 @@ def swing_levels(
         return None, None
 
 
-def closes_against(completed: List[Dict[str, Any]], side: str, n: int) -> int:
+def closes_against(completed: list[dict[str, Any]], side: str, n: int) -> int:
     """Count of the last n completed closes that moved against the side."""
     window = completed[-n:] if len(completed) >= n else completed
     count = 0
@@ -113,17 +113,15 @@ def closes_against(completed: List[Dict[str, Any]], side: str, n: int) -> int:
             prev = None
             continue
         if prev is not None:
-            if side.upper() == "LONG" and c < prev:
-                count += 1
-            elif side.upper() == "SHORT" and c > prev:
+            if side.upper() == "LONG" and c < prev or side.upper() == "SHORT" and c > prev:
                 count += 1
         prev = c
     return count
 
 
 def opposite_break(
-    completed: List[Dict[str, Any]], side: str, lookback: int = 20
-) -> Tuple[bool, Dict[str, Any]]:
+    completed: list[dict[str, Any]], side: str, lookback: int = 20
+) -> tuple[bool, dict[str, Any]]:
     """Completed-close break against the trade direction (Donchian-style).
 
     Uses prior-period extremes (excludes the evaluated candle itself) so the
@@ -192,8 +190,8 @@ def remaining_net_rr(
 
 
 def tp_distances_atr(
-    ref_price: float, side: str, tps: List[float], atr_value: Optional[float]
-) -> List[Optional[float]]:
+    ref_price: float, side: str, tps: list[float], atr_value: float | None
+) -> list[float | None]:
     """Remaining distance to each TP in ATR units (direction-aware sign)."""
     out = []
     for tp in tps:
@@ -205,7 +203,7 @@ def tp_distances_atr(
     return out
 
 
-def near_level(ref_price: float, level: float, atr_value: Optional[float], band_atr: float) -> bool:
+def near_level(ref_price: float, level: float, atr_value: float | None, band_atr: float) -> bool:
     """Is ref_price within band_atr ATRs of level? Needs a valid ATR."""
     if atr_value is None or atr_value <= 0:
         return False

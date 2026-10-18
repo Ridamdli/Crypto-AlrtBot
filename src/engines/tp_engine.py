@@ -1,4 +1,4 @@
-from typing import Dict
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -7,7 +7,7 @@ class TakeProfitEngine:
     def __init__(self, r_multiple: float = 2.0):
         self.r_multiple = r_multiple
 
-    def calculate_tp(self, entry_price: float, sl_price: float, side: str) -> Dict[str, float]:
+    def calculate_tp(self, entry_price: float, sl_price: float, side: str) -> dict[str, float]:
         """
         Calculate the single TP based on risk (R).
         """

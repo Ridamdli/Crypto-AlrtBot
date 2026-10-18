@@ -7,8 +7,8 @@ Dashboard runs in a daemon thread; the scheduler loop runs in main.
 import os
 import threading
 
-from src.scheduler import BotScheduler
 from src.dashboard import run as run_dashboard
+from src.scheduler import BotScheduler
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -1,19 +1,18 @@
-import os
-import time
-import json
-import signal
-import sys
 import argparse
-from typing import Dict, Any, List, Optional
+import json
+import os
+import signal
+import time
 from datetime import datetime, timezone
+from typing import Any
 
-from src.pipeline import SignalPipeline
-from src.models.signal import SignalModel
-from src.utils.telegram_formatter import TelegramFormatter
-from src.utils.telegram_bot import TelegramBot
-from src.data.persistence import SignalPersistence
 from src.config import CONFIG, AppConfig
+from src.data.persistence import SignalPersistence
+from src.models.signal import SignalModel
+from src.pipeline import SignalPipeline
 from src.utils.logger import get_logger
+from src.utils.telegram_bot import TelegramBot
+from src.utils.telegram_formatter import TelegramFormatter
 
 logger = get_logger(__name__)
 
@@ -43,8 +42,8 @@ class BotScheduler:
 
     def __init__(
         self,
-        config: Optional[AppConfig] = None,
-        pipeline: Optional[SignalPipeline] = None,
+        config: AppConfig | None = None,
+        pipeline: SignalPipeline | None = None,
         cooldown_hours: float = 6.0,
         state_file: str = "data_store/scheduler_state.json",
     ):
@@ -60,7 +59,7 @@ class BotScheduler:
         if state_dir and not os.path.exists(state_dir):
             os.makedirs(state_dir, exist_ok=True)
 
-    def _load_state(self) -> Dict[str, Any]:
+    def _load_state(self) -> dict[str, Any]:
         if os.path.exists(self.state_file):
             try:
                 with open(self.state_file, "r") as f:
@@ -69,14 +68,14 @@ class BotScheduler:
                 logger.warning(f"Failed to read scheduler state: {e}")
         return {"published_signals": {}}
 
-    def _save_state(self, state: Dict[str, Any]) -> None:
+    def _save_state(self, state: dict[str, Any]) -> None:
         try:
             from src.utils.atomic import atomic_write_json
             atomic_write_json(self.state_file, state)
         except Exception as e:
             logger.error(f"Failed to save scheduler state: {e}")
 
-    def is_duplicate(self, symbol: str, side: str, state: Dict[str, Any]) -> bool:
+    def is_duplicate(self, symbol: str, side: str, state: dict[str, Any]) -> bool:
         """Checks if a signal for the same symbol & side was published within cooldown."""
         key = f"{symbol}_{side}"
         published_map = state.get("published_signals", {})
@@ -97,7 +96,7 @@ class BotScheduler:
         deep_scan: bool = False,
         max_retries: int = 3,
         retry_delay: float = 3.0,
-    ) -> List[SignalModel]:
+    ) -> list[SignalModel]:
         """
         Executes one complete scanning cycle with retry logic for transient errors.
         Prevents duplicate signal publication within cooldown window.
@@ -187,7 +186,7 @@ class BotScheduler:
         self._archive_old_signals()
         return published_signals
 
-    def _share_paper_to_invo(self, published: list) -> None:  # noqa: C901 (gated bridge)
+    def _share_paper_to_invo(self, published: list) -> None:
         """Auto-share published signals as Invo PAPER trades (no real money).
 
         Mapping verified live: entrySim = position size in sim dollars
@@ -356,9 +355,7 @@ class BotScheduler:
         if os.getenv("INVO_PAPER_ENABLED", "false").lower() != "true":
             return
         try:
-            from src.exits.ledger import ExitDecisionLedger
-            from src.invo import exit_sync as _sync
-            from src.invo.client import InvoClient, load_share_ledger
+            from src.invo.client import InvoClient
             dry = os.getenv("INVO_PAPER_DRY_RUN", "true").lower() != "false"
             apply = os.getenv("EXITS_APPLY", "false").lower() == "true"
             if dry or not apply:
@@ -395,6 +392,7 @@ class BotScheduler:
         """Sync body: runs only while holding the volume lock. See
         _sync_exits_to_invo for the contract (TP1+SL only, idempotent)."""
         import time as _time
+
         from src.exits.ledger import ExitDecisionLedger
         from src.invo import exit_sync as _sync
         from src.invo.client import load_share_ledger
@@ -622,8 +620,8 @@ class BotScheduler:
     def _track_outcomes(self) -> None:
         """Update live outcome ledger + paper portfolio. Must never break scans."""
         try:
-            from src.tracking.outcome_tracker import OutcomeTracker
             from src.papertrade.portfolio import PaperPortfolio
+            from src.tracking.outcome_tracker import OutcomeTracker
             tracker = OutcomeTracker()
             tracker.track_all()
             outcomes = tracker.load_ledger()

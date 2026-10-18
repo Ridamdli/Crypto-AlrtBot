@@ -1,14 +1,13 @@
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.pipeline import SignalPipeline
-from src.models.signal import SignalModel
-from src.utils.telegram_formatter import TelegramFormatter
-from src.utils.telegram_bot import TelegramBot
 from src.data.persistence import SignalPersistence
+from src.models.signal import SignalModel
+from src.pipeline import SignalPipeline
 from src.utils.logger import get_logger
+from src.utils.telegram_bot import TelegramBot
+from src.utils.telegram_formatter import TelegramFormatter
 
 logger = get_logger(__name__)
 

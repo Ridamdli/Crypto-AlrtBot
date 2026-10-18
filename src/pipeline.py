@@ -1,29 +1,26 @@
-from typing import Dict, Any, List, Optional, Union
-from datetime import datetime, timezone
 import hashlib
 import os
-
-from src.data.binance_client import BinanceFuturesClient
-from src.data.universe_filter import UniverseFilter
-from src.data.ohlcv_fetcher import OHLCVFetcher
-from src.data.timeframe_manager import TimeframeManager
-from src.data.futures_data import FuturesDataService
-from src.data.symbol_registry import get_symbol_registry
-
-from src.engines.btc_regime import BTCRegimeEngine
-from src.engines.volume_engine import VolumeEngine
-from src.engines.oi_engine import OIEngine
-from src.engines.funding_engine import FundingEngine
-from src.engines.entry_engine import EntryEngine
-from src.engines.sl_engine import StopLossEngine
-from src.engines.tp_engine import TakeProfitEngine
-from src.engines.risk_engine import RiskEngine
-from src.engines.scoring_engine import ScoringEngine
-from src.engines.invalidation_engine import InvalidationEngine
-
-from src.strategies import STRATEGY_REGISTRY, create_strategy, STRATEGY_TIMEFRAMES
+from datetime import datetime, timezone
+from typing import Any
 
 from src.config import CONFIG, AppConfig
+from src.data.binance_client import BinanceFuturesClient
+from src.data.futures_data import FuturesDataService
+from src.data.ohlcv_fetcher import OHLCVFetcher
+from src.data.symbol_registry import get_symbol_registry
+from src.data.timeframe_manager import TimeframeManager
+from src.data.universe_filter import UniverseFilter
+from src.engines.btc_regime import BTCRegimeEngine
+from src.engines.entry_engine import EntryEngine
+from src.engines.funding_engine import FundingEngine
+from src.engines.invalidation_engine import InvalidationEngine
+from src.engines.oi_engine import OIEngine
+from src.engines.risk_engine import RiskEngine
+from src.engines.scoring_engine import ScoringEngine
+from src.engines.sl_engine import StopLossEngine
+from src.engines.tp_engine import TakeProfitEngine
+from src.engines.volume_engine import VolumeEngine
+from src.strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES, create_strategy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -53,11 +50,11 @@ def _price_trend_15m(klines_15m, lookback: int = 10) -> str:
 class SignalPipeline:
     def __init__(
         self,
-        config: Optional[AppConfig] = None,
-        client: Optional[BinanceFuturesClient] = None,
-        fetcher: Optional[OHLCVFetcher] = None,
-        tf_manager: Optional[TimeframeManager] = None,
-        universe_filter: Optional[UniverseFilter] = None,
+        config: AppConfig | None = None,
+        client: BinanceFuturesClient | None = None,
+        fetcher: OHLCVFetcher | None = None,
+        tf_manager: TimeframeManager | None = None,
+        universe_filter: UniverseFilter | None = None,
     ):
         self.config = config or CONFIG
         self.client = client or BinanceFuturesClient()
@@ -102,9 +99,9 @@ class SignalPipeline:
         self.invalidation_engine = InvalidationEngine()
 
         # Initialize strategy instances per symbol (cached)
-        self._strategy_cache: Dict[str, Dict[str, Any]] = {}
+        self._strategy_cache: dict[str, dict[str, Any]] = {}
 
-    def _get_strategy_instance(self, symbol: str, strategy_family: str, strategy_config: Dict[str, Any]) -> Any:
+    def _get_strategy_instance(self, symbol: str, strategy_family: str, strategy_config: dict[str, Any]) -> Any:
         """Get or create a strategy instance for a symbol."""
         cache_key = f"{symbol}:{strategy_family}"
         if cache_key not in self._strategy_cache:
@@ -114,7 +111,7 @@ class SignalPipeline:
             self._strategy_cache[cache_key] = create_strategy(strategy_family, config, symbol)
         return self._strategy_cache[cache_key]
 
-    def _live_scan_symbols(self, all_symbols: List[str]) -> List[str]:
+    def _live_scan_symbols(self, all_symbols: list[str]) -> list[str]:
         """Intersect the volume-filtered universe with the live scan set.
 
         LIVE_REQUIRE_VALIDATED (default true): admit only coins with
@@ -132,7 +129,7 @@ class SignalPipeline:
             tradable = [s for s in tradable if s in validated]
         return [s for s in all_symbols if s in tradable]
 
-    def _get_strategies_for_symbol(self, symbol: str) -> List[str]:
+    def _get_strategies_for_symbol(self, symbol: str) -> list[str]:
         """Get the list of strategy families to test for a symbol."""
         symbol_cfg = self.symbol_registry.get_symbol_config(symbol)
         # Use priority strategies from config, or default to all enabled
@@ -143,8 +140,8 @@ class SignalPipeline:
         return STRATEGY_REGISTRY.list_families()
 
     def _parse_as_of_time(
-        self, as_of_time: Optional[Union[int, str, datetime]]
-    ) -> tuple[Optional[int], str]:
+        self, as_of_time: int | str | datetime | None
+    ) -> tuple[int | None, str]:
         """
         Parses as_of_time into (timestamp_ms, iso_str).
         If as_of_time is None, returns (None, current_utc_iso).
@@ -178,9 +175,9 @@ class SignalPipeline:
 
     def run_pipeline(
         self,
-        as_of_time: Optional[Union[int, str, datetime]] = None,
-        symbols: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        as_of_time: int | str | datetime | None = None,
+        symbols: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         as_of_ts, timestamp_str = self._parse_as_of_time(as_of_time)
         dt_key = timestamp_str[:10].replace("-", "")
 

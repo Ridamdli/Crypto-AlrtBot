@@ -21,10 +21,10 @@ Design:
 Fee/slippage/ambiguity settings default to the baseline's constructor
 defaults; a unit test pins them equal so upstream changes break loudly.
 """
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from src.backtest.evaluator import AmbiguousResolution, SignalOutcomeEvaluator
-from src.exits import policy
 from src.exits.config import ExitConfig
 from src.exits.models import ExitPlan, PositionState
 
@@ -60,16 +60,15 @@ class CandidateEvaluator:
 
     def evaluate_signal(
         self,
-        signal: Dict[str, Any],
-        subsequent_klines: List[Dict[str, Any]],
-        decide_fn: Optional[Callable] = None,
-        context_klines: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        signal: dict[str, Any],
+        subsequent_klines: list[dict[str, Any]],
+        decide_fn: Callable | None = None,
+        context_klines: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         # context_klines: pre-signal completed bars (worker history only —
         # entry search and event processing use subsequent_klines exclusively).
         # Mirrors live, where the monitor fetches history including pre-signal
         # bars. Without context, early-trade supervision abstains on thin data.
-        from src.papertrade.liquidation import estimate_liq_price
 
         side = signal["side"]
         context = list(context_klines or [])
@@ -114,7 +113,7 @@ class CandidateEvaluator:
         active_sl = base_plan.stop_loss
         plan = base_plan
         plan_changes = 0
-        events_log: List[Dict[str, Any]] = []
+        events_log: list[dict[str, Any]] = []
         seen_plan_hashes = {(plan.stop_loss, plan.tp)}
         holding_bars = 0
         remaining_position = 1.0
@@ -311,8 +310,8 @@ class CandidateEvaluator:
 
 
 # ── comparison metrics ──────────────────────────────────────────
-def arm_metrics(results: List[Dict[str, Any]], seed: int = 42,
-                iters: int = 2000) -> Dict[str, Any]:
+def arm_metrics(results: list[dict[str, Any]], seed: int = 42,
+                iters: int = 2000) -> dict[str, Any]:
     """Aggregate metrics over evaluated trades. Deterministic bootstrap CI."""
     trig = [r for r in results if r.get("entry_triggered")]
     nets = [float(r.get("net_realized_r", 0.0)) for r in trig]
@@ -344,7 +343,7 @@ def arm_metrics(results: List[Dict[str, Any]], seed: int = 42,
     }
 
 
-def _bootstrap_ci(xs: List[float], seed: int, iters: int) -> Dict[str, Any]:
+def _bootstrap_ci(xs: list[float], seed: int, iters: int) -> dict[str, Any]:
     import random
     rng = random.Random(seed)
     n = len(xs)
@@ -357,7 +356,7 @@ def _bootstrap_ci(xs: List[float], seed: int, iters: int) -> Dict[str, Any]:
 
 def make_decide_fn(
     cfg: ExitConfig,
-    workers: Optional[List] = None,
+    workers: list | None = None,
     disabled: frozenset = frozenset(),
 ):
     """Build the history-only decide_fn used by the candidate arm.
@@ -367,8 +366,7 @@ def make_decide_fn(
     (look-ahead prevention is structural: the caller truncates). Disabled
     worker ids are replaced by abstain stubs for ablation runs.
     """
-    from src.exits.models import ExitPlan, PositionState
-    from src.exits.risk_guard import RiskGuard
+    from src.exits.models import ExitPlan
     from src.exits.supervisor import ExitSupervisor
     from src.exits.workers import ALL_WORKERS, WorkerAssessment, WorkerCtx
 
@@ -385,7 +383,7 @@ def make_decide_fn(
     # simulated ms. REDUCE/CLOSE leave plan levels untouched, so without
     # this the cooldown clock would never start on event-only decisions
     # and every-bar repeats would slip through (observed in eval v1).
-    intervention: Dict[str, int] = {"ts": 0}
+    intervention: dict[str, int] = {"ts": 0}
 
     def abstain(wid, ctx):
         return WorkerAssessment(worker_id=wid, worker_version="ablated",
@@ -434,13 +432,13 @@ def make_decide_fn(
 
 
 def compare_arms(
-    signals: List[Dict[str, Any]],
-    klines_map: Dict[str, List[Dict[str, Any]]],
+    signals: list[dict[str, Any]],
+    klines_map: dict[str, list[dict[str, Any]]],
     decide_fn_factory: Callable[..., Callable],
-    cfg: Optional[ExitConfig] = None,
-    max_signals: Optional[int] = None,
-    ablate_workers: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    cfg: ExitConfig | None = None,
+    max_signals: int | None = None,
+    ablate_workers: list[str] | None = None,
+) -> dict[str, Any]:
     """Baseline vs candidate on IDENTICAL signals/klines/assumptions.
 
     decide_fn_factory(disabled=frozenset()) builds a fresh decide_fn (fresh
@@ -469,7 +467,7 @@ def compare_arms(
         return base_rows, cand_rows
 
     base_rows, cand_rows = run_one(decide_fn_factory)
-    out: Dict[str, Any] = {
+    out: dict[str, Any] = {
         "n_signals": len(signals),
         "baseline": arm_metrics(base_rows, cfg.bootstrap_seed, cfg.bootstrap_iters),
         "candidate": arm_metrics(cand_rows, cfg.bootstrap_seed, cfg.bootstrap_iters),
@@ -500,7 +498,7 @@ def compare_arms(
     return out
 
 
-def _sig_ts_ms(sig: Dict[str, Any]) -> int:
+def _sig_ts_ms(sig: dict[str, Any]) -> int:
     from datetime import datetime
     ts = sig.get("timestamp", 0)
     if isinstance(ts, (int, float)):

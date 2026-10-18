@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+
 from src.models.signal import SignalModel
 from src.utils.logger import get_logger
 

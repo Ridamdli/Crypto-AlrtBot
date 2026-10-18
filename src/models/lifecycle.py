@@ -1,7 +1,7 @@
-from enum import Enum
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any
 
 from src.utils.logger import get_logger
 
@@ -26,7 +26,7 @@ class SignalLifecycleTracker:
     """
 
     # Explicit, legal state transition rules
-    VALID_TRANSITIONS: Dict[SignalState, List[SignalState]] = {
+    VALID_TRANSITIONS: dict[SignalState, list[SignalState]] = {
         SignalState.GENERATED: [
             SignalState.WAITING_FOR_ENTRY,
             SignalState.INVALIDATED,
@@ -53,11 +53,11 @@ class SignalLifecycleTracker:
         self,
         signal_id: str,
         initial_state: SignalState = SignalState.GENERATED,
-        created_at: Optional[str] = None,
+        created_at: str | None = None,
     ):
         self.signal_id = signal_id
         self.current_state = initial_state
-        self.history: List[Dict[str, Any]] = [
+        self.history: list[dict[str, Any]] = [
             {
                 "from_state": None,
                 "to_state": initial_state.value,
@@ -75,8 +75,8 @@ class SignalLifecycleTracker:
         self,
         target_state: SignalState,
         reason: str,
-        timestamp: Optional[str] = None,
-        price: Optional[float] = None,
+        timestamp: str | None = None,
+        price: float | None = None,
     ) -> bool:
         """
         Transitions the signal state machine to target_state.
@@ -114,7 +114,7 @@ class SignalLifecycleTracker:
         )
         return True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "signal_id": self.signal_id,
             "current_state": self.current_state.value,

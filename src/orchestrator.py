@@ -3,16 +3,15 @@ Strategy Orchestrator
 Orchestrates multiple strategies per coin, handles conflicts,
 and manages signal lifecycle for live trading.
 """
-import os
 import json
-import logging
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field
+import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
+
 from src.config import AppConfig
-from src.strategies import STRATEGY_REGISTRY, create_strategy
 from src.data.symbol_registry import get_symbol_registry
-from src.models.lifecycle import SignalLifecycleTracker, SignalState
+from src.strategies import STRATEGY_REGISTRY, create_strategy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -36,19 +35,19 @@ class AggregatedSignal:
     """Result of signal aggregation for a symbol."""
     symbol: str
     side: str  # "LONG", "SHORT", "CONFLICT"
-    signals: List[Dict[str, Any]]
+    signals: list[dict[str, Any]]
     consensus_score: float
     conflict: bool
-    conflict_details: Optional[str] = None
+    conflict_details: str | None = None
 
 
 class ConflictResolver:
     """Resolves conflicts between multiple strategy signals for the same symbol."""
     
-    def __init__(self, config: Optional[ConflictConfig] = None):
+    def __init__(self, config: ConflictConfig | None = None):
         self.config = config or ConflictConfig()
     
-    def resolve(self, signals: List[Dict[str, Any]]) -> AggregatedSignal:
+    def resolve(self, signals: list[dict[str, Any]]) -> AggregatedSignal:
         """
         Resolve conflicting signals for a single symbol.
         
@@ -159,14 +158,14 @@ class SignalDeduplicator:
             atomic_write_json(state_file, {"published_signals": {}},
                               indent=None)
     
-    def _load_state(self) -> Dict[str, Any]:
+    def _load_state(self) -> dict[str, Any]:
         try:
             with open(self.state_file, "r") as f:
                 return json.load(f)
         except Exception:
             return {"published_signals": {}}
     
-    def _save_state(self, state: Dict[str, Any]):
+    def _save_state(self, state: dict[str, Any]):
         try:
             from src.utils.atomic import atomic_write_json
             atomic_write_json(self.state_file, state)
@@ -206,18 +205,18 @@ class StrategyOrchestrator:
         self,
         config: AppConfig,
         registry: Any,
-        conflict_config: Optional[ConflictConfig] = None,
+        conflict_config: ConflictConfig | None = None,
     ):
         self.config = config
         self.registry = registry
         self.conflict_resolver = ConflictResolver(conflict_config)
         self.deduplicator = SignalDeduplicator()
         self.symbol_registry = get_symbol_registry(config)
-        self._strategy_cache: Dict[str, Any] = {}
-        self.signal_history: Dict[str, List[Dict]] = {}
+        self._strategy_cache: dict[str, Any] = {}
+        self.signal_history: dict[str, list[dict]] = {}
         
         # Load top-3 registry if exists
-        self.top3_registry: Dict[str, List[str]] = {}
+        self.top3_registry: dict[str, list[str]] = {}
         self._load_top3_registry()
     
     def _load_top3_registry(self, registry_path: str = "reports/top3_by_coin.json"):
@@ -244,7 +243,7 @@ class StrategyOrchestrator:
             self._strategy_cache[f"{symbol}:{family}"] = create_strategy(family, {"params": {}}, symbol)
         return self._strategy_cache[f"{symbol}:{family}"]
     
-    def get_approved_strategies(self, symbol: str) -> List[str]:
+    def get_approved_strategies(self, symbol: str) -> list[str]:
         """Get approved strategies for a symbol from top3 registry."""
         if symbol in self.top3_registry:
             return self.top3_registry[symbol]
@@ -253,7 +252,7 @@ class StrategyOrchestrator:
         symbol_cfg = CONFIG.get_symbol_config(symbol)
         return symbol_cfg.priority_strategies
     
-    def get_approved_strategies_for_all(self) -> Dict[str, List[str]]:
+    def get_approved_strategies_for_all(self) -> dict[str, list[str]]:
         """Get approved strategies for all symbols."""
         result = {}
         for symbol in self.symbol_registry.get_tradable_symbols():
@@ -263,11 +262,11 @@ class StrategyOrchestrator:
     def process_symbol(
         self,
         symbol: str,
-        market_data: Dict[str, Any],
+        market_data: dict[str, Any],
         global_regime: str,
         funding_rate: float,
-        oi_data: Dict,
-    ) -> List[Dict[str, Any]]:
+        oi_data: dict,
+    ) -> list[dict[str, Any]]:
         """
         Run all approved strategies for a symbol and return signals.
         
@@ -348,11 +347,11 @@ class StrategyOrchestrator:
     
     def generate_signals(
         self,
-        market_data: Dict[str, Dict[str, Any]],
+        market_data: dict[str, dict[str, Any]],
         global_regime: str,
-        funding_rates: Dict[str, float],
-        oi_data_map: Dict[str, Dict],
-    ) -> List[Dict[str, Any]]:
+        funding_rates: dict[str, float],
+        oi_data_map: dict[str, dict],
+    ) -> list[dict[str, Any]]:
         """
         Generate and aggregate signals for all available symbols.
         
@@ -365,7 +364,7 @@ class StrategyOrchestrator:
         Returns:
             List of final aggregated signals ready for Telegram
         """
-        all_signals_by_symbol: Dict[str, List[Dict]] = {}
+        all_signals_by_symbol: dict[str, list[dict]] = {}
         
         # Generate signals per symbol
         for symbol in self.symbol_registry.get_tradable_symbols():
@@ -408,7 +407,7 @@ class StrategyOrchestrator:
         
         return final_signals
     
-    def get_approved_strategies_for_all(self) -> Dict[str, List[str]]:
+    def get_approved_strategies_for_all(self) -> dict[str, list[str]]:
         """Get approved strategies for all available symbols."""
         result = {}
         for symbol in self.symbol_registry.get_tradable_symbols():

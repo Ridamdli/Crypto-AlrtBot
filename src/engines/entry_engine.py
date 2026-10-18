@@ -1,4 +1,5 @@
-from typing import Dict, Any, List
+from typing import Any
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -7,7 +8,7 @@ class EntryEngine:
     def __init__(self, pullback_pct: float = 0.5):
         self.pullback_pct = pullback_pct / 100.0 # e.g., 0.5%
 
-    def calculate_entry(self, model: str, current_price: float, recent_klines: List[Dict[str, Any]], side: str) -> Dict[str, Any]:
+    def calculate_entry(self, model: str, current_price: float, recent_klines: list[dict[str, Any]], side: str) -> dict[str, Any]:
         """
         Calculate entry price and activation conditions based on model.
         models: "market", "pullback"

@@ -1,4 +1,5 @@
-from typing import Dict, Any, List
+from typing import Any
+
 from src.data.binance_client import BinanceFuturesClient
 from src.utils.logger import get_logger
 
@@ -8,7 +9,7 @@ class FuturesDataService:
     def __init__(self, client: BinanceFuturesClient):
         self.client = client
 
-    def get_market_context(self, symbol: str) -> Dict[str, Any]:
+    def get_market_context(self, symbol: str) -> dict[str, Any]:
         """
         Fetches open interest, mark price, and funding rate to form a context snapshot.
         """

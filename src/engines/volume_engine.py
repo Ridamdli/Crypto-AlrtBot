@@ -1,5 +1,7 @@
-from typing import List, Dict, Any
+from typing import Any
+
 import pandas as pd
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -9,7 +11,7 @@ class VolumeEngine:
         self.rolling_window = rolling_window
         self.min_ratio = min_ratio
 
-    def analyze_volume(self, klines_15m: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def analyze_volume(self, klines_15m: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Calculates volume expansion ratio based on 15m data.
         """

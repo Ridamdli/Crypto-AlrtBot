@@ -1,6 +1,7 @@
-from pydantic import BaseModel, model_validator
-from pydantic import ConfigDict
-from typing import Any, List, Optional
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, model_validator
+
 
 class SignalModel(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -12,7 +13,7 @@ class SignalModel(BaseModel):
     side: str
     strategy_id: str = "momentum_volume_v1"
     strategy_version: str = "1.0.0"
-    configuration_hash: Optional[str] = None
+    configuration_hash: str | None = None
 
     # Trade parameters
     entry: float
@@ -30,15 +31,15 @@ class SignalModel(BaseModel):
     confidence: int
 
     # Human-readable output
-    conditions: List[str]
-    invalidation_conditions: List[str]
-    management_rules: List[str]
+    conditions: list[str]
+    invalidation_conditions: list[str]
+    management_rules: list[str]
 
     # Optional enrichment
-    btc_regime: Optional[str] = None
-    volume_ratio: Optional[float] = None
-    oi_change_pct: Optional[float] = None
-    funding_rate: Optional[float] = None
+    btc_regime: str | None = None
+    volume_ratio: float | None = None
+    oi_change_pct: float | None = None
+    funding_rate: float | None = None
 
     @model_validator(mode="before")
     @classmethod

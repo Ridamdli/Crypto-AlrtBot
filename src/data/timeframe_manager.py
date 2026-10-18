@@ -1,16 +1,17 @@
-from typing import Dict, List, Any, Optional
 import concurrent.futures
+from typing import Any
+
 from src.data.ohlcv_fetcher import OHLCVFetcher
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 class TimeframeManager:
-    def __init__(self, fetcher: OHLCVFetcher, timeframes: List[str] = None):
+    def __init__(self, fetcher: OHLCVFetcher, timeframes: list[str] = None):
         self.fetcher = fetcher
         self.timeframes = timeframes or ["15m", "1h", "4h"]
 
-    def fetch_multi_timeframe(self, symbol: str, limit: int = 200, end_time: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
+    def fetch_multi_timeframe(self, symbol: str, limit: int = 200, end_time: int | None = None) -> dict[str, list[dict[str, Any]]]:
         """
         Synchronously fetch multi-timeframe OHLCV data.
         Returns a dictionary keyed by timeframe.

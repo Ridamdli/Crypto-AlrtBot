@@ -6,10 +6,10 @@ torn write would silently reset deduplication, equity, or exit plans.
 """
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 
-def atomic_write_json(path: str, data: Any, indent: Optional[int] = 2) -> None:
+def atomic_write_json(path: str, data: Any, indent: int | None = 2) -> None:
     """Serialize `data` to JSON and atomically replace `path` with it.
 
     Serialize-first: a serialization failure raises before anything on

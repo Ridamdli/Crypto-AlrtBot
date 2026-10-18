@@ -1,6 +1,7 @@
-from typing import List, Dict, Any
-from src.utils.logger import get_logger
+from typing import Any
+
 from src.config import AppConfig
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -9,7 +10,7 @@ class ScoringEngine:
         self.cfg = config.scoring
         self.min_confidence = config.signals.min_confidence
 
-    def score_candidate(self, candidate_data: Dict[str, Any], config: AppConfig) -> int:
+    def score_candidate(self, candidate_data: dict[str, Any], config: AppConfig) -> int:
         """
         Calculates a confidence score 0-100 for a trade setup candidate.
         Weights per PRD §23: regime(20), structure(15), momentum(15),
@@ -78,7 +79,7 @@ class ScoringEngine:
 
         return min(100, score)
 
-    def rank_candidates(self, candidates: List[Dict[str, Any]], top_n=None, config: AppConfig = None) -> List[Dict[str, Any]]:
+    def rank_candidates(self, candidates: list[dict[str, Any]], top_n=None, config: AppConfig = None) -> list[dict[str, Any]]:
         """Score, filter by min confidence, and return every viable signal.
 
         top_n=None (default) means uncapped: all qualifying setups publish.

@@ -1,5 +1,7 @@
-from typing import List, Dict, Any
+from typing import Any
+
 import pandas as pd
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,7 +21,7 @@ class StopLossEngine:
         atr = df['tr'].rolling(window=self.atr_period).mean().iloc[-1]
         return float(atr)
 
-    def calculate_sl(self, model: str, entry_price: float, side: str, klines: List[Dict[str, Any]]) -> float:
+    def calculate_sl(self, model: str, entry_price: float, side: str, klines: list[dict[str, Any]]) -> float:
         """
         Calculate Stop-Loss price.
         models: "atr", "structural"

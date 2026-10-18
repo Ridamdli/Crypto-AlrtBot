@@ -7,7 +7,6 @@ Secrets arrive via env only and are never logged or persisted by this module.
 import imaplib
 import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
 
 from src.utils.logger import get_logger
 
@@ -34,7 +33,7 @@ class MailboxReader:
         return m
 
     def latest_otp(self, since_minutes: int = 10,
-                   sender_hints: tuple = SENDER_HINTS) -> Optional[str]:
+                   sender_hints: tuple = SENDER_HINTS) -> str | None:
         """Newest plausible OTP code from recent inbox mail. Returns None if absent."""
         since = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
         try:
