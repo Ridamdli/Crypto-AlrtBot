@@ -158,6 +158,74 @@ class _FakeDateTime:
         return self._now
 
 
+def _persistence_sig(signal_id):
+    from src.models.signal import SignalModel
+
+    return SignalModel(
+        signal_id=signal_id, timestamp="2026-10-14T00:00:00Z",
+        symbol="BTCUSDT", side="LONG", entry=100.0, tp=104.0,
+        stop_loss=98.0, leverage=5, margin=20.0, position_notional=100.0,
+        risk_amount=1.0, risk_reward=2.0, confidence=70, conditions=[],
+        invalidation_conditions=[], management_rules=[],
+    )
+
+
+def test_corrupt_signal_file_quarantined_not_overwritten(tmp_path, monkeypatch):
+    """A corrupt daily file must never be replaced by a lone new signal.
+
+    Regression: save_signal used to swallow the parse error and atomically
+    rewrite the file with only the new record, destroying the day's history.
+    """
+    import datetime as _dt
+    import glob as _glob
+
+    from src.data.persistence import SignalPersistence
+
+    monkeypatch.setattr(
+        "src.data.persistence.datetime",
+        _FakeDateTime(_dt.datetime(2026, 10, 14)),
+    )
+    day_file = tmp_path / "signals_2026-10-14.json"
+    day_file.write_text("{not valid json", encoding="utf-8")
+
+    sp = SignalPersistence(storage_dir=str(tmp_path))
+    assert sp.save_signal(_persistence_sig("SIG-T")) is True
+
+    # Prior bytes preserved next door, not destroyed.
+    quarantine = tmp_path / "signals_2026-10-14.json.corrupt"
+    assert quarantine.read_text(encoding="utf-8") == "{not valid json"
+    # Fresh file holds exactly the new signal.
+    rows = json.loads(day_file.read_text(encoding="utf-8"))
+    assert [r["signal_id"] for r in rows] == ["SIG-T"]
+
+    # Persistence is not blocked for the rest of the day.
+    assert sp.save_signal(_persistence_sig("SIG-T2")) is True
+    rows = json.loads(day_file.read_text(encoding="utf-8"))
+    assert [r["signal_id"] for r in rows] == ["SIG-T", "SIG-T2"]
+
+    # The quarantined file is invisible to the readers' signals_*.json glob.
+    assert _glob.glob(str(tmp_path / "signals_*.json")) == [str(day_file)]
+
+
+def test_signal_day_boundary_is_utc(tmp_path, monkeypatch):
+    """The daily filename must follow the UTC date, not host-local time."""
+    import datetime as _dt
+
+    from src.data.persistence import SignalPersistence
+
+    class _UTCOnlyDateTime:
+        def now(self, tz=None):
+            assert tz is not None, "day boundary must be read with a UTC tz"
+            assert tz.utcoffset(None) == _dt.timedelta(0)
+            return _dt.datetime(2026, 2, 1, 0, 30, tzinfo=_dt.timezone.utc)
+
+    monkeypatch.setattr("src.data.persistence.datetime", _UTCOnlyDateTime())
+    sp = SignalPersistence(storage_dir=str(tmp_path))
+    assert sp.save_signal(_persistence_sig("SIG-UTC")) is True
+    # 00:30 UTC on Feb 1 is still Jan 31 in every UTC-negative locale.
+    assert (tmp_path / "signals_2026-02-01.json").exists()
+
+
 def test_lifecycle_save_load_roundtrip(tmp_path):
     from src.models.lifecycle import SignalLifecycleTracker, SignalState
 
