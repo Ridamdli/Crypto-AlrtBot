@@ -155,8 +155,9 @@ class SignalDeduplicator:
         self.cooldown_hours = cooldown_hours
         os.makedirs(os.path.dirname(state_file), exist_ok=True)
         if not os.path.exists(state_file):
-            with open(state_file, "w") as f:
-                json.dump({"published_signals": {}}, f)
+            from src.utils.atomic import atomic_write_json
+            atomic_write_json(state_file, {"published_signals": {}},
+                              indent=None)
     
     def _load_state(self) -> Dict[str, Any]:
         try:
@@ -167,8 +168,8 @@ class SignalDeduplicator:
     
     def _save_state(self, state: Dict[str, Any]):
         try:
-            with open(self.state_file, "w") as f:
-                json.dump(state, f, indent=2)
+            from src.utils.atomic import atomic_write_json
+            atomic_write_json(self.state_file, state)
         except Exception as e:
             logger.error(f"Failed to save deduplicator state: {e}")
     

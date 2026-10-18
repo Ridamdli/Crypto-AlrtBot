@@ -62,8 +62,8 @@ class PaperPortfolio:
 
     def save(self, ledger: Dict[str, Any]) -> None:
         try:
-            with open(self.ledger_path, "w", encoding="utf-8") as f:
-                json.dump(ledger, f, indent=2)
+            from src.utils.atomic import atomic_write_json
+            atomic_write_json(self.ledger_path, ledger)
         except OSError as e:
             logger.error(f"[Paper] Failed to save portfolio ledger: {e}")
 

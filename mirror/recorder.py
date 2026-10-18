@@ -56,12 +56,12 @@ class TradingSession:
         if not self.state_path:
             return
         try:
-            import json as _json
             import os as _os
+            from src.utils.atomic import atomic_write_json
             _os.makedirs(_os.path.dirname(self.state_path) or ".", exist_ok=True)
-            with open(self.state_path, "w", encoding="utf-8") as f:
-                _json.dump({"refresh_token": self.refresh_token,
-                            "access_token": self.access_token}, f)
+            atomic_write_json(self.state_path, {"refresh_token": self.refresh_token,
+                                                "access_token": self.access_token},
+                              indent=None)
             try:
                 _os.chmod(self.state_path, 0o600)
             except OSError:

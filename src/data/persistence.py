@@ -33,8 +33,8 @@ class SignalPersistence:
 
         # Save
         try:
-            with open(file_path, "w") as f:
-                json.dump(data, f, indent=4)
+            from src.utils.atomic import atomic_write_json
+            atomic_write_json(file_path, data, indent=4)
             logger.info(f"Signal {signal.signal_id} persisted locally.")
             return True
         except Exception as e:

@@ -123,8 +123,8 @@ class SignalLifecycleTracker:
         }
 
     def save(self, filepath: str) -> None:
-        with open(filepath, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
+        from src.utils.atomic import atomic_write_json
+        atomic_write_json(filepath, self.to_dict())
 
     @classmethod
     def load(cls, filepath: str) -> "SignalLifecycleTracker":

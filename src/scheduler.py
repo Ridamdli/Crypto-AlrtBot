@@ -71,8 +71,8 @@ class BotScheduler:
 
     def _save_state(self, state: Dict[str, Any]) -> None:
         try:
-            with open(self.state_file, "w") as f:
-                json.dump(state, f, indent=2)
+            from src.utils.atomic import atomic_write_json
+            atomic_write_json(self.state_file, state)
         except Exception as e:
             logger.error(f"Failed to save scheduler state: {e}")
 
@@ -682,8 +682,8 @@ class BotScheduler:
         try:
             # Keep ~10 days of 15m heartbeats (96/day) so a full analysis
             # window always survives; signals/outcomes/paper ledgers are uncapped.
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(history[-1000:], f, indent=2)
+            from src.utils.atomic import atomic_write_json
+            atomic_write_json(path, history[-1000:])
         except OSError as e:
             logger.error(f"[Scheduler] Failed to record scan heartbeat: {e}")
 
