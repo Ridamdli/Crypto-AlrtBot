@@ -33,6 +33,22 @@ logger = get_logger(__name__)
 CANDIDATES_JSON = "reports/scoring_audit_candidates.json"
 TABLES_MD = "reports/scoring_audit_tables.md"
 
+
+def audit_paths(partition: str) -> tuple[str, str]:
+    """Val/test captures get a suffix; train keeps the original filenames."""
+    if partition == "train":
+        return CANDIDATES_JSON, TABLES_MD
+    return (CANDIDATES_JSON.replace(".json", f"_{partition}.json"),
+            TABLES_MD.replace(".md", f"_{partition}.md"))
+
+
+def partition_bounds(n: int, partition: str) -> tuple[int, int]:
+    """Chronological 60/20/20 split (same TRAIN boundary as the confidence
+    experiment); order is time, never shuffled."""
+    cut1, cut2 = int(n * 0.6), int(n * 0.8)
+    return {"train": (0, cut1), "val": (cut1, cut2),
+            "test": (cut2, n)}[partition]
+
 # BTCUSDT 4h klines in the replay DB start here; before this timestamp the BTC
 # regime is structurally NEUTRAL for every candidate (no 4h data to judge).
 BTC_4H_START_MS = 1783396800000
@@ -150,7 +166,7 @@ def component_breakdown(cand: dict[str, Any], config: AppConfig) -> dict[str, in
 # ─────────────────────────────────────────────────────────────────────────────
 # capture
 # ─────────────────────────────────────────────────────────────────────────────
-def capture(stride: int, limit_ts: int | None) -> None:
+def capture(stride: int, limit_ts: int | None, partition: str = "train") -> None:
     silence_logs()
     os.makedirs("reports", exist_ok=True)
 
@@ -197,7 +213,8 @@ def capture(stride: int, limit_ts: int | None) -> None:
 
         scan_end = g_end - (3 * 24 * 60 * 60 * 1000)
         all_ts = generate_timestamps(g_start, scan_end)
-        train_ts = all_ts[: int(len(all_ts) * 0.6)][::stride]
+        lo, hi = partition_bounds(len(all_ts), partition)
+        train_ts = all_ts[lo:hi][::stride]
         if limit_ts:
             train_ts = train_ts[:limit_ts]
 
@@ -205,6 +222,7 @@ def capture(stride: int, limit_ts: int | None) -> None:
             "config_hash": config.compute_hash(),
             "min_confidence": config.signals.min_confidence,
             "window_train": [train_ts[0], train_ts[-1]],
+            "partition": partition,
             "n_timestamps": len(train_ts),
             "stride": stride,
             "symbols": symbols,
@@ -271,9 +289,9 @@ def capture(stride: int, limit_ts: int | None) -> None:
         # scan_end is 3d before data end, so every candidate should see >=100 future bars
         raise SystemExit(f"ABORT: {n_empty_future} candidates had <100 future klines — outcome eval invalid")
     meta["n_candidates"] = len(records)
-    with open(CANDIDATES_JSON, "w") as f:
+    with open(audit_paths(partition)[0], "w") as f:
         json.dump({"meta": meta, "candidates": records}, f)
-    print(f"captured {len(records)} candidates -> {CANDIDATES_JSON}")
+    print(f"captured {len(records)} candidates -> {audit_paths(partition)[0]}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -351,8 +369,9 @@ def build_perturbations() -> dict[str, dict]:
     }
 
 
-def analyze() -> None:
-    with open(CANDIDATES_JSON) as f:
+def analyze(partition: str = "train") -> None:
+    candidates_json, tables_md = audit_paths(partition)
+    with open(candidates_json) as f:
         data = json.load(f)
     cands = data["candidates"]
     meta = data["meta"]
@@ -363,7 +382,7 @@ def analyze() -> None:
     lines.append(f"- config_hash: `{meta['config_hash']}`  | candidates: **{len(cands)}**  "
                  f"| timestamps: {meta['n_timestamps']} (stride {meta['stride']})  "
                  f"| symbols: {len(meta['symbols'])}  | gate: {gate}\n")
-    lines.append(f"- TRAIN window: {meta['window_train']}  | BTC 4h (regime) available from ms {meta['btc_4h_start_ms']}\n")
+    lines.append(f"- {partition.upper()} window: {meta['window_train']}  | BTC 4h (regime) available from ms {meta['btc_4h_start_ms']}\n")
 
     def comp_table(subset: list[dict], title: str) -> None:
         lines.append(f"\n## Component value -> outcome: {title}\n")
@@ -455,9 +474,9 @@ def analyze() -> None:
     lines.append(f"- funding_penalty distribution: {pen_counter}\n")
     lines.append(f"- max attainable score observed: {max_total} (code caps at 100)\n")
 
-    with open(TABLES_MD, "w", encoding="utf-8") as f:
+    with open(tables_md, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"wrote {TABLES_MD}")
+    print(f"wrote {tables_md}")
 
 
 def main() -> None:
@@ -465,11 +484,13 @@ def main() -> None:
     parser.add_argument("phase", choices=["capture", "analyze"])
     parser.add_argument("--stride", type=int, default=1, help="keep every Nth TRAIN timestamp")
     parser.add_argument("--limit-ts", type=int, default=None, help="cap timestamp count (debug)")
+    parser.add_argument("--partition", choices=["train", "val", "test"], default="train",
+                        help="chronological 60/20/20 slice (capture + analyze)")
     args = parser.parse_args()
     if args.phase == "capture":
-        capture(args.stride, args.limit_ts)
+        capture(args.stride, args.limit_ts, args.partition)
     else:
-        analyze()
+        analyze(args.partition)
 
 
 if __name__ == "__main__":

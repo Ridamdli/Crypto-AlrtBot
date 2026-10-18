@@ -94,3 +94,21 @@ def test_perturbation_shifts_only_target_component():
     assert sum(pert.values()) == sum(base.values()) - base["structure"]
     assert {k: v for k, v in pert.items() if k != "structure"} == \
            {k: v for k, v in base.items() if k != "structure"}
+
+
+def test_partition_bounds_cover_timeline_disjointly():
+    n = 1000
+    bounds = {p: audit.partition_bounds(n, p) for p in ("train", "val", "test")}
+    # chronological, contiguous, no overlap: 60/20/20
+    assert bounds["train"] == (0, 600)
+    assert bounds["val"] == (600, 800)
+    assert bounds["test"] == (800, 1000)
+    assert sum(hi - lo for lo, hi in bounds.values()) == n
+    for p, (lo, hi) in bounds.items():
+        assert 0 <= lo < hi <= n, p
+    # train keeps original artifact names; val/test get suffixed
+    assert audit.audit_paths("train") == (audit.CANDIDATES_JSON, audit.TABLES_MD)
+    cj, tm = audit.audit_paths("val")
+    assert cj.endswith("_val.json") and tm.endswith("_val.md")
+    cj, tm = audit.audit_paths("test")
+    assert cj.endswith("_test.json") and tm.endswith("_test.md")
