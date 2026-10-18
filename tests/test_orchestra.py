@@ -1,12 +1,20 @@
 """Regression tests for the 14-coin orchestra wiring.
 
-Every enabled coin must carry exactly 3 picks from registered families,
+Every enabled coin must carry 2–3 picks from registered families,
 BTC must trade with its doc-aligned picks, and research must stay gated
 to the validated-history subset.
 """
+import importlib
+
+import pytest
+
 from src.config import CONFIG
 from src.pipeline import SignalPipeline
-from src.strategies import STRATEGY_REGISTRY
+from src.strategies import (
+    COIN_PRIORITY_STRATEGIES,
+    STRATEGY_REGISTRY,
+    STRATEGY_TIMEFRAMES,
+)
 
 
 def test_tradable_universe_is_14_coins():
@@ -25,23 +33,42 @@ def test_research_universe_stays_gated_to_validated_history():
         assert sym not in available
 
 
-def test_every_tradable_coin_has_3_registered_picks():
+def test_every_tradable_coin_has_registered_picks():
     for sym in CONFIG.get_tradable_symbols():
         picks = CONFIG.get_symbol_config(sym).priority_strategies
-        assert len(picks) == 3, f"{sym} picks: {picks}"
+        # RSI retirement (Phase 02) left 9 coins with 2 picks.
+        assert 2 <= len(picks) <= 3, f"{sym} picks: {picks}"
         for fam in picks:
             assert fam in STRATEGY_REGISTRY, f"{sym} picks unknown family {fam}"
 
 
 def test_btc_picks_match_doc_matrix():
     picks = CONFIG.get_symbol_config("BTCUSDT").priority_strategies
-    assert picks == ["momentum", "ema_trend", "rsi_mean_reversion"]
+    assert picks == ["momentum", "ema_trend"]
 
 
 def test_pipeline_covers_btc_with_its_picks():
     pipe = SignalPipeline(config=CONFIG)
-    assert pipe._get_strategies_for_symbol("BTCUSDT") == ["momentum", "ema_trend", "rsi_mean_reversion"]
+    assert pipe._get_strategies_for_symbol("BTCUSDT") == ["momentum", "ema_trend"]
     assert pipe.symbol_registry.is_tradable("BTCUSDT")
+
+
+def test_rsi_family_fully_retired():
+    """Retired in Phase 02: its 1.5R TP can never pass the min_rr=2.0
+    pipeline gate and the unfixed ATR-stop defect made repair not worth
+    it. It must not creep back through any registry surface."""
+    assert "rsi_mean_reversion" not in STRATEGY_REGISTRY.list_families()
+    assert "rsi_mean_reversion" not in STRATEGY_TIMEFRAMES
+    for fams in COIN_PRIORITY_STRATEGIES.values():
+        assert "rsi_mean_reversion" not in fams
+    for sym in CONFIG.get_tradable_symbols():
+        picks = CONFIG.get_symbol_config(sym).priority_strategies
+        assert "rsi_mean_reversion" not in picks, sym
+
+
+def test_rsi_module_stays_deleted():
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("src.strategies.rsi_mean_reversion")
 
 
 def test_live_gate_excludes_unvalidated_by_default(monkeypatch):

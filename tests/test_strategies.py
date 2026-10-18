@@ -9,7 +9,6 @@ from src.strategies import (
     DonchianBreakoutStrategy,
     EMATrendStrategy,
     MomentumFilterStrategy,
-    RSIMeanReversionStrategy,
     VolumeBreakoutStrategy,
 )
 
@@ -348,93 +347,6 @@ class TestBollingerATRStrategy:
         assert candidates[0].side == "LONG"
 
 
-class TestRSIMeanReversionStrategy:
-    def test_rsi_oversold_long(self):
-        """Test RSI oversold generates LONG."""
-        strategy = RSIMeanReversionStrategy({"params": {"rsi_period": 14, "oversold_threshold": 30, "trend_filter": False}}, "XRPUSDT")
-        
-        # Create oversold RSI scenario with proper volume
-        klines = []
-        price = 100.0
-        for i in range(30):
-            price *= 0.995  # Declining
-            vol = 1000000.0
-            if i == 29:
-                vol = 3000000.0  # High volume on reversal
-            klines.append({
-                "timestamp": 1700000000000 + i * 900000,
-                "open": price,
-                "high": price * 1.01,
-                "low": price * 0.99,
-                "close": price,
-                "volume": vol,
-            })
-        # RSI should be low now, then uptick with high volume
-        klines.append({
-            "timestamp": 1700000000000 + 30 * 900000,
-            "open": price * 0.99,
-            "high": price * 1.02,
-            "low": price * 0.98,
-            "close": price * 1.01,
-            "volume": 3000000.0,
-        })
-        
-        candidates = strategy.generate_candidates(
-            klines_15m=klines,
-            klines_1h=_make_klines_1h(50, 100.0, "down"),
-            klines_4h=_make_klines_4h(50, 100.0, "down"),
-            btc_regime="neutral",
-            oi_data={},
-            funding_rate=0.0,
-            current_price=klines[-1]["close"],
-        )
-        
-        assert len(candidates) >= 1
-        assert candidates[0].side == "LONG"
-    
-    def test_rsi_overbought_short(self):
-        """Test RSI overbought generates SHORT."""
-        strategy = RSIMeanReversionStrategy({"params": {"rsi_period": 14, "overbought_threshold": 70, "trend_filter": False}}, "XRPUSDT")
-        
-        klines = []
-        price = 100.0
-        for i in range(30):
-            price *= 1.005  # Rising
-            vol = 1000000.0
-            if i == 29:
-                vol = 3000000.0  # High volume on reversal
-            klines.append({
-                "timestamp": 1700000000000 + i * 900000,
-                "open": price,
-                "high": price * 1.01,
-                "low": price * 0.99,
-                "close": price,
-                "volume": vol,
-            })
-        # Overbought then downtick with high volume
-        klines.append({
-            "timestamp": 1700000000000 + 30 * 900000,
-            "open": price,
-            "high": price * 1.01,
-            "low": price * 0.99,
-            "close": price * 0.99,
-            "volume": 3000000.0,
-        })
-        
-        candidates = strategy.generate_candidates(
-            klines_15m=klines,
-            klines_1h=_make_klines_1h(50, 100.0, "up"),
-            klines_4h=_make_klines_4h(50, 100.0, "up"),
-            btc_regime="neutral",
-            oi_data={},
-            funding_rate=0.0,
-            current_price=klines[-1]["close"],
-        )
-        
-        assert len(candidates) >= 1
-        assert candidates[0].side == "SHORT"
-
-
 class TestVolumeBreakoutStrategy:
     def test_volume_breakout_long(self):
         """Test volume breakout generates LONG."""
@@ -545,7 +457,6 @@ class TestStrategyGeometry:
         MomentumFilterStrategy,
         EMATrendStrategy,
         BollingerATRStrategy,
-        RSIMeanReversionStrategy,
         VolumeBreakoutStrategy,
     ])
     def test_long_signal_geometry(self, StrategyClass):
@@ -576,7 +487,6 @@ class TestStrategyGeometry:
         MomentumFilterStrategy,
         EMATrendStrategy,
         BollingerATRStrategy,
-        RSIMeanReversionStrategy,
         VolumeBreakoutStrategy,
     ])
     def test_short_signal_geometry(self, StrategyClass):

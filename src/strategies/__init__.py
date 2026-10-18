@@ -9,7 +9,6 @@ from .bollinger_atr import BollingerATRStrategy
 from .donchian import DonchianBreakoutStrategy
 from .ema_trend import EMATrendStrategy
 from .momentum import MomentumFilterStrategy
-from .rsi_mean_reversion import RSIMeanReversionStrategy
 from .volume_breakout import VolumeBreakoutStrategy
 
 # Canonical strategy registry - single source of truth
@@ -20,7 +19,6 @@ STRATEGY_REGISTRY.register_family("donchian", DonchianBreakoutStrategy)
 STRATEGY_REGISTRY.register_family("momentum", MomentumFilterStrategy)
 STRATEGY_REGISTRY.register_family("ema_trend", EMATrendStrategy)
 STRATEGY_REGISTRY.register_family("bollinger_atr", BollingerATRStrategy)
-STRATEGY_REGISTRY.register_family("rsi_mean_reversion", RSIMeanReversionStrategy)
 STRATEGY_REGISTRY.register_family("volume_breakout", VolumeBreakoutStrategy)
 
 # Map strategy families to their default timeframes
@@ -29,25 +27,24 @@ STRATEGY_TIMEFRAMES = {
     "momentum": "15m",
     "ema_trend": "15m",
     "bollinger_atr": "15m",
-    "rsi_mean_reversion": "15m",
     "volume_breakout": "15m",
 }
 
 # Map coins to their priority strategies (for research prioritization)
 COIN_PRIORITY_STRATEGIES = {
-    "BTCUSDT": ["momentum", "ema_trend", "rsi_mean_reversion"],
+    "BTCUSDT": ["momentum", "ema_trend"],
     "ETHUSDT": ["donchian", "momentum", "ema_trend"],
     "SOLUSDT": ["bollinger_atr", "momentum", "volume_breakout"],
-    "ZECUSDT": ["donchian", "rsi_mean_reversion", "bollinger_atr"],
-    "XRPUSDT": ["volume_breakout", "donchian", "rsi_mean_reversion"],
+    "ZECUSDT": ["donchian", "bollinger_atr"],
+    "XRPUSDT": ["volume_breakout", "donchian"],
     "BNBUSDT": ["ema_trend", "donchian", "momentum"],
-    "HYPEUSDT": ["bollinger_atr", "volume_breakout", "rsi_mean_reversion"],
-    "DOGEUSDT": ["donchian", "momentum", "rsi_mean_reversion"],
-    "UNIUSDT": ["donchian", "momentum", "rsi_mean_reversion"],
-    "NEARUSDT": ["donchian", "momentum", "rsi_mean_reversion"],
-    "ADAUSDT": ["volume_breakout", "rsi_mean_reversion", "ema_trend"],
+    "HYPEUSDT": ["bollinger_atr", "volume_breakout"],
+    "DOGEUSDT": ["donchian", "momentum"],
+    "UNIUSDT": ["donchian", "momentum"],
+    "NEARUSDT": ["donchian", "momentum"],
+    "ADAUSDT": ["volume_breakout", "ema_trend"],
     "AVAXUSDT": ["bollinger_atr", "ema_trend", "donchian"],
-    "LINKUSDT": ["volume_breakout", "momentum", "rsi_mean_reversion"],
+    "LINKUSDT": ["volume_breakout", "momentum"],
     "DOTUSDT": ["volume_breakout", "donchian", "ema_trend"],
 }
 
@@ -75,7 +72,6 @@ __all__ = [
     "DonchianBreakoutStrategy",
     "EMATrendStrategy",
     "MomentumFilterStrategy",
-    "RSIMeanReversionStrategy",
     "SignalCandidate",
     "StrategyRegistry",
     "Timeframe",
