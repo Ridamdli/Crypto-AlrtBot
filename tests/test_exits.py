@@ -519,6 +519,87 @@ def test_ledger_outcome_link(tmp_path):
     assert rec["linked_outcome"]["status"] == "TP3_HIT"
 
 
+def _pin_decision(sid, key, action="NO_CHANGE"):
+    from src.exits.models import SupervisorDecision
+    return SupervisorDecision(signal_id=sid, action=action,
+                              rationale="idempotency pin",
+                              decision_key=key)
+
+
+def test_seen_keys_survive_decision_eviction(tmp_path):
+    """R2-1: evicting old audit records must not resurrect their keys."""
+    from src.exits.ledger import ExitDecisionLedger
+    led = ExitDecisionLedger(storage_dir=str(tmp_path), max_decisions=3)
+    for i in range(5):
+        assert led.record(_pin_decision("S", f"K{i}"), apply=False) is True
+    assert len(led._state["decisions"]) == 3  # cap still bounds history
+    for i in range(5):
+        assert led.has_key(f"K{i}")
+    assert led.seen_keys() == frozenset(f"K{i}" for i in range(5))
+
+
+def test_duplicate_suppressed_after_restart(tmp_path):
+    from src.exits.ledger import ExitDecisionLedger
+    led = ExitDecisionLedger(storage_dir=str(tmp_path), max_decisions=3)
+    closes = [100.0] * 24 + [99.4, 99.0, 99.2, 99.5, 99.6, 99.5]
+    d = _decide(sig("LONG", entry=100.0, sl=98.0),
+               bars(closes, lo_pad=0.05, hi_pad=0.05), PositionState.OPEN)
+    assert d.action == "TIGHTEN_STOP"
+    assert led.record(d, apply=True) is True
+    led2 = ExitDecisionLedger(storage_dir=str(tmp_path), max_decisions=3)
+    assert led2.has_key(d.decision_key) is True
+    assert d.decision_key in led2.seen_keys()
+    assert led2.active_plan(sig("LONG", entry=100.0, sl=98.0)).version == 1
+
+
+def test_repeat_record_keeps_suppression_without_key_dupes(tmp_path):
+    from src.exits.ledger import ExitDecisionLedger
+    led = ExitDecisionLedger(storage_dir=str(tmp_path))
+    d = _pin_decision("S", "K-same")
+    assert led.record(d, apply=False) is True
+    assert led.record(d, apply=False) is True  # append behavior unchanged
+    assert led.has_key("K-same") is True
+    assert list(led._state["seen_keys"]).count("K-same") == 1
+
+
+def test_proposal_only_decisions_unchanged(tmp_path):
+    from src.exits.ledger import ExitDecisionLedger
+    led = ExitDecisionLedger(storage_dir=str(tmp_path))
+    d = _pin_decision("S", "K-flag", action="FLAG_CONFLICT")
+    assert led.record(d, apply=False) is True
+    assert led.has_key("K-flag") is True
+    assert led.active_plan(sig("LONG")).version == 0  # plans frozen
+    assert led.close_signal_ids() == []
+
+
+def test_legacy_file_backfills_keys_without_rewrite(tmp_path):
+    import json
+    from src.exits.ledger import ExitDecisionLedger
+    path = os.path.join(str(tmp_path), "exit_decisions.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"version": 1,
+                   "decisions": [
+                       {"signal_id": "S", "decision_key": "K-old1"},
+                       {"signal_id": "S", "decision_key": "K-old2"}],
+                   "plans": {}, "events": {}, "invalidated": [],
+                   "last_eval": {}}, f)
+    led = ExitDecisionLedger(storage_dir=str(tmp_path))
+    assert led.healthy is True
+    assert led.has_key("K-old1") and led.has_key("K-old2")
+    assert {"K-old1", "K-old2"} <= set(led.seen_keys())
+
+
+def test_corrupt_file_keys_fail_safe_empty(tmp_path):
+    from src.exits.ledger import ExitDecisionLedger
+    p = os.path.join(str(tmp_path), "exit_decisions.json")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("{not json")
+    led = ExitDecisionLedger(storage_dir=str(tmp_path))
+    assert led.healthy is False
+    assert led.seen_keys() == frozenset()
+    assert led.has_key("anything") is False
+
+
 # ── §7: monitor behavior ──────────────────────────────────────────
 class _FakeFetcher:
     def __init__(self, klines):

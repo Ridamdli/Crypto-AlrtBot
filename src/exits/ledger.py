@@ -44,7 +44,11 @@ class ExitDecisionLedger:
     # ── load / save ───────────────────────────────────────────────
     def _blank(self) -> Dict[str, Any]:
         return {"version": LEDGER_VERSION, "decisions": [], "plans": {},
-                "events": {}, "invalidated": [], "last_eval": {}}
+                "events": {}, "invalidated": [], "last_eval": {},
+                # Durable idempotency keys, independent of the capped
+                # decisions audit list (see record()): evicting an old
+                # decision must never resurrect it as "unseen".
+                "seen_keys": []}
 
     def _load(self) -> Dict[str, Any]:
         try:
@@ -56,6 +60,15 @@ class ExitDecisionLedger:
             for k in ("decisions", "plans", "events", "invalidated", "last_eval"):
                 if k not in data or not isinstance(data[k], (list, dict)):
                     data[k] = [] if k in ("decisions", "invalidated") else {}
+            # seen_keys is additive-only: legacy files predate it, so
+            # backfill from the loaded decisions once (no rewrite needed —
+            # the union is persisted on the next record()).
+            if not isinstance(data.get("seen_keys"), list):
+                data["seen_keys"] = []
+            for d in data["decisions"]:
+                if isinstance(d, dict) and d.get("decision_key"):
+                    if d["decision_key"] not in data["seen_keys"]:
+                        data["seen_keys"].append(d["decision_key"])
             return data
         except FileNotFoundError:
             return self._blank()
@@ -78,12 +91,17 @@ class ExitDecisionLedger:
 
     # ── queries ───────────────────────────────────────────────────
     def has_key(self, decision_key: str) -> bool:
+        if decision_key in self._state.get("seen_keys", []):
+            return True
         return any(d.get("decision_key") == decision_key
                    for d in self._state["decisions"])
 
     def seen_keys(self) -> frozenset:
-        return frozenset(d.get("decision_key", "")
-                         for d in self._state["decisions"] if d.get("decision_key"))
+        keys = set(self._state.get("seen_keys", []) or [])
+        keys.update(d.get("decision_key", "")
+                    for d in self._state["decisions"] if d.get("decision_key"))
+        keys.discard("")
+        return frozenset(keys)
 
     def active_plan(self, signal: Dict[str, Any]) -> ExitPlan:
         rec = self._state["plans"].get(signal["signal_id"])
@@ -128,6 +146,11 @@ class ExitDecisionLedger:
         """
         self._state["decisions"].append(decision.to_dict())
         self._state["decisions"] = self._state["decisions"][-self.max_decisions:]
+        # Idempotency outlives the capped audit list: retain every recorded
+        # key (applied or not — monitor suppression and guard duplicate
+        # checks consult the union, exactly as before eviction).
+        if decision.decision_key and decision.decision_key not in self._state.get("seen_keys", []):
+            self._state.setdefault("seen_keys", []).append(decision.decision_key)
         if apply:
             if decision.plan_after:
                 self._state["plans"][decision.signal_id] = decision.plan_after
