@@ -1,7 +1,60 @@
 """Tests for the Invo auto-share client (all network mocked — no creds needed)."""
+import re
+from pathlib import Path
+
 import pytest
 
+from src.invo import session as _session_mod
 from src.invo.client import InvoClient, InvoAuthError
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_STORAGE = tuple((_REPO_ROOT / name).resolve()
+                      for name in ("data_store", "mirror_data"))
+
+
+@pytest.fixture(autouse=True)
+def _forbid_repo_storage_writes(monkeypatch):
+    """Fail loudly if any test here appends to the repo's real storage.
+
+    A bare client construction used to default to data_store/, so the
+    dry-run tests appended events to the live invo_activity.jsonl during
+    full-suite runs. Client code imports log_activity from the session
+    module inside __init__, so the session module attribute is the one
+    to intercept.
+    """
+    real_log_activity = _session_mod.log_activity
+
+    def _guarded(storage_dir, event, detail=None, **kwargs):
+        root = Path(storage_dir).resolve()
+        for forbidden in _REPO_STORAGE:
+            if root == forbidden or forbidden in root.parents:
+                pytest.fail(f"[test_invo] activity write into repo storage: "
+                            f"{root} ({event})")
+        return real_log_activity(storage_dir, event, detail, **kwargs)
+
+    monkeypatch.setattr(_session_mod, "log_activity", _guarded)
+
+
+def test_all_storage_constructors_in_this_module_are_pinned_to_tmp():
+    """Static regression guard: every storage-taking constructor call in
+    this file must name its isolated directory (InvoClient/SimLedger via
+    storage_dir=, direct SessionStore/log_activity/record_share calls via
+    tmp_path). SimLedger's relative "data_store" is safe only under the
+    tests' chdir-to-tmp convention; the repo-wide conftest storage guard
+    is the runtime backstop for anything this line-based scan misses
+    (e.g. multi-line constructions)."""
+    lines = Path(__file__).read_text(encoding="utf-8").splitlines()
+    needles = (
+        (re.compile(r"(?<!\w)InvoClient\("), "storage_dir"),
+        (re.compile(r"(?<!\w)SessionStore\("), "tmp_path"),
+        (re.compile(r"(?<!\w)SimLedger\("), "storage_dir"),
+        (re.compile(r"(?<!\w)record_share\("), "tmp_path"),
+        (re.compile(r"(?<!real_)\blog_activity\("), "tmp_path"),
+    )
+    bare = [(i, line.strip()) for i, line in enumerate(lines, 1)
+            for pattern, marker in needles
+            if pattern.search(line) and marker not in line]
+    assert not bare, f"unisolated storage construction: {bare}"
 
 
 def _sig(**kw):
@@ -11,8 +64,8 @@ def _sig(**kw):
     return base
 
 
-def test_build_position_payload_matches_app_schema():
-    c = InvoClient()
+def test_build_position_payload_matches_app_schema(tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
     p = c.build_position_payload("BTCUSDT", "LONG", 10, tp_px=95000.0, sl_px=89000.0)
     assert p["coin"] == "BTC"
     assert p["assetIndex"] == 0
@@ -21,14 +74,14 @@ def test_build_position_payload_matches_app_schema():
     assert "clientTxId" in p
 
 
-def test_unknown_coin_refuses_to_guess_index():
-    c = InvoClient()
+def test_unknown_coin_refuses_to_guess_index(tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
     with pytest.raises(ValueError, match="No verified Hyperliquid assetIndex"):
         c.build_position_payload("ZECUSDT", "LONG", 10)
 
 
-def test_bad_side_rejected():
-    c = InvoClient()
+def test_bad_side_rejected(tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
     with pytest.raises(ValueError):
         c.build_position_payload("BTCUSDT", "SIDEWAYS", 10)
 
@@ -51,8 +104,8 @@ def test_live_share_requires_login_first(monkeypatch, tmp_path):
         c.share_position(_sig(), dry_run=False)
 
 
-def test_paper_share_payload_matches_captured_shape():
-    c = InvoClient()
+def test_paper_share_payload_matches_captured_shape(tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
     p = c.build_paper_share_payload(
         symbol="BTCUSDT", long=False, leverage=7,
         entry_sim=1.1585205451150278, price_target=29,
@@ -79,8 +132,8 @@ def test_paper_headers_carry_required_app_fields():
         assert h[k]
 
 
-def test_paper_share_dry_run_posts_nothing(monkeypatch):
-    c = InvoClient()
+def test_paper_share_dry_run_posts_nothing(tmp_path, monkeypatch):
+    c = InvoClient(storage_dir=str(tmp_path))
     calls = []
     monkeypatch.setattr(c.session, "post",
                         lambda *a, **k: calls.append((a, k)) or None)
@@ -149,11 +202,11 @@ def test_share_ledger_roundtrip(tmp_path):
     assert load_share_ledger(str(tmp_path))["SIG-1"]["baseIds"] == ["abc"]
 
 
-def test_paper_share_uses_sim_dollar_size():
+def test_paper_share_uses_sim_dollar_size(tmp_path):
     """entrySim = position size in sim dollars (verified live 2026-10-08:
     posting entrySim=10.0 debited remainingSim by exactly 10.0)."""
     from src.invo.client import InvoClient
-    c = InvoClient()
+    c = InvoClient(storage_dir=str(tmp_path))
     p = c.build_paper_share_payload(
         symbol="BTCUSDT", long=True, leverage=1,
         entry_sim=10.0, price_target=85000,
@@ -209,11 +262,11 @@ def test_ensure_auth_needs_creds(tmp_path):
         InvoClient(storage_dir=str(tmp_path)).ensure_auth()
 
 
-def test_password_login_is_dead():
+def test_password_login_is_dead(tmp_path):
     from src.invo.client import InvoAuthError, InvoClient
     import pytest as _pt
     with _pt.raises(InvoAuthError):
-        InvoClient(email="u@gmail.com").login()
+        InvoClient(email="u@gmail.com", storage_dir=str(tmp_path)).login()
 
 
 def test_session_persists_and_otp_cooldown(tmp_path):
@@ -248,7 +301,7 @@ def test_conflict_precheck_is_local_only(tmp_path, monkeypatch):
     import src.invo.client as _mod
     monkeypatch.setattr(_mod, "load_share_ledger",
                         lambda *a, **k: shares)
-    c = InvoClient()
+    c = InvoClient(storage_dir=str(tmp_path))
     assert c.already_shared_open("BTCUSDT", "P", {}) is True
     assert c.already_shared_open("BTCUSDT", "P", {"SIG-1": {"final": True}}) is False
     assert c.already_shared_open("ETHUSDT", "P", {}) is False
@@ -342,8 +395,8 @@ def test_record_share_stamps_time(tmp_path):
     assert rec["shared_at"] > 0
 
 
-def test_live_share_posts_exact_path(monkeypatch):
-    c = InvoClient(email="u@x.com")
+def test_live_share_posts_exact_path(tmp_path, monkeypatch):
+    c = InvoClient(email="u@x.com", storage_dir=str(tmp_path))
     c.access_token = "tok"
     seen = {}
     def fake_post(path, payload, retry=True):
@@ -357,9 +410,9 @@ def test_live_share_posts_exact_path(monkeypatch):
     assert seen["payload"]["coin"] == "BTC"
 
 
-def test_share_and_modify_payloads_never_carry_tp2_tp3():
+def test_share_and_modify_payloads_never_carry_tp2_tp3(tmp_path):
     import json as _json
-    c = InvoClient()
+    c = InvoClient(storage_dir=str(tmp_path))
     share = c.build_paper_share_payload(
         symbol="BTCUSDT", long=True, leverage=10, entry_sim=10.0,
         price_target=95000.0, stop_loss=89000.0, liquidation_price=None,
@@ -372,8 +425,8 @@ def test_share_and_modify_payloads_never_carry_tp2_tp3():
 
 
 # ── exit-sync: TP1 + SL only (never TP2/TP3) ──────────────────────
-def test_modify_payload_matches_app_faG_shape_and_tp1_only():
-    c = InvoClient()
+def test_modify_payload_matches_app_faG_shape_and_tp1_only(tmp_path):
+    c = InvoClient(storage_dir=str(tmp_path))
     p = c.build_paper_modify_payload("base-1", price_target=112.40, stop_loss=108.55,
                                      liquidation_price=99.9)
     assert p["baseId"] == "base-1"
@@ -387,8 +440,8 @@ def test_modify_payload_matches_app_faG_shape_and_tp1_only():
     assert "tp2" not in blob and "tp3" not in blob  # TP2/TP3 do not exist here
 
 
-def test_modify_dry_run_posts_nothing(monkeypatch):
-    c = InvoClient()
+def test_modify_dry_run_posts_nothing(tmp_path, monkeypatch):
+    c = InvoClient(storage_dir=str(tmp_path))
     calls = []
     monkeypatch.setattr(c.session, "post",
                         lambda *a, **k: calls.append((a, k)) or None)
