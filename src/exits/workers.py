@@ -84,6 +84,14 @@ def _base(worker_id: str, version: str, ctx: WorkerCtx) -> WorkerAssessment:
     )
 
 
+def _abstain(a: WorkerAssessment, reason: str) -> WorkerAssessment:
+    """Shared abstention exit: verdict stays ABSTAIN and evidence_quality
+    is 0.0 per the documented convention (never the 1.0 default)."""
+    a.uncertainty = reason
+    a.evidence_quality = 0.0
+    return a
+
+
 def _quality(ctx: WorkerCtx, thin_ok: bool = False) -> float:
     """Evidence-quality discount: 1.0 fresh+complete, scaled down otherwise."""
     q = 1.0
@@ -114,8 +122,7 @@ class StructureWorker:
         a = _base(self.ID, self.VERSION, ctx)
         a.indicators = ["close", "swing20"]
         if not ctx.fresh or ctx.last_close is None:
-            a.uncertainty = f"abstain: {ctx.freshness_reason}"
-            return a
+            return _abstain(a, f"abstain: {ctx.freshness_reason}")
         side, entry = ctx.side, ctx.entry
         sl = ctx.plan_stop
         breached = policy.stop_breached(ctx.last_close, side, sl)
@@ -187,12 +194,10 @@ class TargetWorker:
         a = _base(self.ID, self.VERSION, ctx)
         a.indicators = ["close", "atr14"]
         if not ctx.fresh or ctx.last_close is None:
-            a.uncertainty = f"abstain: {ctx.freshness_reason}"
-            return a
+            return _abstain(a, f"abstain: {ctx.freshness_reason}")
         atr = policy.atr_wilder(ctx.completed, ctx.cfg.atr_period)
         if atr is None or atr <= 0:
-            a.uncertainty = "abstain: ATR unavailable (short history)"
-            return a
+            return _abstain(a, "abstain: ATR unavailable (short history)")
         # Only not-yet-hit targets are adjustable.
         tps = self._remaining_tps(ctx)
         dists = policy.tp_distances_atr(ctx.last_close, ctx.side, tps, atr)
@@ -281,16 +286,13 @@ class StopWorker:
             a.evidence_quality = _quality(ctx)
             return a
         if not ctx.fresh or ctx.last_close is None:
-            a.uncertainty = f"abstain: {ctx.freshness_reason}"
-            return a
+            return _abstain(a, f"abstain: {ctx.freshness_reason}")
         atr = policy.atr_wilder(ctx.completed, ctx.cfg.atr_period)
         if atr is None or atr <= 0:
-            a.uncertainty = "abstain: ATR unavailable (short history)"
-            return a
+            return _abstain(a, "abstain: ATR unavailable (short history)")
         hi, lo = policy.swing_levels(ctx.completed, ctx.cfg.swing_lookback)
         if hi is None or lo is None:
-            a.uncertainty = "abstain: swing levels unavailable"
-            return a
+            return _abstain(a, "abstain: swing levels unavailable")
         side, entry, sl = ctx.side, ctx.entry, ctx.plan_stop
         buf = ctx.cfg.swing_buffer
         if side == "LONG":
@@ -346,8 +348,7 @@ class CounterSignalWorker:
         a = _base(self.ID, self.VERSION, ctx)
         a.indicators = ["close", "oppbreak20"]
         if not ctx.fresh or ctx.last_close is None:
-            a.uncertainty = f"abstain: {ctx.freshness_reason}"
-            return a
+            return _abstain(a, f"abstain: {ctx.freshness_reason}")
         if ctx.state in (PositionState.CLOSED, PositionState.INVALIDATED):
             a.verdict = "NO_OPPOSITION"
             a.uncertainty = "nothing to oppose in a terminal state"
@@ -410,8 +411,7 @@ class RiskRewardWorker:
         a = _base(self.ID, self.VERSION, ctx)
         a.indicators = ["close"]
         if not ctx.fresh or ctx.last_close is None:
-            a.uncertainty = f"abstain: {ctx.freshness_reason}"
-            return a
+            return _abstain(a, f"abstain: {ctx.freshness_reason}")
         if ctx.state not in (PositionState.OPEN, PositionState.PARTIAL):
             a.verdict = "RR_OK"
             a.uncertainty = f"no exposure to re-risk for {ctx.state.value} state"
@@ -431,7 +431,7 @@ class RiskRewardWorker:
             "best_upside_net_r": round(upside, 3),
             "fees_cost_r": policy.fee_cost_r(entry, risk_dist, ctx.cfg),
         }
-        if nets and all(n < 0 for n in nets) and downside > 2 * max(upside, 0.0):
+        if nets and all(n < 0 for n in nets) and downside > 2 * abs(upside):
             a.verdict = "RR_DEAD"
             a.proposed_action = ExitAction.CLOSE_PAPER_POSITION.value
             a.proposal = {"reason": "all remaining targets net-negative, downside dominates"}

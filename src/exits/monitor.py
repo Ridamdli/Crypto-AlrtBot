@@ -3,8 +3,10 @@
 Evaluates a non-final setup when a meaningful event occurs:
   - a new completed 15m candle since its last evaluation,
   - price (last completed close) within proximity_atr of the next TP/SL,
-  - invalidation evidence present (handled as an event, decided by workers),
   - or scheduled reevaluation due (max_reeval_s elapsed).
+Invalidation evidence is decided by workers once triggered (a print
+through a level normally trips proximity first); worst case it waits
+for the next completed candle, not for max_reeval_s.
 
 Guarantees: completed candles only; configurable frequency + freshness
 limits; idempotent (decision-key dedupe + data-ts monotonicity); bounded

@@ -997,3 +997,53 @@ def test_open_position_cannot_be_invalidated_as_pending():
     view = PositionView(s, None, PositionState.OPEN, ExitPlan.genesis(s), False)
     ok, _ = g.validate(view, "INVALIDATE_PENDING_SETUP", {})
     assert not ok
+
+
+def _stale_ctx(signal, completed):
+    cfg = ExitConfig()
+    return WorkerCtx(signal, float(signal["stop_loss"]), [float(signal["tp"])],
+                     PositionState.OPEN, completed, T0, cfg,
+                     fresh=False, freshness_reason="stale test")
+
+
+def test_all_workers_abstain_at_zero_quality_on_stale_data():
+    from src.exits.workers import ALL_WORKERS
+    s = sig("LONG", entry=100.0, sl=98.0, tp=104.0)
+    kl = bars([100.0] * 30)
+    for cls in ALL_WORKERS:
+        a = cls().assess(_stale_ctx(s, kl))
+        assert a.verdict == "ABSTAIN", cls.ID
+        assert a.evidence_quality == 0.0, cls.ID
+        assert a.proposed_action is None, cls.ID
+
+
+def test_fresh_assessment_keeps_discounted_quality():
+    s = sig("LONG", entry=100.0, sl=98.0, tp=104.0)
+    kl = bars([100.0] * 30)
+    c = ctx_for(s, kl, state=PositionState.OPEN)
+    a = StructureWorker().assess(c)
+    assert a.verdict == "THESIS_INTACT"
+    assert a.evidence_quality == 0.8  # fresh, full history, OI unavailable
+
+
+def test_rr_dead_requires_downside_dominance():
+    # Degenerate tight plan: all nets negative, but downside (1.8R) does
+    # not dominate |upside| (1.0R) 2x -> REDUCE, not CLOSE.
+    s = sig("LONG", entry=100.0, sl=99.9, tp=100.1)
+    kl = bars([100.0] * 29 + [100.08])
+    c = ctx_for(s, kl, state=PositionState.OPEN)
+    a = RiskRewardWorker().assess(c)
+    assert a.verdict == "RR_DEGRADED"
+    assert a.proposed_action == ExitAction.REDUCE_PAPER_POSITION.value
+    assert a.evidence["remaining_net_rr"][0] < 0
+
+
+def test_rr_dead_still_closes_dominated_plan():
+    # Price pinned near TP with fees exceeding the remainder and downside
+    # far larger than |upside| -> CLOSE preserved.
+    s = sig("LONG", entry=100.0, sl=98.0, tp=104.0)
+    kl = bars([100.0] * 29 + [103.95])
+    c = ctx_for(s, kl, state=PositionState.OPEN)
+    a = RiskRewardWorker().assess(c)
+    assert a.verdict == "RR_DEAD"
+    assert a.proposed_action == ExitAction.CLOSE_PAPER_POSITION.value
