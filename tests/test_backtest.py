@@ -10,19 +10,20 @@ All tests are network-free and use synthetic/mock data.
 """
 
 import copy
-import pytest
-from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.backtest.evaluator import AmbiguousResolution, SignalOutcomeEvaluator
 
 # ── imports under test ─────────────────────────────────────────────────────────
 from src.backtest.replay import ReplayHarness
-from src.backtest.evaluator import SignalOutcomeEvaluator, AmbiguousResolution
-from src.backtest.tuner import ThresholdTuner, DatasetSplit, PerformanceMetrics
-from src.models.lifecycle import SignalLifecycleTracker, SignalState
-from src.scheduler import BotScheduler
+from src.backtest.tuner import DatasetSplit, ThresholdTuner
 from src.config import AppConfig
 from src.engines.oi_engine import OIEngine
-
+from src.models.lifecycle import SignalLifecycleTracker, SignalState
+from src.scheduler import BotScheduler
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -1093,8 +1094,9 @@ class TestSLLookbackIntegration:
 
     def test_pipeline_uses_config_sl_lookback(self):
         """Pipeline should pass sl_lookback from config to StopLossEngine."""
-        from src.pipeline import SignalPipeline
         from unittest.mock import MagicMock
+
+        from src.pipeline import SignalPipeline
         
         cfg = AppConfig()
         cfg.risk.sl_lookback = 30

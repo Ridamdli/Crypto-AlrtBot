@@ -2,20 +2,17 @@
 """
 Regression tests for dataset validation and research runner.
 """
-import pytest
 import os
-import json
 import shutil
 import sqlite3
-from datetime import datetime, timezone
 
-from scripts.validate_dataset import DatasetValidator
+import pytest
+
 from scripts.run_strategy_research import (
     HistoricalDataCache,
-    compute_overlap_window,
     generate_timestamps,
 )
-
+from scripts.validate_dataset import DatasetValidator
 
 _REPO_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "data_store", "historical", "historical_data.db")
@@ -94,7 +91,6 @@ class TestDatasetValidation:
     def test_overlap_window_computation(self):
         """Overlap window computation should handle edge cases."""
         # This test would need a mock cache - skipping for now
-        pass
 
 
 class TestHistoricalDataCache:
@@ -112,7 +108,6 @@ class TestHistoricalDataCache:
         cache.load_symbol_intervals("BTCUSDT", ["15m"])
         
         # Query SQLite directly
-        import sqlite3
         conn = sqlite3.connect(dataset_db)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -170,12 +165,10 @@ class TestResearchRunner:
     def test_regime_aware_and_neutral_conditions_exist(self):
         """Both regime-aware and regime-neutral conditions should be run."""
         # This is tested via integration test in the main script
-        pass
     
     def test_insufficient_candles_only_at_warmup(self):
         """Insufficient candles should only occur at dataset boundaries, not due to gaps."""
         # This is verified by the validation gap analysis
-        pass
 
 
 if __name__ == "__main__":

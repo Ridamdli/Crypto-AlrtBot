@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.invo import session as _session_mod
-from src.invo.client import InvoClient, InvoAuthError
+from src.invo.client import InvoAuthError, InvoClient
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _REPO_STORAGE = tuple((_REPO_ROOT / name).resolve()
@@ -178,7 +178,7 @@ def test_paper_share_success_parses_base_ids(monkeypatch, tmp_path):
 
 
 def test_paper_share_conflict_raises_with_base_ids(monkeypatch, tmp_path):
-    from src.invo.client import InvoConflictError, InvoClient
+    from src.invo.client import InvoClient, InvoConflictError
     c = InvoClient(storage_dir=str(tmp_path))
     monkeypatch.setattr(c.session, "post", lambda *a, **k: _Resp(200, (
         '{"success": false, "baseIds": [], "remainingSim": null, "error": '
@@ -255,16 +255,18 @@ def test_otp_self_login_flow(monkeypatch, tmp_path):
 
 
 def test_ensure_auth_needs_creds(tmp_path):
-    from src.invo.client import InvoAuthError, InvoClient
     import pytest as _pt
+
+    from src.invo.client import InvoAuthError, InvoClient
     # isolated storage: must not pick up any real local session file
     with _pt.raises(InvoAuthError):
         InvoClient(storage_dir=str(tmp_path)).ensure_auth()
 
 
 def test_password_login_is_dead(tmp_path):
-    from src.invo.client import InvoAuthError, InvoClient
     import pytest as _pt
+
+    from src.invo.client import InvoAuthError, InvoClient
     with _pt.raises(InvoAuthError):
         InvoClient(email="u@gmail.com", storage_dir=str(tmp_path)).login()
 
@@ -292,8 +294,9 @@ def test_activity_log_appends_and_trims(tmp_path):
 def test_conflict_precheck_is_local_only(tmp_path, monkeypatch):
     import json as _j
     import os as _o
-    from src.invo.client import InvoClient
     import time as _t
+
+    from src.invo.client import InvoClient
     shares = {"SIG-1": {"symbol": "BTCUSDT", "portfolioId": "P",
                         "baseIds": ["b1"], "shared_at": int(_t.time())}}
     with open(_o.path.join(str(tmp_path), "invo_shares.json"), "w", encoding="utf-8") as f:
@@ -311,8 +314,8 @@ def test_conflict_precheck_is_local_only(tmp_path, monkeypatch):
 def test_scheduler_mapping_matches_manual_test(monkeypatch, tmp_path):
     """The bot's scheduler path must build the identical payload shape as the
     manually verified live post (entry present so liquidationPrice computes)."""
-    import os as _os
     from types import SimpleNamespace
+
     from src.scheduler import BotScheduler
     monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
     monkeypatch.setenv("INVO_PAPER_DRY_RUN", "true")
@@ -342,6 +345,7 @@ def test_scheduler_mapping_matches_manual_test(monkeypatch, tmp_path):
 
 def test_precheck_stale_entries_do_not_block_forever(tmp_path, monkeypatch):
     import time as _t
+
     from src.invo.client import InvoClient
     now = int(_t.time())
     shares = {
@@ -359,8 +363,8 @@ def test_precheck_stale_entries_do_not_block_forever(tmp_path, monkeypatch):
 
 
 def test_record_share_preserves_base_ids_on_failed_write(tmp_path, monkeypatch):
-    import json as _json
     import os as _os
+
     from src.invo.client import load_share_ledger, record_share
     record_share(str(tmp_path), "SIG-1", {"symbol": "X", "baseIds": ["b1"]})
 
@@ -376,8 +380,8 @@ def test_record_share_preserves_base_ids_on_failed_write(tmp_path, monkeypatch):
 
 
 def test_record_share_writes_atomically(tmp_path):
-    import json as _json
     import os as _os
+
     from src.invo.client import load_share_ledger, record_share
     record_share(str(tmp_path), "SIG-1", {"symbol": "X", "baseIds": ["b1"]})
     record_share(str(tmp_path), "SIG-2", {"symbol": "Y", "baseIds": ["b2"]})
@@ -470,6 +474,7 @@ def test_modify_success_parses_remaining_sim(monkeypatch, tmp_path):
 
 def test_modify_failure_raises(monkeypatch, tmp_path):
     import pytest as _pt
+
     from src.invo.client import InvoApiError
     c = InvoClient(storage_dir=str(tmp_path))
     monkeypatch.setattr(c.session, "post", lambda *a, **k: _Resp(200, (
@@ -588,9 +593,9 @@ def test_string_shaped_errors_parse_without_crashing(monkeypatch, tmp_path):
 
 
 def test_scheduler_marks_gone_positions_closed(monkeypatch, tmp_path):
-    from src.scheduler import BotScheduler
     import src.invo.client as _mod
     from src.invo import exit_sync as _sync
+    from src.scheduler import BotScheduler
     monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
     monkeypatch.setenv("INVO_PAPER_DRY_RUN", "false")
     monkeypatch.setenv("EXITS_APPLY", "true")
@@ -603,6 +608,7 @@ def test_scheduler_marks_gone_positions_closed(monkeypatch, tmp_path):
                         lambda self, *a, **k: (_ for _ in ()).throw(
                             _mod.InvoApiError(200, "Investment is closed")))
     import os as _os
+
     import src.exits.ledger as _led
     # Mirror production layout: the scheduler uses relative "data_store",
     # which resolves under chdir to tmp_path/data_store.
@@ -635,8 +641,8 @@ def _terminal_oc(sid, status, entry_triggered=True, final=True):
 def test_terminal_outcomes_release_without_credit(monkeypatch, tmp_path):
     """TP1_HIT / STOPPED_OUT / LIQUIDATED (entered) free their reservations
     with NO credit — local finality is not remote-settlement evidence."""
-    from src.scheduler import BotScheduler
     from src.invo.sim_ledger import SimLedger
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     sim = SimLedger(storage_dir="data_store")
     for i, st in enumerate(("TP1_HIT", "STOPPED_OUT", "LIQUIDATED")):
@@ -650,8 +656,8 @@ def test_terminal_outcomes_release_without_credit(monkeypatch, tmp_path):
 
 
 def test_expired_and_unresolved_preserved(monkeypatch, tmp_path):
-    from src.scheduler import BotScheduler
     from src.invo.sim_ledger import SimLedger
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     sim = SimLedger(storage_dir="data_store")
     sim.reserve("SIG-EXP", "BTCUSDT", 10.0)
@@ -671,8 +677,8 @@ def test_expired_and_unresolved_preserved(monkeypatch, tmp_path):
 
 
 def test_terminal_release_survives_malformed_records(monkeypatch, tmp_path):
-    from src.scheduler import BotScheduler
     from src.invo.sim_ledger import SimLedger
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     sim = SimLedger(storage_dir="data_store")
     sim.reserve("SIG-OK", "BTCUSDT", 10.0)
@@ -687,8 +693,8 @@ def test_terminal_release_survives_malformed_records(monkeypatch, tmp_path):
 
 
 def test_terminal_release_idempotent(monkeypatch, tmp_path):
-    from src.scheduler import BotScheduler
     from src.invo.sim_ledger import SimLedger
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     sim = SimLedger(storage_dir="data_store")
     sim.reserve("SIG-1", "BTCUSDT", 10.0)
@@ -700,10 +706,10 @@ def test_terminal_release_idempotent(monkeypatch, tmp_path):
 def test_track_outcomes_wires_terminal_release(monkeypatch, tmp_path):
     """End-to-end through _track_outcomes with stubbed tracker/portfolio:
     natural terminal outcomes free the mirror; EXPIRED stays reserved."""
-    from src.scheduler import BotScheduler
-    from src.invo.sim_ledger import SimLedger
-    import src.tracking.outcome_tracker as _otmod
     import src.papertrade.portfolio as _ppmod
+    import src.tracking.outcome_tracker as _otmod
+    from src.invo.sim_ledger import SimLedger
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     sim = SimLedger(storage_dir="data_store")
     sim.reserve("SIG-WIN", "BTCUSDT", 10.0)
@@ -732,8 +738,8 @@ def test_track_outcomes_wires_terminal_release(monkeypatch, tmp_path):
 
 
 def test_scheduler_sync_gated_by_dry_run_and_apply(monkeypatch, tmp_path):
-    from src.scheduler import BotScheduler
     import src.invo.client as _mod
+    from src.scheduler import BotScheduler
     monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
     monkeypatch.setenv("INVO_PORTFOLIO_ID", "pid")
     monkeypatch.setenv("INVO_EMAIL", "e@x.com")
@@ -762,9 +768,10 @@ def test_share_success_records_sim_reservation(monkeypatch, tmp_path):
     """A posted share must mirror its sim commitment locally (observational).
     A failed share must leave no reservation behind."""
     from types import SimpleNamespace
-    from src.scheduler import BotScheduler
+
     import src.invo.client as _mod
     from src.invo.sim_ledger import SimLedger
+    from src.scheduler import BotScheduler
     monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
     monkeypatch.setenv("INVO_PAPER_DRY_RUN", "false")
     monkeypatch.setenv("INVO_PORTFOLIO_ID", "pid")
@@ -794,10 +801,11 @@ def test_share_success_records_sim_reservation(monkeypatch, tmp_path):
 
 def test_share_conflict_records_remote_commitment(monkeypatch, tmp_path):
     from types import SimpleNamespace
-    from src.scheduler import BotScheduler
+
     import src.invo.client as _mod
     from src.invo.client import InvoConflictError
     from src.invo.sim_ledger import SimLedger
+    from src.scheduler import BotScheduler
     monkeypatch.setenv("INVO_PAPER_ENABLED", "true")
     monkeypatch.setenv("INVO_PAPER_DRY_RUN", "false")
     monkeypatch.setenv("INVO_PORTFOLIO_ID", "pid")
@@ -824,8 +832,8 @@ def test_share_conflict_records_remote_commitment(monkeypatch, tmp_path):
 
 
 def test_audit_event_carries_prev_levels(monkeypatch, tmp_path):
-    from src.scheduler import BotScheduler
     from src.invo.sync_audit import read_audit
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     BotScheduler._audit("SIG-P", "modify", "confirmed",
                         {"proceed": True, "idempotency_key": "key1234567890",
@@ -950,8 +958,9 @@ def _seed_sync_state(tmp_path):
 
 def test_429_retry_after_honored_end_to_end(monkeypatch, tmp_path):
     import requests
-    from src.scheduler import BotScheduler
+
     from src.invo import exit_sync as _sync
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     _seed_sync_state(tmp_path)
     sched = BotScheduler.__new__(BotScheduler)
@@ -976,9 +985,9 @@ def test_429_retry_after_honored_end_to_end(monkeypatch, tmp_path):
 
 
 def test_locked_sync_applies_and_is_idempotent(monkeypatch, tmp_path):
-    from src.scheduler import BotScheduler
     from src.invo import exit_sync as _sync
     from src.invo.sync_audit import read_audit
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     _seed_sync_state(tmp_path)
     sched = BotScheduler.__new__(BotScheduler)
@@ -1125,6 +1134,7 @@ def _seed_prior_share(tmp_path, final):
     import json as _json
     import os as _os
     import time as _time
+
     from src.invo.client import record_share
     _os.makedirs(tmp_path / "data_store", exist_ok=True)
     with open(tmp_path / "data_store" / "outcomes.json", "w",
@@ -1137,8 +1147,8 @@ def _seed_prior_share(tmp_path, final):
 
 
 def _run_share(monkeypatch, tmp_path, client, signals):
-    from src.scheduler import BotScheduler
     from src.invo import client as _client_mod
+    from src.scheduler import BotScheduler
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(_client_mod, "InvoClient",
                         lambda *a, **k: client)
