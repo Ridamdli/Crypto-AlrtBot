@@ -10,7 +10,6 @@ shortcut: detects create/delete/size/mtime change only — a same-size rewrite
 inside one filesystem mtime tick would slip; switch to content hashing if
 that ever matters.
 """
-import os
 from pathlib import Path
 
 import pytest
