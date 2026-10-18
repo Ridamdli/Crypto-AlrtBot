@@ -33,13 +33,13 @@ def _signal(ts_ms, entry=100.0, sl=97.0, tp1=103.0, tp2=106.0, tp3=109.0, side="
     }
 
 
-def test_tp1_hit_is_tracked_and_final():
+def test_tp1_hit_is_tracked_and_final(tmp_path):
     t0 = int(time.time() * 1000) - 3 * 3600 * 1000  # 3h ago -> 12 bars elapsed
     rows = [
         _raw_row(t0 + 900000, 99.0, 101.0, 98.5, 100.0),    # touches entry 100
         _raw_row(t0 + 1800000, 100.0, 103.5, 99.5, 102.0),  # hits TP 103
     ]
-    tr = OutcomeTracker(client=StubClient(rows))
+    tr = OutcomeTracker(client=StubClient(rows), storage_dir=str(tmp_path))
     ledger = {}
     rec = tr.track_signal(_signal(t0), ledger)
     assert rec["tp1_hit"] is True
@@ -49,17 +49,17 @@ def test_tp1_hit_is_tracked_and_final():
     assert ledger["SIG-TEST-1"]["net_realized_r"] == rec["net_realized_r"]
 
 
-def test_stop_out_is_terminal():
+def test_stop_out_is_terminal(tmp_path):
     t0 = 1700000000000
     rows = [_raw_row(t0 + 900000, 99.0, 100.5, 96.0, 98.0)]  # entry then SL 97
-    tr = OutcomeTracker(client=StubClient(rows))
+    tr = OutcomeTracker(client=StubClient(rows), storage_dir=str(tmp_path))
     rec = tr.track_signal(_signal(t0), {})
     assert rec["sl_hit"] is True
     assert rec["status"] == "STOPPED_OUT"
     assert rec["final"] is True
 
 
-def test_young_signal_without_entry_is_never_finalized_early():
+def test_young_signal_without_entry_is_never_finalized_early(tmp_path):
     now_ms = int(time.time() * 1000)
     t0 = now_ms - 30 * 60 * 1000  # 30 min ago -> ~2 bars elapsed
     rows = [
@@ -67,7 +67,7 @@ def test_young_signal_without_entry_is_never_finalized_early():
         _raw_row(t0 + 1800000, 105.5, 106.5, 104.5, 106.0),
         _raw_row(t0 + 2700000, 106.0, 107.0, 105.0, 106.5),
     ]
-    tr = OutcomeTracker(client=StubClient(rows))
+    tr = OutcomeTracker(client=StubClient(rows), storage_dir=str(tmp_path))
     rec = tr.track_signal(_signal(t0), {})
     assert rec["entry_triggered"] is False
     assert rec["final"] is False  # only 3 future bars < max_entry_bars=6
@@ -142,12 +142,12 @@ def test_holding_timer_final_and_open():
     assert empty["holding_time"] is None
 
 
-def test_tracked_record_carries_holding_fields():
+def test_tracked_record_carries_holding_fields(tmp_path):
     t0 = int(__import__("time").time() * 1000) - 3 * 3600 * 1000
     rows = [
         _raw_row(t0 + 900000, 99.0, 101.0, 98.5, 100.0),  # entry only, TP untouched
     ]
-    tr = OutcomeTracker(client=StubClient(rows))
+    tr = OutcomeTracker(client=StubClient(rows), storage_dir=str(tmp_path))
     rec = tr.track_signal(_signal(t0), {})
     assert rec["holding_minutes"] is not None
     assert "(open)" in rec["holding_time"]

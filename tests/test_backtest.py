@@ -85,11 +85,15 @@ class TestReplayHarness:
       3. No future data is used (end_time parameter is forwarded)
     """
 
+    @pytest.fixture(autouse=True)
+    def _tmp_dir(self, tmp_path):
+        self._tmp_dir = tmp_path
+
     def _build_harness_with_mock_pipeline(self, signals_to_return):
         """Creates a ReplayHarness whose pipeline is replaced by a deterministic mock."""
         mock_pipeline = MagicMock()
         mock_pipeline.run_pipeline.return_value = signals_to_return
-        harness = ReplayHarness(storage_dir="data_store/test_replay")
+        harness = ReplayHarness(storage_dir=str(self._tmp_dir / "test_replay"))
         harness.pipeline = mock_pipeline
         return harness, mock_pipeline
 
@@ -816,11 +820,16 @@ class TestSignalLifecycle:
 class TestSchedulerDuplicatePrevention:
     """Tests for BotScheduler duplicate suppression logic (no network required)."""
 
+    @pytest.fixture(autouse=True)
+    def _tmp_dir(self, tmp_path):
+        self._tmp_dir = tmp_path
+
     def _scheduler(self, cooldown_hours=6.0):
         with patch("src.scheduler.SignalPipeline"), \
              patch("src.scheduler.TelegramBot"), \
              patch("src.scheduler.SignalPersistence"):
-            sched = BotScheduler(cooldown_hours=cooldown_hours, state_file="data_store/test_state.json")
+            sched = BotScheduler(cooldown_hours=cooldown_hours,
+                                 state_file=str(self._tmp_dir / "test_state.json"))
         return sched
 
     def test_duplicate_within_cooldown_is_suppressed(self):
