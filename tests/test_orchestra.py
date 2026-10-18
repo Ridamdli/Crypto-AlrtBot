@@ -148,3 +148,41 @@ def test_pipeline_trend_adds_full_momentum_credit():
         stripped = {k: v for k, v in s.items() if k != "price_trend"}
         assert (pipe.scoring_engine.score_candidate(s, _CONFIG)
                 - pipe.scoring_engine.score_candidate(stripped, _CONFIG)) == 8
+
+
+def _parser():
+    from src.pipeline import SignalPipeline
+    return SignalPipeline.__new__(SignalPipeline)._parse_as_of_time.__get__(
+        SignalPipeline.__new__(SignalPipeline), SignalPipeline)
+
+
+def test_parse_as_of_time_none_uses_now():
+    ts_ms, iso = _parser()(None)
+    assert ts_ms is None and iso.endswith("Z")
+
+
+def test_parse_as_of_time_int_seconds_and_ms():
+    ts_ms, iso = _parser()(1_783_468_800)
+    assert ts_ms == 1_783_468_800_000 and iso == "2026-07-08T00:00:00Z"
+    ts_ms, iso = _parser()(1_783_468_800_000)
+    assert ts_ms == 1_783_468_800_000 and iso == "2026-07-08T00:00:00Z"
+
+
+def test_parse_as_of_time_datetime_naive_and_aware():
+    import datetime
+    naive = datetime.datetime(2026, 10, 1, 12, 0, 0)
+    ts_ms, iso = _parser()(naive)
+    assert ts_ms == 1_790_856_000_000 and iso == "2026-10-01T12:00:00Z"
+    aware = naive.replace(tzinfo=datetime.timezone.utc)
+    assert _parser()(aware) == (ts_ms, iso)
+
+
+def test_parse_as_of_time_iso_string():
+    ts_ms, iso = _parser()("2026-10-01T12:00:00Z")
+    assert ts_ms == 1_790_856_000_000 and iso == "2026-10-01T12:00:00Z"
+
+
+def test_parse_as_of_time_unsupported_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        _parser()(object())

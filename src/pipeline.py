@@ -104,40 +104,6 @@ class SignalPipeline:
         # Initialize strategy instances per symbol (cached)
         self._strategy_cache: Dict[str, Dict[str, Any]] = {}
 
-    def _parse_as_of_time(
-        self, as_of_time: Optional[Union[int, str, datetime]]
-    ) -> tuple[Optional[int], str]:
-        """
-        Parses as_of_time into (timestamp_ms, iso_str).
-        If as_of_time is None, returns (None, current_utc_iso).
-        """
-        if as_of_time is None:
-            now = datetime.now(timezone.utc)
-            return None, now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        if isinstance(as_of_time, int):
-            # assume milliseconds if > 1e11, else seconds
-            ts_ms = as_of_time if as_of_time > 100_000_000_000 else as_of_time * 1000
-            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
-            return ts_ms, dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        if isinstance(as_of_time, datetime):
-            if as_of_time.tzinfo is None:
-                as_of_time = as_of_time.replace(tzinfo=timezone.utc)
-            ts_ms = int(as_of_time.timestamp() * 1000)
-            return ts_ms, dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        if isinstance(as_of_time, str):
-            # Parse ISO string
-            cleaned = as_of_time.replace("Z", "+00:00")
-            dt = datetime.fromisoformat(cleaned)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            ts_ms = int(dt.timestamp() * 1000)
-            return ts_ms, dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        raise ValueError(f"Unsupported as_of_time type: {type(as_of_time)}")
-
     def _get_strategy_instance(self, symbol: str, strategy_family: str, strategy_config: Dict[str, Any]) -> Any:
         """Get or create a strategy instance for a symbol."""
         cache_key = f"{symbol}:{strategy_family}"
@@ -197,7 +163,7 @@ class SignalPipeline:
             if as_of_time.tzinfo is None:
                 as_of_time = as_of_time.replace(tzinfo=timezone.utc)
             ts_ms = int(as_of_time.timestamp() * 1000)
-            return ts_ms, dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            return ts_ms, as_of_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         if isinstance(as_of_time, str):
             # Parse ISO string
