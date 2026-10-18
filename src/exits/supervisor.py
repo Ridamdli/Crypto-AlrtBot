@@ -371,7 +371,13 @@ class ExitSupervisor:
         else:  # REDUCE_PAPER_POSITION — plan levels unchanged; exposure event recorded
             new_plan = ExitPlan(view.signal_id, nxt, plan.stop_loss,
                                 plan.tp, now_ms, "")
-        key = decision_key(view.signal_id, plan.version, ctx.data_ts_ms, action, proposal)
+        # Hash the same clean parameters _finish uses for the decision key:
+        # private "_" fields (notably the stashed _decision_key) must not
+        # enter EITHER hash, or plan lineage (basis_decision_key) can never
+        # match any persisted decision_key.
+        clean_proposal = {k: v for k, v in proposal.items()
+                          if not str(k).startswith("_")}
+        key = decision_key(view.signal_id, plan.version, ctx.data_ts_ms, action, clean_proposal)
         new_plan = ExitPlan(new_plan.signal_id, new_plan.version, new_plan.stop_loss,
                             new_plan.tp,
                             new_plan.decided_at_ms, key)

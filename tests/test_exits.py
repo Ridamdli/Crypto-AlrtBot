@@ -404,6 +404,42 @@ def test_decision_key_collides_only_on_identical_inputs():
     assert k1 != decision_key("A", 0, 11, "FLAG_CONFLICT", {})
 
 
+def test_applied_adjustment_basis_matches_decision_key():
+    """Lineage: an applied plan's basis key must equal its decision's key,
+    so plan→decision correlation joins on stored keys."""
+    closes = [100.0] * 24 + [99.4, 99.0, 99.2, 99.5, 99.6, 99.5]
+    kl = bars(closes, lo_pad=0.05, hi_pad=0.05)
+    s = sig("LONG", entry=100.0, sl=98.0)
+    d = _decide(s, kl, PositionState.OPEN)
+    assert d.action == ExitAction.TIGHTEN_STOP.value
+    assert d.plan_after["basis_decision_key"] == d.decision_key
+
+
+def test_fixed_key_matches_pre_fix_clean_key():
+    """The fix changes only correlation metadata: the persisted decision
+    key must equal the key computed from clean params (the pre-fix
+    _finish behavior), i.e. deduplication identity is unchanged."""
+    closes = [100.0] * 24 + [99.4, 99.0, 99.2, 99.5, 99.6, 99.5]
+    kl = bars(closes, lo_pad=0.05, hi_pad=0.05)
+    s = sig("LONG", entry=100.0, sl=98.0)
+    d = _decide(s, kl, PositionState.OPEN)
+    expected = decision_key(s["signal_id"], 0, d.data_ts_ms,
+                            ExitAction.TIGHTEN_STOP.value,
+                            {"stop_loss": d.plan_after["stop_loss"]})
+    assert d.decision_key == expected
+    assert d.plan_after["basis_decision_key"] == expected
+
+
+def test_distinct_proposals_distinct_basis_keys():
+    closes = [100.0] * 24 + [99.4, 99.0, 99.2, 99.5, 99.6, 99.5]
+    kl = bars(closes, lo_pad=0.05, hi_pad=0.05)
+    s = sig("LONG", entry=100.0, sl=98.0)
+    d = _decide(s, kl, PositionState.OPEN)
+    other = decision_key(s["signal_id"], 0, d.data_ts_ms,
+                         ExitAction.TIGHTEN_STOP.value, {"stop_loss": 97.5})
+    assert other != d.plan_after["basis_decision_key"]
+
+
 # ── §7: guard idempotency/ordering + classification ───────────────
 def test_guard_duplicate_and_stale_rejected():
     g = RiskGuard(ExitConfig())
