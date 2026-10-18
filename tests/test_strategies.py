@@ -665,6 +665,77 @@ class TestMomentumATRStopLevels:
         assert out["position_size"] == pytest.approx(round(10.0 / risk, 4))
 
 
+class TestMomentumStructuralSLNoLookahead:
+    """The structural-SL lookback must use completed candles only.
+
+    The forming candle's high/low are not printed history; including
+    them let an in-progress wick drag a LONG stop down (or lift a SHORT
+    stop up) on data that can still change. Fixed at momentum.py:151/:203
+    to mirror _get_recent_extremes' -(n+1):-1 window. ATR and volume
+    filters off to isolate the structural branch.
+    """
+
+    def test_long_forming_candle_low_excluded(self):
+        strategy = MomentumFilterStrategy(
+            {"params": {"atr_filter": False, "volume_filter": False,
+                        "trend_filter": False}}, "ETHUSDT")
+        closes = [100.0 + 0.3 * i for i in range(24)] + [107.5]
+        klines = []
+        prev = float(closes[0])
+        for i, c in enumerate(closes):
+            c = float(c)
+            if i == len(closes) - 1:
+                # Forming candle dips to 99.0 — not printed history.
+                klines.append({"timestamp": 1700000000000 + i * 900000,
+                               "open": prev, "high": 107.7, "low": 99.0,
+                               "close": c, "volume": 1000.0})
+            else:
+                klines.append({"timestamp": 1700000000000 + i * 900000,
+                               "open": prev, "high": max(prev, c) + 0.2,
+                               "low": min(prev, c) - 0.2, "close": c,
+                               "volume": 1000.0})
+            prev = c
+        cands = [c for c in _gen(strategy, klines, closes[-1])
+                 if c.side == "LONG"]
+        assert len(cands) == 1
+        cd = cands[0]
+        # lowest (printed window) = low of candle 4 = 100.7; the fixed
+        # lookback window (rows 14..23) never sees the 99.0 wick.
+        assert cd.stop_loss == pytest.approx(100.5993, abs=1e-6)
+        assert cd.stop_loss > 99.0  # buggy window would yield 98.901
+        assert cd.stop_loss < cd.entry_price
+
+    def test_short_forming_candle_high_excluded(self):
+        strategy = MomentumFilterStrategy(
+            {"params": {"atr_filter": False, "volume_filter": False,
+                        "trend_filter": False}}, "ETHUSDT")
+        closes = [100.0 - 0.3 * i for i in range(24)] + [92.8]
+        klines = []
+        prev = float(closes[0])
+        for i, c in enumerate(closes):
+            c = float(c)
+            if i == len(closes) - 1:
+                # Forming candle spikes to 103.0 — not printed history.
+                klines.append({"timestamp": 1700000000000 + i * 900000,
+                               "open": prev, "high": 103.0, "low": 92.6,
+                               "close": c, "volume": 1000.0})
+            else:
+                klines.append({"timestamp": 1700000000000 + i * 900000,
+                               "open": prev, "high": max(prev, c) + 0.2,
+                               "low": min(prev, c) - 0.2, "close": c,
+                               "volume": 1000.0})
+            prev = c
+        cands = [c for c in _gen(strategy, klines, closes[-1])
+                 if c.side == "SHORT"]
+        assert len(cands) == 1
+        cd = cands[0]
+        # highest (printed window) = 99.3; the fixed lookback window
+        # (rows 14..23) never sees the 103.0 wick.
+        assert cd.stop_loss == pytest.approx(99.3993, abs=1e-6)
+        assert cd.stop_loss < 103.0  # buggy window would yield 103.103
+        assert cd.stop_loss > cd.entry_price
+
+
 class TestVolumeBreakoutATRStopLevels:
     """ATR stop must compare price-to-price (Donchian pattern).
 
