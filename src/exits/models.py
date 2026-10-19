@@ -194,6 +194,11 @@ class SupervisorDecision:
     code_version: str = EXITS_CODE_VERSION
     decided_at_ms: int = 0
     data_ts_ms: int = 0
+    # Set by ExitDecisionLedger.record() — whether the plan/event side effects
+    # were applied, and when. None on legacy rows written before this field
+    # existed (apply status unknown).
+    applied: bool | None = None
+    applied_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -210,4 +215,6 @@ class SupervisorDecision:
             "code_version": self.code_version,
             "decided_at_ms": self.decided_at_ms,
             "data_ts_ms": self.data_ts_ms,
+            "applied": self.applied,
+            "applied_at": self.applied_at,
         }

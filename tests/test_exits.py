@@ -580,6 +580,35 @@ def test_legacy_file_backfills_keys_without_rewrite(tmp_path):
     assert {"K-old1", "K-old2"} <= set(led.seen_keys())
 
 
+def test_ledger_persists_applied_flag(tmp_path):
+    """R: audit must distinguish applied vs advisory decisions."""
+    led = ExitDecisionLedger(storage_dir=str(tmp_path))
+    led.record(_pin_decision("S", "K-applied"), apply=True)
+    led.record(_pin_decision("S", "K-advisory"), apply=False)
+    applied, advisory = led.decisions_for("S")
+    assert applied["applied"] is True
+    assert applied["applied_at"] and "T" in applied["applied_at"]
+    assert advisory["applied"] is False
+    assert advisory["applied_at"] is None
+    led2 = ExitDecisionLedger(storage_dir=str(tmp_path))  # survives restart
+    assert led2.decisions_for("S")[0]["applied"] is True
+
+
+def test_legacy_rows_without_applied_read_as_unknown(tmp_path):
+    """Rows written before the field existed must not crash or lie."""
+    path = os.path.join(str(tmp_path), "exit_decisions.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"version": 1,
+                   "decisions": [{"signal_id": "S", "action": "NO_CHANGE",
+                                  "decision_key": "K-old"}],
+                   "plans": {}, "events": {}, "invalidated": [],
+                   "last_eval": {}}, f)
+    led = ExitDecisionLedger(storage_dir=str(tmp_path))
+    rec = led.decisions_for("S")[0]
+    assert rec.get("applied") is None
+    assert rec.get("applied_at") is None
+
+
 def test_corrupt_file_keys_fail_safe_empty(tmp_path):
     p = os.path.join(str(tmp_path), "exit_decisions.json")
     with open(p, "w", encoding="utf-8") as f:

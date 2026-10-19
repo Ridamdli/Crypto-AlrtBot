@@ -20,6 +20,7 @@ changes (fail safe) while still allowing record-only decisions.
 """
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 from src.exits.models import ExitPlan, SupervisorDecision
@@ -142,8 +143,12 @@ class ExitDecisionLedger:
         apply=False (monitor-only): the decision is recorded for audit, the
         active plan is untouched. apply=True additionally stores plan_after,
         overlay events, and invalidation flags — all still paper-side only.
+        Either way the row carries `applied` and (only when applied) an
+        `applied_at` ISO timestamp, so advisory vs applied is auditable.
         Returns True if the ledger write succeeded.
         """
+        decision.applied = apply
+        decision.applied_at = datetime.now(timezone.utc).isoformat() if apply else None
         self._state["decisions"].append(decision.to_dict())
         self._state["decisions"] = self._state["decisions"][-self.max_decisions:]
         # Idempotency outlives the capped audit list: retain every recorded
