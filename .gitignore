@@ -26,6 +26,9 @@ mirror_data/
 *.sqlite-wal
 *.sqlite-shm
 
+# Production evidence (pulled read-only from Railway, never committed)
+prod_evidence/
+
 # Reports (generated - keep source docs)
 reports/*.json
 reports/*.md
