@@ -202,6 +202,12 @@ That file is read at the start of the next session.
   scope, hypotheses and post-window decision tree: `reports/OBSERVATION_PROTOCOL_2026-10.md`,
   `reports/PRE_REGISTERED_HYPOTHESES_2026-10.md`. No mid-window policy change — no gate, filter,
   strategy or exit tuning until it closes; decide from the tree, not from the latest print.
+- **Graph freeze until the window ends (2026-11-21).** No rebuilds. Current graph — 3,006 nodes /
+  7,930 edges / 148 communities / 71 curated labels — is frozen as-is. Rationale: each rebuild on a
+  drifted community set drops more labels (measured 120 → 83 → 71), `graphify label` is billed and
+  rejected, and 71 names still serve queries. The graph lags the tree by the C-series docs; that is
+  accepted. Post-window rebuild **must** carry an explicit label strategy: hand-label the top 30
+  communities, or operator-authorized `graphify label`, or accept the degradation deliberately.
 - RSI + `ema_trend` retired. BTC = momentum-only, ADA = volume_breakout-only.
 - Phase 04 (entry redesign) is the next major workstream — options spec in
   `reports/PHASE_04_ENTRY_REDESIGN_SPEC.md` (written; no option chosen).
