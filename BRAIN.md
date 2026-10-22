@@ -197,12 +197,14 @@ That file is read at the start of the next session.
 - **BTC coverage watch (standing rule):** BTC produces ~1 signal / 11 days. If a 30-day scan
   produces **< 3** BTC signals, Phase 04 must address BTC coverage explicitly.
 - `p3_shadow` writes `data_store/p3_shadow.jsonl` (main-service volume, survives deploys).
-- Production runs pre-`49ff810` code. 37 local commits await deploy; plan split into Wave 1
-  (safety/correctness), Wave 2 (P2 + P3 shadow), Hold (entry selection) in
-  `reports/DEPLOY_READINESS.md`. Railway auth expired — running revision unconfirmed.
-- Deploy is blocked on operator authorization; nothing ships automatically.
-- W6 delivery is at-least-once: the queue replays byte-identical `clientTxId`s, so safety
-  depends on Invo deduping server-side (unproven from the repo).
+- **Deployment policy (standing): no deploy until Phase 04 completes AND the operator
+  explicitly authorizes a deploy event.** `reports/DEPLOY_READINESS.md` (Wave 1 /
+  Wave 2 / Hold) is a **future plan, not an imminent execution**. The open input is
+  Phase 04 direction, not deploy authorization.
+- Production runs pre-`49ff810` code; 37 local commits are held. Railway auth expired —
+  running revision unconfirmed.
+- W6 delivery is at-least-once: the queue replays byte-identical `clientTxId`s (64-bit
+  since `5fcc4e6`), so safety depends on Invo deduping server-side (unproven from the repo).
 - `EXITS_APPLY=true` on Railway; local stays false in fixtures.
 - `MIMIC_LIVE=true` on Railway; $16 real money.
 - Statistical caveat: 11 days / 204 entry signals, 5.1 days / 97 exit signals, one regime.
