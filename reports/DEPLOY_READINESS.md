@@ -1,8 +1,8 @@
 # Deploy Readiness — Waves 1 and 2
 
-**This document authorizes nothing.** No deploy, no production write, and no
-Railway read has been performed. Every step runs only on explicit operator
-authorization.
+**Future deploy plan. Execution is blocked until Phase 04 completes AND the
+operator explicitly authorizes a deploy event.** No deploy, no production write,
+and no Railway read has been performed.
 
 **Evidence base for every claim below:** 11 days (2026-10-08 → 2026-10-19), 204
 entry signals, one regime (bearish 157 / neutral 47), UNIUSDT-dominated exit
@@ -128,11 +128,11 @@ a uniqueness constraint, and no code or doc shows Invo rejecting a duplicate. A
 read-only check of the API can't resolve it either — it needs a deliberate
 duplicate submission.
 
-**Finding 4 — id space is 32 bits.** `uuid4().hex[:8]`. Collision probability is
-~4.7 × 10⁻⁶ at 200 records and ~1.2% at 10,000. A collision would make two
-distinct fills carry the same id; if Invo dedupes, the second is silently
-dropped. Low severity at current volume, rising with age. The main bot's
-`build_position_payload` uses a full UUID (128-bit), so this is mirror-only.
+**Finding 4 — id space (client side, resolved).** It was 32-bit
+(`uuid4().hex[:8]`): ~1.2% collision at 10,000 records. Both open and close now
+use `hex[:16]` (64-bit), lowering that to ~2.7 × 10⁻¹¹. Old queued and recorded
+ids keep their original width; no migration. The main bot already used a full
+UUID, so this was mirror-only.
 
 **Verdict:** retries send byte-identical ids. **Retries are safe only if Invo
 dedupes on `clientTxId`** — which remains unconfirmed. Mitigation until
@@ -142,10 +142,10 @@ confirmed:
 2. If duplicates appear, do not patch the recorder blind. A reconcile pass that
    queries Invo for the id and skips existing records is the fix; propose it
    before writing it.
-3. Widening the id to `hex[:16]` is a one-line change — **not made**, because it
-   requires operator approval and would not fix missing server dedup anyway.
+3. The client-side collision risk is **fixed** (`hex[:16]`). It does not fix
+   missing server dedup; that remains external and must be confirmed before W6.
 
-**No code change has been made for this finding.**
+**No change to the delivery or retry mechanism has been made.** Only the id width.
 
 ---
 
@@ -176,8 +176,9 @@ All are operator actions; none has been performed.
    `no trading session (refresh failed)` on every attempt.
 4. **Confirm Invo dedup on `clientTxId`** (§4). One deliberate duplicate
    submission of a harmless record settles it.
-5. **Authorize the wave.** Wave 1 and Wave 2 may ship together or in sequence;
-   the mirror may ship independently of both.
+5. **Authorize the deploy event** — only after Phase 04 completes and the
+   standing deploy policy is lifted. Wave 1 and Wave 2 may then ship together or
+   in sequence; the mirror may ship independently of both.
 
 Env vars: **Wave 1 mirror** — `INVO_TRADING_REFRESH` (required),
 `INVO_TRADING_TOKEN` (optional). **Wave 1 main** — no new variables.
@@ -274,12 +275,14 @@ the outcome ledger is written by the evaluator, not this change set.
 
 ---
 
-## 9. Authorization
+## 9. Status and authorization
 
+- **Standing deploy policy: no deploy until Phase 04 completes AND the operator
+  explicitly authorizes a deploy event.** This document is a future plan, not an
+  imminent execution.
 - Nothing here has been deployed, run against production, or pushed. All commits
   are local.
-- The deploy strategy is the operator's open decision: (a) now, (b) after
-  Phase 04, (c) partial.
 - Wave 1 and Wave 2 are separable; the mirror is separable from both.
 - Railway reads remain blocked until `railway login` is refreshed, so the running
   main-service revision cannot be confirmed before then.
+- The open input is **Phase 04 direction**, not deploy authorization.
