@@ -33,6 +33,8 @@ prod_evidence/
 reports/*.json
 reports/*.md
 !reports/README.md
+!reports/DEPLOY_READINESS.md
+!reports/GRAPHIFY_BRAIN_SETUP.md
 
 # Graphify knowledge graph (generated, regenerable)
 graphify-out/
