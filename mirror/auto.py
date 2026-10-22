@@ -124,7 +124,7 @@ def build_record_open(ev: Dict[str, Any], coin: str, asset_index: int,
                       nonce_ms: int) -> Dict[str, Any]:
     """Invo copy record, field-for-field like the app's own confirm."""
     return {
-        "clientTxId": f"entry:{uuid.uuid4().hex[:8]}",
+        "clientTxId": f"entry:{uuid.uuid4().hex[:16]}",
         "coin": coin,
         "assetIndex": asset_index,
         "entry": {"side": side.lower(), "marginMode": "isolated",
@@ -723,7 +723,7 @@ class AutoBot:
             try:
                 meta = self.hl.meta().get(coin, {})
                 self.session.record_close({
-                    "clientTxId": f"close:{uuid.uuid4().hex[:8]}",
+                    "clientTxId": f"close:{uuid.uuid4().hex[:16]}",
                     "baseShortId": copies[coin].get("source") or coin,
                     "assetIndex": meta.get("assetIndex", 0),
                     "submission": {"hlOrder": fill.get("raw"),
