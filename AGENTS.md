@@ -5,9 +5,10 @@ navigation; this file covers the rules that must not be broken.
 
 ## 1. Test baseline
 
-- **607 collected / 0 failed / 0 skipped** (29 files, 601 `def test_*` + 6
+- **615 collected / 0 failed / 0 skipped** (30 files, 609 `def test_*` + 6
   parametrized expansions).
-- Derivation: 605 at `72bb525` + 2 (W9 `f62d9a1`, W10 `95db541`) = 607.
+- Derivation: 605 at `72bb525` + 2 (W9 `f62d9a1`, W10 `95db541`) + 8 (Phase 04A
+  harness) = 615.
 - Use `python -m pytest`. The `pytest` console script on PATH is Python 3.11 and
   fails collection.
 - Any deviation means code changed. Investigate; do not update the baseline to

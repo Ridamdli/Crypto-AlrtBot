@@ -42,7 +42,7 @@ $sp = "$env:APPDATA\uv\tools\graphifyy\Lib\site-packages\graphify"
 1. Read this file.
 2. Verify the MCP server: the 10-tool count above must be 10. If fewer, the `[mcp]` extra is gone —
    run the recovery in §0.
-3. Suite baseline: **607 collected / 0 failed / 0 skipped**. Verify:
+3. Suite baseline: **615 collected / 0 failed / 0 skipped**. Verify:
    ```powershell
    python -m pytest --collect-only -q | Select-String "^tests/" |
      ForEach-Object { [int]($_.Line.Split(":")[1]) } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
@@ -139,24 +139,27 @@ exact labels for classes/top-level functions, and `path::symbol` ids for methods
 4. **Community labels persist** across `cluster-only` and `update` (node-overlap remap, verified
    120/120 names kept). Only a from-scratch extract into a fresh directory loses them — never do
    that without backing up `graphify-out/.graphify_labels.json`.
-5. **Suite baseline is 607 / 0 / 0.** Any deviation means code changed — investigate before proceeding.
+5. **Suite baseline is 615 / 0 / 0.** Any deviation means code changed — investigate before proceeding.
 6. Dynamic dispatch generally (`getattr`, DI-registered handlers) is not bound by the AST pass.
    Grep is still correct for literals, error strings, and comments the extractor drops.
 
 ## 7. Test baseline (hard fact)
 
-`python -m pytest` → **607 collected, 0 failed, 0 skipped** — 29 files, 601 `def test_*` functions
-(424 top-level + 177 methods) + 6 parametrized expansions.
+`python -m pytest` → **615 collected, 0 failed, 0 skipped** — 30 files, 609 `def test_*` functions
+(432 top-level + 177 methods) + 6 parametrized expansions.
 
-Reconciliation: **605 at `72bb525`** (599 functions + 6) **+ 2 new tests = 607**.
+Reconciliation: **605 at `72bb525`** (599 functions + 6) **+ 2 (W9/W10) + 8 (Phase 04A
+harness) = 615**.
 
 | commit | test added |
 |---|---|
 | `f62d9a1` (W9) | `test_guard_p2_rejects_tp_widening_and_fails_closed` |
 | `95db541` (W10) | `test_p3_shadow_logs_without_changing_invalidation` |
+| Phase 04A | `tests/test_phase04a_harness.py` (8 tests: correlation math, proxy bounds, determinism) |
 
 The earlier "607 is a miscount" note was correct only for the pre-W9 tree at `72bb525`. It is
-superseded by this derivation: 605 + 2 = 607. From this commit on, **607 / 0 / 0** is the baseline.
+superseded by this derivation: 605 + 2 + 8 = 615. From this commit on, **615 / 0 / 0** is the
+baseline.
 
 Count it from the tree, not from a report:
 ```powershell
