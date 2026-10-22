@@ -70,3 +70,13 @@ navigation; this file covers the rules that must not be broken.
   touches.
 - New non-trivial logic leaves one small test or an assert-based self-check.
 - A known limitation gets a `shortcut:` comment with the upgrade trigger.
+
+## 7. Commit verification (mandatory)
+
+- After every work report that claims commits were made, the report **must end
+  with verbatim `git log --oneline -5` output**. A report that asserts "committed"
+  without that output has not verified anything.
+- Run it after the last commit, not from memory. If the tree is not clean, say so
+  in the same report — untracked files are the usual way claimed work turns out
+  to be missing.
+- Claimed commits that do not appear in that output are treated as work not done.
