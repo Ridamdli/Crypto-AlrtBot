@@ -208,6 +208,16 @@ That file is read at the start of the next session.
   rejected, and 71 names still serve queries. The graph lags the tree by the C-series docs; that is
   accepted. Post-window rebuild **must** carry an explicit label strategy: hand-label the top 30
   communities, or operator-authorized `graphify label`, or accept the degradation deliberately.
+- **Window monitoring schedule (active until 2026-11-21).**
+  - **Weekly report, every Sunday — 5 lines, no prompt required:** n (settled signals this week), mean net R,
+    median net R, top-5 concentration, triggers fired (yes/no, which).
+  - **Produce it autonomously** when the session does any work on a Sunday, or when the operator opens a session
+    after Sunday and that week's report has not been produced. Do not wait to be asked.
+  - **Immediate trigger alerts** — report at the next interaction, before other work:
+    (i) **bullish regime week** — 7-day BTC 4h regime = BULL → pause protocol per A4, flag the single-regime trap;
+    (ii) **5 consecutive trades with R > 2.0** → tail event, note it, change no decision;
+    (iii) **CI lower bound < 0 on the rolling 30-day** → strong-fail territory, escalate.
+  - On any trigger: report to the operator first. No action without authorization.
 - RSI + `ema_trend` retired. BTC = momentum-only, ADA = volume_breakout-only.
 - Phase 04 (entry redesign) is the next major workstream — options spec in
   `reports/PHASE_04_ENTRY_REDESIGN_SPEC.md` (written; no option chosen).
