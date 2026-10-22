@@ -72,9 +72,12 @@ def decision_key(
 class ExitSupervisor:
     SUPERVISOR_VERSION = "1.0.0"
 
-    def __init__(self, cfg: ExitConfig | None = None):
+    def __init__(self, cfg: ExitConfig | None = None,
+                 shadow_path: str | None = None):
         self.cfg = cfg or ExitConfig()
         self.guard = RiskGuard(self.cfg)
+        # P3 shadow log. None = off (replay and unit tests stay side-effect free).
+        self.shadow_path = shadow_path
 
     # ── main entry ──────────────────────────────────────────────────
     def decide(
@@ -110,6 +113,11 @@ class ExitSupervisor:
         # Rule 2 — safety second.
         if invalidated is not None:
             if view.state == PositionState.PENDING:
+                if self.shadow_path:
+                    from src.exits import p3_shadow
+                    p3_shadow.write(
+                        p3_shadow.evaluate(view, struct, counter),
+                        self.shadow_path)
                 return self._finish(
                     view, assessments, ctx, now_ms,
                     ExitAction.INVALIDATE_PENDING_SETUP.value,

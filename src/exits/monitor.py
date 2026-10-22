@@ -21,7 +21,7 @@ recorded as proposals for audit and for the offline candidate harness.
 from collections.abc import Callable
 from typing import Any
 
-from src.exits import policy
+from src.exits import p3_shadow, policy
 from src.exits.config import ExitConfig, load_exit_config
 from src.exits.ledger import ExitDecisionLedger
 from src.exits.models import (
@@ -62,7 +62,7 @@ class ExitMonitor:
             import os
             apply = os.getenv("EXITS_APPLY", "false").lower() == "true"
         self.apply = bool(apply)
-        self.supervisor = ExitSupervisor(self.cfg)
+        self.supervisor = ExitSupervisor(self.cfg, shadow_path=p3_shadow.DEFAULT_PATH)
         self._workers = [w() for w in ALL_WORKERS]
 
     @staticmethod

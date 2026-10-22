@@ -281,6 +281,28 @@ def test_structure_invalidates_pending_on_elapsed_window():
     assert a.proposed_action == ExitAction.INVALIDATE_PENDING_SETUP.value
 
 
+def test_p3_shadow_logs_without_changing_invalidation(tmp_path):
+    closes = [100.0] * 25 + [101.5, 102.0, 102.5, 102.2, 102.4]  # SHORT, SL 102
+    kl = bars(closes)
+    s = sig("SHORT", entry=100.0, sl=102.0, tp=98.0)
+    c = ctx_for(s, kl, state=PositionState.PENDING)
+    struct = StructureWorker().assess(c)
+    counter = CounterSignalWorker().assess(c)
+    path = tmp_path / "p3_shadow.jsonl"
+    sup = ExitSupervisor(ExitConfig(), shadow_path=str(path))
+    view = PositionView(s, None, PositionState.PENDING, ExitPlan.genesis(s), False)
+    d = sup.decide(view, [struct, counter], c, c.now_ms)
+    # P3 is shadow-only: the invalidation still applies as before.
+    assert d.action == ExitAction.INVALIDATE_PENDING_SETUP.value
+    import json
+    rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["structure_pass"] is True
+    assert rows[0]["counter_pass"] is False
+    assert rows[0]["verdict"] == "reject"
+    assert rows[0]["breach_margin_pct"] > 0
+
+
 def test_structure_spares_young_pending():
     kl = flat(30)
     now = policy.last_close_ts(kl, TF) + 1000
