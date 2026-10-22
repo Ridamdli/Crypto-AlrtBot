@@ -229,7 +229,11 @@ flowchart LR
 - **Mean-reversion is situational:** RSI or Bollinger mean-reversion signals can capture bounces, but often fail in strong trends. We list them as secondary for coins with clear oscillations. E.g., RSI-based trades may work on Doge or ZEC during quick reversals, but require tight stops.  
 - **Volatility tools are useful:** Bollinger/ATR and Donchian rules explicitly adapt to crypto volatility. In practice, using ATR-based stops is critical given erratic moves.  
 - **Regime filters matter:** For coins that follow BTC (ETH, UNI), conditioning on BTC/Ethereum regime (e.g. require BTC uptrend for long trades) can reduce false entries. Similarly, volume confirmations improve breakout reliability.  
-- **Data requirements:** All strategies use Binance USD-M futures OHLCV. OI (open interest) is mapped as unknown (not used directly), funding rates ignored or treated neutrally. All references and examples assume real historical candlesticks (no synthetic data).  
+- **Data requirements:** All strategies use Binance USD-M futures OHLCV. Open interest **is** consumed by the scorer
+  (15 of 100 points, `oi_data.status`), and funding **is** consumed (5 points, scaled by the funding penalty) —
+  neither is treated as neutral. All implemented families run on **15m** bars; the 1h/4h/1d timeframes named in the
+  per-coin tables below are research ideas, not what the system does. All references and examples assume real
+  historical candlesticks (no synthetic data).  
 
 # Recommendations (First 5 Experiments)  
 Based on this analysis, we should immediately run the core calibration studies with real data (no new strategy logic yet). The first five experiments in Colab should be:  

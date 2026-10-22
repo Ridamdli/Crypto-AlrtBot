@@ -40,7 +40,7 @@ Confidence scoring & ranking
 
 ```
 src/
-├── config.py                  # All thresholds in one place (versioned hash)
+├── config.py                  # Risk/volume/scoring config (versioned hash)
 ├── pipeline.py                # Main signal pipeline (run_pipeline)
 ├── scheduler.py               # 15m loop scheduler with duplicate prevention
 ├── main.py                    # Entry point
@@ -113,7 +113,8 @@ TELEGRAM_CHAT_ID=your_chat_id
 # BINANCE_API_KEY and BINANCE_SECRET are optional for public data endpoints
 ```
 
-All strategy thresholds live in [`src/config.py`](src/config.py).  
+Risk, volume, OI and scoring thresholds live in [`src/config.py`](src/config.py); per-family strategy parameters
+live in `src/strategies/*.py` (`default_params`) and are **not** part of the config hash.  
 The config is versioned via `AppConfig.compute_hash()` — every signal stores its configuration fingerprint.
 
 Key parameters:
@@ -375,12 +376,12 @@ print(tuner.compare_configurations(baseline_m, candidate_m))
 python -m pytest tests/ -v
 ```
 
-Current status: **158 tests, 0 failures**
+Current status: **620 tests, 0 failures** (30 files)
 
 ```
-tests/test_engines.py             —  33 tests  (core engine math)
+tests/test_engines.py             —  43 tests  (core engine math)
 tests/test_backtest.py            —  89 tests  (replay, evaluator, tuner, lifecycle, scheduler)
-tests/test_strategies.py          —  24 tests  (strategy families + registry)
+tests/test_strategies.py          —  39 tests  (strategy families + registry)
 tests/test_dataset_validation.py  —  12 tests  (dataset alignment, cache correctness, no-lookahead)
 ```
 
@@ -475,9 +476,9 @@ WAITING_FOR_ENTRY
     ↓
 ACTIVE
     ↓
-TP1_HIT → TP2_HIT → TP3_HIT   ← clean win
+TP1_HIT                         ← clean win (single TP, full position; no TP2/TP3 ladder)
     ↓
-STOPPED_OUT                     ← trailing stop hit on remainder
+STOPPED_OUT                     ← stop hit
 
 WAITING_FOR_ENTRY → EXPIRED
 WAITING_FOR_ENTRY → INVALIDATED
