@@ -35,6 +35,11 @@ reports/*.md
 !reports/README.md
 !reports/DEPLOY_READINESS.md
 !reports/GRAPHIFY_BRAIN_SETUP.md
+# Pre-registration record: must survive a clean checkout, or "do not modify
+# after 2026-10-22" cannot be verified.
+!reports/PRE_REGISTERED_HYPOTHESES_2026-10.md
+!reports/OBSERVATION_PROTOCOL_2026-10.md
+!reports/W_S_DEFECTS_BACKLOG.md
 
 # Graphify knowledge graph (generated, regenerable)
 graphify-out/
