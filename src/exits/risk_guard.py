@@ -19,6 +19,8 @@ Mandatory invariants (spec §D):
 10. This subsystem cannot execute real-money orders: this module imports
     only stdlib, typing, and exits models. A unit test scans src/exits for
     forbidden imports (requests, broker, order, execute).
+11. P2: a take profit may only move toward the current price. Widening is
+    rejected; an unavailable mark fails closed.
 
 A tighter stop raises premature-exit risk; that tradeoff is the Stop
 worker's documented concern and the supervisor's rationale — RiskGuard only
@@ -43,10 +45,11 @@ class RiskGuard:
         seen_keys: frozenset = frozenset(),
         last_data_ts_ms: int = 0,
         data_ts_ms: int = 0,
+        mark: float | None = None,
     ) -> tuple[bool, list[str]]:
         """Returns (ok, reasons). Reasons explain acceptance or every rejection."""
         reasons: list[str] = []
-        ok, why = self._check(proposal, view, action, seen_keys, last_data_ts_ms, data_ts_ms)
+        ok, why = self._check(proposal, view, action, seen_keys, last_data_ts_ms, data_ts_ms, mark)
         reasons.extend(why)
         return ok, reasons
 
@@ -59,6 +62,7 @@ class RiskGuard:
         seen_keys: frozenset,
         last_data_ts_ms: int,
         data_ts_ms: int,
+        mark: float | None = None,
     ) -> tuple[bool, list[str]]:
         sig = view.signal
         plan = view.plan
@@ -86,7 +90,7 @@ class RiskGuard:
         if action == ExitAction.TIGHTEN_STOP.value:
             return self._check_tighten(proposal, view, side, entry, plan)
         if action == ExitAction.ADJUST_TAKE_PROFITS.value:
-            return self._check_targets(proposal, view, side, entry, plan)
+            return self._check_targets(proposal, view, side, entry, plan, mark)
         if action in (ExitAction.REDUCE_PAPER_POSITION.value,
                       ExitAction.CLOSE_PAPER_POSITION.value,
                       ExitAction.INVALIDATE_PENDING_SETUP.value,
@@ -133,6 +137,7 @@ class RiskGuard:
     def _check_targets(
         self, proposal: dict[str, Any], view: PositionView,
         side: str, entry: float, plan: ExitPlan,
+        mark: float | None = None,
     ) -> tuple[bool, list[str]]:
         reasons: list[str] = []
         if view.state not in (PositionState.OPEN, PositionState.PARTIAL):
@@ -152,6 +157,18 @@ class RiskGuard:
                 return False, ["SHORT target must satisfy entry > tp"]
         else:
             return False, [f"unknown side {side}"]
+        # P2: a target may only move toward the current price. Widening
+        # re-opens a capped win and raises the move needed to book the same
+        # R. Fail closed when the mark is unavailable.
+        if mark is None or not (mark > 0 and mark == mark and abs(mark) != float("inf")):
+            return False, ["TP_WIDEN_REJECTED: mark unavailable (fail closed)"]
+        s = 1.0 if side == "LONG" else -1.0
+        if s * (plan.tp - mark) < 0 or s * (tp - mark) < 0:
+            return False, [
+                f"TP_WIDEN_REJECTED: target {tp} is on the loss side of mark {mark}"]
+        if abs(tp - mark) > abs(plan.tp - mark):
+            return False, [
+                f"TP_WIDEN_REJECTED: target {plan.tp} -> {tp} moves away from mark {mark}"]
         # Invariant 6/7: re-check economics with real costs, measured from
         # ENTRY (a target's worth is entry-framed; ref-price framing is what
         # workers report for remaining potential, not the acceptance gate).

@@ -201,7 +201,7 @@ class ExitSupervisor:
             ok, reasons = self.guard.validate(
                 view, action, proposal,
                 seen_keys=seen_keys, last_data_ts_ms=last_data_ts_ms,
-                data_ts_ms=ctx.data_ts_ms,
+                data_ts_ms=ctx.data_ts_ms, mark=ctx.last_close,
             )
             if ok:
                 return self._apply_adjustment(view, assessments, ctx, now_ms, worker, action, proposal, reasons)

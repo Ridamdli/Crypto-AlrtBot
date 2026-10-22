@@ -238,6 +238,29 @@ def test_guard_rejects_bad_targets():
     assert not ok
 
 
+def test_guard_p2_rejects_tp_widening_and_fails_closed():
+    g = RiskGuard(ExitConfig())
+    s = sig("LONG", entry=100.0, sl=99.0, tp=102.0)
+    view = PositionView(s, None, PositionState.OPEN, ExitPlan.genesis(s), False)
+    # P2: 102 -> 103 moves the target away from the mark.
+    ok, reasons = g.validate(view, "ADJUST_TAKE_PROFITS",
+                             {"tp": 103.0}, mark=100.5)
+    assert not ok and any("TP_WIDEN_REJECTED" in r for r in reasons)
+    # Toward the mark still passes.
+    ok, reasons = g.validate(view, "ADJUST_TAKE_PROFITS",
+                             {"tp": 101.0}, mark=100.5)
+    assert ok, reasons
+    # No mark -> fail closed, not a silent pass.
+    ok, reasons = g.validate(view, "ADJUST_TAKE_PROFITS", {"tp": 101.0})
+    assert not ok and any("TP_WIDEN_REJECTED" in r for r in reasons)
+    # SHORT: lowering the target is a widening.
+    s2 = sig("SHORT", entry=100.0, sl=101.0, tp=98.0)
+    view2 = PositionView(s2, None, PositionState.OPEN, ExitPlan.genesis(s2), False)
+    ok, reasons = g.validate(view2, "ADJUST_TAKE_PROFITS",
+                             {"tp": 97.0}, mark=99.5)
+    assert not ok and any("TP_WIDEN_REJECTED" in r for r in reasons)
+
+
 # ── §7: invalidation (genuine) vs opposition ──────────────────────
 def test_structure_invalidates_on_stop_breach_open():
     closes = [100.0] * 25 + [101.5, 102.0, 102.5, 102.2, 102.4]  # SHORT, SL 102
@@ -1018,7 +1041,7 @@ def test_gate_merge_keeps_hit_tp():
     plan = ExitPlan.genesis(s)
     oc = {"tp1_hit": True}
     c = _ctx_with_plan(s, kl, plan, PositionState.OPEN, outcome=oc, cfg=cfg)
-    prop = {"tp": 102.6}
+    prop = {"tp": 101.0}
     w = WorkerAssessment("target", "1.0.0", c.now_ms, c.data_ts_ms,
                          "TARGETS_UNREALISTIC", proposed_action="ADJUST_TAKE_PROFITS",
                          proposal=dict(prop), evidence_quality=0.9)
@@ -1037,7 +1060,7 @@ def test_gate_merge_keeps_hit_tp():
     view2 = _view_with_plan(s, plan, PositionState.OPEN, outcome=oc2)
     d2 = sup.decide(view2, [w2], c2, c2.now_ms)
     assert d2.action == ExitAction.ADJUST_TAKE_PROFITS.value
-    assert d2.plan_after["tp"] == 102.6  # un-hit TP takes proposal
+    assert d2.plan_after["tp"] == 101.0  # un-hit TP takes proposal
 
 
 def test_gate_event_repeats_start_cooldown_in_replay():
