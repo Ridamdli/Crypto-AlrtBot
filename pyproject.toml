@@ -43,8 +43,8 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-# F only (pyflakes): undefined names, unused imports/variables, shadowed definitions —
-# real bugs, not style. Note this narrows ruff's default set, so E9 (syntax errors) is no
-# longer reported; add "E9" here if a parse error ever needs to fail a check.
-# shortcut: F only until the 68 existing findings are cleared, then widen to E4/E7/E9.
-select = ["F"]
+# F (pyflakes) = real bugs: undefined names, unused imports/variables, shadowed
+# definitions. E9 = syntax errors — a correctness gate, not a style rule, so a file
+# that fails to parse cannot pass the check silently.
+# shortcut: F+E9 until the 68 F findings are cleared, then widen to E4/E7.
+select = ["F", "E9"]
