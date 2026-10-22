@@ -18,7 +18,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_PATH = os.path.join("mirror_data", "p3_shadow.jsonl")
+# data_store is the main service's mounted volume, so the sample survives a
+# redeploy. mirror_data would be container-local there.
+DEFAULT_PATH = os.path.join("data_store", "p3_shadow.jsonl")
 
 
 def evaluate(view, struct, counter) -> dict:

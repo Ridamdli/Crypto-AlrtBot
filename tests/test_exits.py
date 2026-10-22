@@ -282,6 +282,9 @@ def test_structure_invalidates_pending_on_elapsed_window():
 
 
 def test_p3_shadow_logs_without_changing_invalidation(tmp_path):
+    from src.exits import p3_shadow
+    # The default path is on the main service's volume, not container-local.
+    assert p3_shadow.DEFAULT_PATH.replace("\\", "/") == "data_store/p3_shadow.jsonl"
     closes = [100.0] * 25 + [101.5, 102.0, 102.5, 102.2, 102.4]  # SHORT, SL 102
     kl = bars(closes)
     s = sig("SHORT", entry=100.0, sl=102.0, tp=98.0)
