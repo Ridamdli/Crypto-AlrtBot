@@ -42,7 +42,7 @@ $sp = "$env:APPDATA\uv\tools\graphifyy\Lib\site-packages\graphify"
 1. Read this file.
 2. Verify the MCP server: the 10-tool count above must be 10. If fewer, the `[mcp]` extra is gone —
    run the recovery in §0.
-3. Suite baseline: **605 collected / 0 failed / 0 skipped**. Verify:
+3. Suite baseline: **607 collected / 0 failed / 0 skipped**. Verify:
    ```powershell
    python -m pytest --collect-only -q | Select-String "^tests/" |
      ForEach-Object { [int]($_.Line.Split(":")[1]) } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
@@ -139,18 +139,30 @@ exact labels for classes/top-level functions, and `path::symbol` ids for methods
 4. **Community labels persist** across `cluster-only` and `update` (node-overlap remap, verified
    120/120 names kept). Only a from-scratch extract into a fresh directory loses them — never do
    that without backing up `graphify-out/.graphify_labels.json`.
-5. **Suite baseline is 605 / 0 / 0.** Any deviation means code changed — investigate before proceeding.
+5. **Suite baseline is 607 / 0 / 0.** Any deviation means code changed — investigate before proceeding.
 6. Dynamic dispatch generally (`getattr`, DI-registered handlers) is not bound by the AST pass.
    Grep is still correct for literals, error strings, and comments the extractor drops.
 
 ## 7. Test baseline (hard fact)
 
-`python -m pytest` → **605 collected, 0 failed, 0 skipped** — 29 files, 599 `def test_*` functions
-+ 6 parametrized expansions.
+`python -m pytest` → **607 collected, 0 failed, 0 skipped** — 29 files, 601 `def test_*` functions
+(424 top-level + 177 methods) + 6 parametrized expansions.
 
-Prior documents cite **607**; that was a miscount, not a lost test. `git status` is clean and all 29
-test files are collected, so no test was deleted or skipped. Correction is forward-only: from this
-commit on, **605 / 0 / 0** is the baseline. Do not "reconcile" older reports.
+Reconciliation: **605 at `72bb525`** (599 functions + 6) **+ 2 new tests = 607**.
+
+| commit | test added |
+|---|---|
+| `f62d9a1` (W9) | `test_guard_p2_rejects_tp_widening_and_fails_closed` |
+| `95db541` (W10) | `test_p3_shadow_logs_without_changing_invalidation` |
+
+The earlier "607 is a miscount" note was correct only for the pre-W9 tree at `72bb525`. It is
+superseded by this derivation: 605 + 2 = 607. From this commit on, **607 / 0 / 0** is the baseline.
+
+Count it from the tree, not from a report:
+```powershell
+python -m pytest --collect-only -q | Select-String "^tests/" |
+  ForEach-Object { [int]($_.Line.Split(":")[1]) } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
+```
 
 Note: the `pytest` console script on PATH belongs to Python 3.11 and fails collection (6 dependency
 errors). Use `python -m pytest` (Python 3.14).
@@ -177,9 +189,20 @@ That file is read at the start of the next session.
 
 - 03-B-2 closed: exit management is **not** the production defect.
 - RSI + `ema_trend` retired. BTC = momentum-only, ADA = volume_breakout-only.
-- Phase 04 (entry redesign) is the next major workstream — spec in
-  `reports/PHASE_04_ENTRY_REDESIGN_SPEC.md` (pending).
-- Production runs pre-`49ff810` code; ~10 local commits ready, awaiting deploy decision.
+- Phase 04 (entry redesign) is the next major workstream — options spec in
+  `reports/PHASE_04_ENTRY_REDESIGN_SPEC.md` (written; no option chosen).
+- **Entry kill-switch (standing rule):** halt new entries if (i) the mimic's $16 cap is hit,
+  (ii) a 30-day sample still has a CI lower bound ≤ 0 **and** a median ≤ −0.5R, or (iii) fees
+  exceed gross in any rolling 7-day window.
+- **BTC coverage watch (standing rule):** BTC produces ~1 signal / 11 days. If a 30-day scan
+  produces **< 3** BTC signals, Phase 04 must address BTC coverage explicitly.
+- `p3_shadow` writes `data_store/p3_shadow.jsonl` (main-service volume, survives deploys).
+- Production runs pre-`49ff810` code. 37 local commits await deploy; plan split into Wave 1
+  (safety/correctness), Wave 2 (P2 + P3 shadow), Hold (entry selection) in
+  `reports/DEPLOY_READINESS.md`. Railway auth expired — running revision unconfirmed.
+- Deploy is blocked on operator authorization; nothing ships automatically.
+- W6 delivery is at-least-once: the queue replays byte-identical `clientTxId`s, so safety
+  depends on Invo deduping server-side (unproven from the repo).
 - `EXITS_APPLY=true` on Railway; local stays false in fixtures.
 - `MIMIC_LIVE=true` on Railway; $16 real money.
 - Statistical caveat: 11 days / 204 entry signals, 5.1 days / 97 exit signals, one regime.
