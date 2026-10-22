@@ -1,9 +1,10 @@
 # BRAIN.md — ask the graph before you grep
 
-This repo has a knowledge graph of itself: symbols, files, calls, imports, docs, and 120 named
-communities. Use it to locate code cheaply, then open only the files that matter.
+This repo has a knowledge graph of itself: symbols, files, calls, imports, docs, and 148
+communities (71 of them still carrying a curated name — see §6 rule 4). Use it to locate code
+cheaply, then open only the files that matter.
 
-- Graph: `graphify-out/graph.json` — **2,815 nodes / 7,571 edges / 120 communities** (built at `fcfdc33`).
+- Graph: `graphify-out/graph.json` — **3,006 nodes / 7,930 edges / 148 communities** (built at `ec8527e`).
 - Confidence: **87% EXTRACTED** (AST), **13% INFERRED** (heuristics), 0% ambiguous.
 - Human-readable summary: `graphify-out/GRAPH_REPORT.md` (28 KB). Interactive map: `graphify-out/graph.html`.
 - Session lessons: `graphify-out/reflections/LESSONS.md` (read it first if it exists).
@@ -42,7 +43,7 @@ $sp = "$env:APPDATA\uv\tools\graphifyy\Lib\site-packages\graphify"
 1. Read this file.
 2. Verify the MCP server: the 10-tool count above must be 10. If fewer, the `[mcp]` extra is gone —
    run the recovery in §0.
-3. Suite baseline: **615 collected / 0 failed / 0 skipped**. Verify:
+3. Suite baseline: **620 collected / 0 failed / 0 skipped**. Verify:
    ```powershell
    python -m pytest --collect-only -q | Select-String "^tests/" |
      ForEach-Object { [int]($_.Line.Split(":")[1]) } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
@@ -136,29 +137,34 @@ exact labels for classes/top-level functions, and `path::symbol` ids for methods
    hop, because `auto.py:702 self.hl.close(coin)` is a dynamic attribute call the AST cannot bind.
    The actual binding is `mirror/hl.py:140 HlBridge.close`. **Treat graph paths ending at `HlBridge`
    as incomplete and verify the `.close()` binding in code.**
-4. **Community labels persist** across `cluster-only` and `update` (node-overlap remap, verified
-   120/120 names kept). Only a from-scratch extract into a fresh directory loses them — never do
-   that without backing up `graphify-out/.graphify_labels.json`.
-5. **Suite baseline is 615 / 0 / 0.** Any deviation means code changed — investigate before proceeding.
+4. **Community labels survive only while the community set is stable.** The remap is by node overlap:
+   when the graph has drifted since the last rebuild, community ids change and unmatched names are
+   dropped. Measured 2026-10-22 — a stale graph (built at `fcfdc33`) rebuilt twice took the label
+   store **120 → 83 → 71** names while communities went **120 → 140 → 148**. A small `update` keeps
+   names; a rebuild after long drift does not. Back up `graphify-out/.graphify_labels.json` before a
+   rebuild you expect to drift, and never refresh names with `graphify label` (billed — rule 2);
+   accept hub-derived names instead.
+5. **Suite baseline is 620 / 0 / 0.** Any deviation means code changed — investigate before proceeding.
 6. Dynamic dispatch generally (`getattr`, DI-registered handlers) is not bound by the AST pass.
    Grep is still correct for literals, error strings, and comments the extractor drops.
 
 ## 7. Test baseline (hard fact)
 
-`python -m pytest` → **615 collected, 0 failed, 0 skipped** — 30 files, 609 `def test_*` functions
-(432 top-level + 177 methods) + 6 parametrized expansions.
+`python -m pytest` → **620 collected, 0 failed, 0 skipped** — 31 files, 614 `def test_*` functions
++ 6 parametrized expansions.
 
 Reconciliation: **605 at `72bb525`** (599 functions + 6) **+ 2 (W9/W10) + 8 (Phase 04A
-harness) = 615**.
+harness) + 5 (W-DD Option A) = 620**.
 
 | commit | test added |
 |---|---|
 | `f62d9a1` (W9) | `test_guard_p2_rejects_tp_widening_and_fails_closed` |
 | `95db541` (W10) | `test_p3_shadow_logs_without_changing_invalidation` |
 | Phase 04A | `tests/test_phase04a_harness.py` (8 tests: correlation math, proxy bounds, determinism) |
+| `4ddd798` (W-DD A2) | `tests/test_scoring_breakdown.py` (5 tests: persist, `None` on legacy rows, join by `signal_id`) |
 
 The earlier "607 is a miscount" note was correct only for the pre-W9 tree at `72bb525`. It is
-superseded by this derivation: 605 + 2 + 8 = 615. From this commit on, **615 / 0 / 0** is the
+superseded by this derivation: 605 + 2 + 8 + 5 = 620. From this commit on, **620 / 0 / 0** is the
 baseline.
 
 Count it from the tree, not from a report:
@@ -178,7 +184,8 @@ Never committed.
 
 ## 9. Regenerating
 
-- Code changed → `.\scripts\graphify-safe.ps1 update .` (AST only, no LLM, keeps labels).
+- Code changed → `.\scripts\graphify-safe.ps1 update .` (AST only, no LLM; labels survive a small
+  drift, not a long one — see §6 rule 4).
 - Docs changed → run the `/graphify --update` skill, or accept stale doc nodes.
 - Full rebuild (loses curated labels) → see `README.md` → *Project brain*.
 
@@ -191,6 +198,10 @@ That file is read at the start of the next session.
 ## 11. Current work state (volatile — maintained by the operator)
 
 - 03-B-2 closed: exit management is **not** the production defect.
+- **30-day observation window is active (2026-10-22 → 2026-11-21 or n = 200).** Pre-registered
+  scope, hypotheses and post-window decision tree: `reports/OBSERVATION_PROTOCOL_2026-10.md`,
+  `reports/PRE_REGISTERED_HYPOTHESES_2026-10.md`. No mid-window policy change — no gate, filter,
+  strategy or exit tuning until it closes; decide from the tree, not from the latest print.
 - RSI + `ema_trend` retired. BTC = momentum-only, ADA = volume_breakout-only.
 - Phase 04 (entry redesign) is the next major workstream — options spec in
   `reports/PHASE_04_ENTRY_REDESIGN_SPEC.md` (written; no option chosen).

@@ -5,10 +5,13 @@ navigation; this file covers the rules that must not be broken.
 
 ## 1. Test baseline
 
-- **615 collected / 0 failed / 0 skipped** (30 files, 609 `def test_*` + 6
+- **620 collected / 0 failed / 0 skipped** (31 files, 614 `def test_*` + 6
   parametrized expansions).
 - Derivation: 605 at `72bb525` + 2 (W9 `f62d9a1`, W10 `95db541`) + 8 (Phase 04A
-  harness) = 615.
+  harness) + 5 (W-DD Option A, `tests/test_scoring_breakdown.py`) = 620.
+- W-DD Option A: `SignalModel.scoring_breakdown` (`dict | None`) persists the
+  per-component score points. `None` means the row predates the contract — audits
+  reconstruct and label that `Estimated`, never zero. Outcomes join by `signal_id`.
 - Use `python -m pytest`. The `pytest` console script on PATH is Python 3.11 and
   fails collection.
 - Any deviation means code changed. Investigate; do not update the baseline to
