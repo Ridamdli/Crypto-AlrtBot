@@ -118,6 +118,53 @@ of the window's attention. Non-negotiable before 04B: a phase decision that refe
 built on a wrong description. Fix the four claims (test count, family list, multi-TP, timeframe), then delete
 whatever is left that describes nothing.
 
+**Done:** `ec8527e` — README test count (620 / 31 files, per-file counts), threshold location, multi-TP ladder and
+the OI/funding claim corrected; the 1h/4h/1d per-coin tables are now explicitly labelled research ideas. Residual
+risk: those tables still read like design intent at a glance.
+
+---
+
+## 5. Momentum ATR parameters inert
+
+**Impact: low for the window, medium for interpretation.** The momentum family declares `atr_filter` and
+`atr_multiplier` and never consumes them.
+
+**Evidence (measured 2026-10-22, read-only).** `src/strategies/momentum.py`:
+
+| Line | Code | Fate |
+|---|---|---|
+| 122 | `atr_15m = self._calculate_atr(...) if self.params["atr_filter"] else 0` | assigned, never read |
+| 139 | `atr_stop_dist = self._calculate_atr(...) * self.params["atr_multiplier"] if ... else 0` | assigned, never read |
+| 140 | `min_risk_dist = self._calculate_atr(...) * 0.5 if self._calculate_atr(...) > 0 else ...` | recomputes ATR three times in one expression |
+| 150+ | structural SL from the recent swing low | what actually prices the stop |
+
+`atr_filter` and `atr_multiplier` appear in `default_params` and `param_schema` and nowhere else in the decision
+path.
+
+**Same defect class as items 1 and 3:** a parameter is declared, advertised, never read. Item 1 is `regime_filter`,
+item 3 is `StrategyFamilyConfig`. This one is quieter — nothing reads the value at all, so no filter silently passes
+everything; the config simply describes a stop rule that does not exist.
+
+**Classification: BEHAVIORAL DECISION, not cleanup.** Deleting the two unused locals is a no-op; deciding what
+`atr_filter` / `atr_multiplier` should *do* is not.
+
+**Options**
+
+- **(a) Wire the ATR stop in** — behaviour change. Would replace or bound the structural swing low, changing stop
+  distance, R multiple and every outcome in this family. Needs its own post-window observation before any 04B
+  citation, same as item 2.
+- **(b) Delete `atr_filter` and `atr_multiplier`** — no-op removal of a lie, plus the three dead locals. Behaviour
+  identical, docs stop advertising a filter that does not exist. Should leave one line in the family docstring
+  saying the stop is structural, since (b) otherwise erases the record that ATR was ever intended.
+
+**Impact note.** Operator reports momentum at **+1.42R mean on 22 signals** in the current evidence set
+(*User-provided* — not re-derived here; `signals.jsonl` holds **21** momentum signals, so the count needs
+reconciling before the figure is cited). If that edge is real it comes from the structural swing-low stop, not from
+ATR — which argues for (b) rather than for wiring ATR in to "fix" a family that already works.
+
+**Window-safe: do not touch.** Current momentum behaviour is what the window measures; inert parameters change
+nothing about it.
+
 ---
 
 ## Order of work (when authorized)
@@ -126,7 +173,8 @@ whatever is left that describes nothing.
 |---|---|---|---|
 | 2 | Bollinger gate: remove or re-threshold | **after the window closes**; before any 04B citation of +19R | behaviour (11 extra detections, 7 publish) — needs a published-set diff |
 | 4 | Docs correction | before any 04B decision references the docs | documentation |
-| 1 | `regime_filter` fix-or-remove | after H3 resolves | behaviour — needs H3 evidence |
+| 1 | `regime_filter` fix-or-remove | after H3 resolves | behaviour - needs H3 evidence |
+| 5 | Momentum ATR: wire in or delete the params | after the window; before any momentum figure is cited as an ATR result | behaviour (a) or no-op deletion (b) - needs a decision |
 | 3 | Provenance completeness | after the window, as its own work package | evidence plumbing |
 
 ## Not in this backlog (on purpose)
@@ -149,7 +197,7 @@ Everything here waits until the window closes (2026-11-21).
 | Rule | Count | Effort | Notes |
 |---|---|---|---|
 | F401 unused import | 27 | ~1h | `--fix`, then review removals inside modules that legitimately re-export |
-| F841 unused variable | 25 | ~1h | **not a blind fix** — see the momentum.py note below |
+| F841 unused variable | 25 | ~1h | `--fix` with a review pass; the one pair that was not cosmetic moved to item 5 |
 | F541 f-string without placeholder | 11 | ~10m | safe |
 | F811 redefinition | 3 | ~1h | `src/config.py:118` (`StrategyFamilyConfig`, same object as backlog item 3), `src/orchestrator.py:410` (`get_approved_strategies_for_all`), `src/research/strategy_research.py:127` (`StrategyResearchRunner`). These are **class/function redefinitions**, not the momentum duplicate-method pair (L1/L2) |
 | F601 repeated dict key | 2 | ~5m | audited clean — verdict below |
@@ -159,13 +207,6 @@ both set `strategy_id` and `strategy_version` in the same candidate dict, with *
 (`cand.strategy_id`, `cand.strategy_version`). The later pair wins and equals the earlier pair, so the candidate is
 byte-identical either way: a leftover from moving those keys down the literal. Cleanup is deleting lines 410-411 —
 deleting the *second* pair is a pure no-op. Not done now.
-
-**F841 in `src/strategies/momentum.py:122,139,202` is not cosmetic — review before fixing.** `atr_15m` and
-`atr_stop_dist` are computed and then discarded (the LONG path prices its stop from the structural swing low), and
-line 140 recomputes `_calculate_atr` three times. Consequence: momentum's `atr_filter` / `atr_multiplier`
-parameters are **inert** — same defect class as backlog item 1 (`regime_filter`), not a cleanup item. Removing the
-unused variables must not be mistaken for removing the filter; the honest fix is either wiring the ATR stop in or
-deleting the advertised parameters. `entry_price` at `:202` looks like ordinary dead assignment.
 
 **Deferred rule families:** the config selects F + E9 only. E4 / E7 stay unselected until this queue is empty; the
 upgrade trigger lives in `pyproject.toml`.
