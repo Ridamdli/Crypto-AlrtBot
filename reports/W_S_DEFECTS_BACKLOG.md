@@ -137,3 +137,35 @@ whatever is left that describes nothing.
   method definitions (L1/L2), donchian close-vs-price wording (L4), orphan `.pyc` (L6), Bollinger SHORT tests (L7).
   These are real but none is decision-blocking; they are recorded in the findings register and wait for a work
   package that touches that family.
+
+---
+
+## Post-window cleanup queue (added 2026-10-22)
+
+Static-analysis debt with no decision value **during** the window. `ruff --fix` rewrites bytes: a large mechanical
+diff would obscure the H1–H4 read, because nobody reviewing the tree can tell a cleanup hunk from a behaviour hunk.
+Everything here waits until the window closes (2026-11-21).
+
+| Rule | Count | Effort | Notes |
+|---|---|---|---|
+| F401 unused import | 27 | ~1h | `--fix`, then review removals inside modules that legitimately re-export |
+| F841 unused variable | 25 | ~1h | **not a blind fix** — see the momentum.py note below |
+| F541 f-string without placeholder | 11 | ~10m | safe |
+| F811 redefinition | 3 | ~1h | `src/config.py:118` (`StrategyFamilyConfig`, same object as backlog item 3), `src/orchestrator.py:410` (`get_approved_strategies_for_all`), `src/research/strategy_research.py:127` (`StrategyResearchRunner`). These are **class/function redefinitions**, not the momentum duplicate-method pair (L1/L2) |
+| F601 repeated dict key | 2 | ~5m | audited clean — verdict below |
+
+**F601 verdict — INTENTIONAL, no bug (audited 2026-10-22, read-only).** `src/pipeline.py:387-388` and `:410-411`
+both set `strategy_id` and `strategy_version` in the same candidate dict, with **identical** expressions
+(`cand.strategy_id`, `cand.strategy_version`). The later pair wins and equals the earlier pair, so the candidate is
+byte-identical either way: a leftover from moving those keys down the literal. Cleanup is deleting lines 410-411 —
+deleting the *second* pair is a pure no-op. Not done now.
+
+**F841 in `src/strategies/momentum.py:122,139,202` is not cosmetic — review before fixing.** `atr_15m` and
+`atr_stop_dist` are computed and then discarded (the LONG path prices its stop from the structural swing low), and
+line 140 recomputes `_calculate_atr` three times. Consequence: momentum's `atr_filter` / `atr_multiplier`
+parameters are **inert** — same defect class as backlog item 1 (`regime_filter`), not a cleanup item. Removing the
+unused variables must not be mistaken for removing the filter; the honest fix is either wiring the ATR stop in or
+deleting the advertised parameters. `entry_price` at `:202` looks like ordinary dead assignment.
+
+**Deferred rule families:** the config selects F + E9 only. E4 / E7 stay unselected until this queue is empty; the
+upgrade trigger lives in `pyproject.toml`.
