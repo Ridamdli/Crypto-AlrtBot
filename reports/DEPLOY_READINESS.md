@@ -1,180 +1,285 @@
-# Deploy Readiness — W5–W10
+# Deploy Readiness — Waves 1 and 2
 
-**This document authorizes nothing.** No deploy, no production write, no Railway
-read has been performed. Every step below runs only on explicit operator
+**This document authorizes nothing.** No deploy, no production write, and no
+Railway read has been performed. Every step runs only on explicit operator
 authorization.
 
-**Evidence base:** 11 days (2026-10-08 → 2026-10-19), 204 signals, one regime
-(bearish 157 / neutral 47), UNIUSDT-dominated exit population. Nothing in this
-checklist depends on a count-only reading; the behaviour claims are replay results.
+**Evidence base for every claim below:** 11 days (2026-10-08 → 2026-10-19), 204
+entry signals, one regime (bearish 157 / neutral 47), UNIUSDT-dominated exit
+population. R-weighted where a policy claim is made. No claim is a 30-day result.
 
 ---
 
-## 1. What is deployed today, and what is not
+## 0. Deploy units and scope
 
-Production reference date: **2026-10-13**. Last known deployed mirror revision:
+| unit | service | start command | volume |
+|---|---|---|---|
+| main | `crypto-alrtbot` | `python -m src.service` | `/app/data_store` |
+| mirror | `pariston-mimic` | `python -m mirror` | `/app/mirror_data` |
+
+Production reference: **2026-10-13**. Last confirmed mirror revision:
 **`f2dfde8`**. The mirror is uploaded from the local tree with `railway up` —
-GitHub auto-deploy does not fire. The main service's exact running revision is
-**unknown** and must be read from Railway after `railway login`; do not assume it
-matches the local tree.
+GitHub auto-deploy does not fire. The main service's running revision is
+**unconfirmed** (Railway auth expired).
 
-**37 commits** sit between `f2dfde8` and `HEAD`. 20 touch runtime code; the rest
-are tests, scripts, docs, and lint.
+**37 commits** since `f2dfde8`; **20 touch runtime code**. 11 days / 204 signals /
+one regime / UNIUSDT-dominated applies to all behaviour claims.
 
-### 1a. Runtime-affecting commits by service
+---
 
-**Main service (`crypto-alrtbot`, `python -m src.service`)**
+## 1. Wave 1 — safety and correctness
 
-| commit | change | risk |
+Ships the main-service image and the mirror independently. Neither depends on
+the other.
+
+### 1a. Main service
+
+| commit | change | effect on recorded history |
 |---|---|---|
-| `12faa3c` | retry transient capital skips; un-bury seen coins | low |
-| `c941c6c` | OI short + momentum scoring inputs | medium — changes signal selection |
-| `d9212eb` | count only delivered Telegram sends | low |
-| `b787459` | atomic ledger writes | low |
-| `7542c9a` | zero evidence quality on abstains; RR_DEAD fix | medium — changes scoring |
-| `d666c7c` | hash exit decision keys from clean proposal fields | low |
-| `86e1fcb` | retain exit idempotency keys past the cap | low |
-| `674c86b` | **fix ATR stop double-subtraction** (momentum, volume, EMA) | **high — changes stop levels and therefore R** |
-| `fa79b58` | `as_of_time` NameError fix | low |
-| `c90507a` | archive 7-day-old signal files; chronological merge | medium — moves files |
-| `02aa4f3` | ruff fixes in `src` | low |
-| `2bcf1b7` | corrupt daily signal files preserved; UTC day boundary | low |
-| `3602856` | retire `rsi_mean_reversion` | medium — fewer signals |
-| `52bf4b3` | momentum lookahead fix (forming candle excluded) | **high — changes SL lookback** |
-| `49ff810` | persist `applied` on exit decisions | low |
-| `a29831a` | **retire `ema_trend_20_50`** | **high — registry, config, deleted module** |
-| `f62d9a1` | **P2 TP-widening rejection** | medium — can only reject, never widen |
-| `95db541` | **P3 shadow log** | low — write-only |
+| `12faa3c` | retry transient capital skips; un-bury seen coins | none (live-only path) |
+| `c941c6c` | OI short + momentum scoring inputs | **Hold** — see §3 |
+| `d9212eb` | count only delivered Telegram sends | none |
+| `b787459` | atomic ledger writes | none |
+| `7542c9a` | zero evidence quality on abstains; RR_DEAD fix | none on past rows; forward exit decisions change |
+| `d666c7c` | decision keys hashed from clean proposal fields | none (future keys only) |
+| `86e1fcb` | retain idempotency keys past the cap | none |
+| `674c86b` | **ATR stop double-subtraction fix** | none on past rows; **forward stops change** |
+| `fa79b58` | `as_of_time` NameError; dead duplicate removed | parser correctness |
+| `c90507a` | archive 7-day signal files; chronological merge | storage only |
+| `02aa4f3` | ruff fixes in `src` | none |
+| `2bcf1b7` | corrupt daily files preserved; UTC day boundary | storage bucketing |
+| `3602856` | retire `rsi_mean_reversion` | **deliberate reduction** |
+| `52bf4b3` | momentum lookahead fix (forming candle excluded) | none on past rows; **forward SL changes** |
+| `49ff810` | persist `applied` on exit decisions | none |
+| `a29831a` | retire `ema_trend_20_50` | **deliberate reduction** (evidence: −0.736R, CI [−1.291, −0.181]) |
 
-**Mirror service (`pariston-mimic`, `python -m mirror`)**
+Three commits are **forward-only behaviour changes**, not history no-ops:
+`674c86b`, `52bf4b3`, and the two retirements. They are correctness fixes and an
+evidence-backed removal, but they are not "no-op" and must be verified as
+forward changes (§7, V1.3).
 
-| commit | change | risk |
+### 1b. Mirror service
+
+| commit | change | effect |
 |---|---|---|
-| `fcfdc33` | **queue records when no trading session; flush oldest-first** | medium — new file, new drain path |
+| `fcfdc33` | queue records when no trading session; flush oldest-first | none on history; new durable queue file |
 
-`f84872d` (dashboard P0) is dated 2026-10-13 and may or may not be in the running
-main image — confirm before counting it as pending.
+### 1c. Wave 1 verification — see §7
+### 1d. Wave 1 rollback criteria — see §8.1
 
-### 1b. Not deployed by any of this
+---
 
-- Exit management is closed (03-B-2). P2 is an invariant, not an exit redesign.
-- No schema migration, no ledger rewrite, no data rewrite. All new files are
-  additive.
-- No change to the mirror's execution gate (`MIMIC_LIVE`) or to the main bot's
-  live/paper flags.
+## 2. Wave 2 — policy instrumentation
 
-## 2. Environment variables
+Both commits are **replay-verified no-ops** and change no past decision.
 
-### Main service — nothing new is required
+| commit | change | evidence |
+|---|---|---|
+| `f62d9a1` | **P2** — a target may only move toward the mark; widening rejected | 31/31 historical ADJUSTs accepted, 0 widenings, 0 flips (`scripts/verify_p2_zero_change.py`) |
+| `95db541` | **P3 shadow** — records what P3 would have decided on pending invalidation | write-only; invalidation still applies (test) |
 
-`EXITS_ENABLED=true` and `EXITS_APPLY=false` keep supervision recording
-proposals only; that is the intended state for W9/W10. `EXITS_STORAGE_DIR`
-(default `data_store`) is already on the mounted volume.
+Wave 2 depends on Wave 1 only because it is the same image. It has no runtime
+dependency on any Wave 1 commit. 11 days / 204 signals / one regime /
+UNIUSDT-dominated still bounds the evidence: P2's proof is 31 rows, not 31 days.
 
-**Operational caveat — P3 shadow path.** `src/exits/p3_shadow.py` writes
-`mirror_data/p3_shadow.jsonl`, literally as specified. On the **main service**
-the persistent volume is `/app/data_store`, not `/app/mirror_data`. The file will
-be created inside the container's writable layer, survive until the next deploy,
-and then reset. It cannot be read back from a volume. If the shadow sample is
-meant to survive redeploys, the path needs to be configurable (one-line change) —
-say so and I will make it `EXITS_P3_SHADOW_PATH` with the current value as the
-default.
+### 2a. Verification — see §7
+### 2b. Rollback criteria — see §8.2
 
-### Mirror service — `INVO_TRADING_*` required for W6 to deliver
+---
 
-`mirror/recorder.py` builds its session from:
+## 3. Hold — Phase 04 pending
 
-| variable | role |
+| commit | why held |
 |---|---|
-| `INVO_TRADING_REFRESH` | long-lived refresh JWT; **required** — without it every record queues and raises `no trading session (refresh failed)` |
-| `INVO_TRADING_TOKEN` | optional short-lived access-token override |
+| `c941c6c` | changes OI/short scoring inputs, i.e. **which entry signals are selected** |
+| anything else touching entry selection or per-coin strategy mapping | Phase 04 owns it |
 
-`MIRROR_DATA_DIR` (default `mirror_data`) decides where
-`pending_records.jsonl` lives; on the mimic that path is the mounted volume, so
-the queue survives restarts.
+`c941c6c` is a bug fix, not a redesign. It is held because the rule is literal:
+entry selection changes wait for Phase 04. If the operator prefers to ship it
+with Wave 1, it moves; that is an operator call, not a technical one.
 
-**Behaviour without the refresh token:** the fix makes the failure
-non-destructive — records are appended to the queue with `fsync` and the caller
-still raises and alerts. It does **not** make them deliverable. Confirm the
-variable is present on `pariston-mimic` before treating W6 as operational.
+---
 
-**W6 dedup — answered: there is none.** `flush()` has no `clientTxId`, no `oid`,
-and no payload-hash check. It re-reads the whole queue, posts each row, and
-rewrites whatever is left. A crash between a successful POST and the queue
-rewrite will resend that row. This is documented in the module as
-`shortcut: at-least-once … Invo must dedupe on it`. Consequence: **at-least-once
-delivery**, not exactly-once. If Invo does not dedupe on `clientTxId`, a restart
-during a flush can duplicate a paper record. This was already true of any retry
-path; the queue makes the window larger, not new.
+## 4. W6 Dedup Risk & Mitigation
 
-## 3. Post-deploy verification
+**Question:** on crash-restart, can a fill be POSTed twice, and is that safe?
 
-Run in order; stop at the first failure.
+**Finding 1 — `clientTxId` exists on both record types.**
+- open: `mirror/auto.py:127` → `entry:<uuid4 hex[:8]>`
+- close: `mirror/auto.py:726` → `close:<uuid4 hex[:8]>`
 
-1. **Liveness.** `GET /healthz` returns OK. Scheduler log shows a completed scan
-   cycle with no traceback.
-2. **Registry.** Startup log lists four families. `ema_trend_20_50` and
-   `rsi_mean_reversion` appear nowhere in the registry or in today's signal file
-   under `data_store/signals/`.
-3. **Signal sanity.** New signals carry `signal_id`, `side`, `entry`,
-   `stop_loss`, and a single `tp`. Spot-check one stop against the ATR formula —
-   this is where the double-subtraction fix (`674c86b`) shows up; a stop that is
-   one ATR too tight means the old code is running.
-4. **Exit ledger.** New rows in `data_store/` exit decisions include `applied`
-   and `applied_at`. `ADJUST_TAKE_PROFITS` rows show `plan_after.tp` closer to
-   the mark than the prior target, never further.
-5. **P2.** Grep new decisions for `TP_WIDEN_REJECTED`. Expected count: **0** —
-   every historical ADJUST was a tightening (31/31 on replay). A non-zero count
-   is not an error; it means a worker proposed a widening and the guard caught
-   it. Log it for review.
-6. **P3 shadow.** After the first pending invalidation, the file exists with one
-   JSON row per invalidation containing `structure_pass`, `counter_pass`,
-   `verdict`, `breach_margin_pct`. Invalidation itself still fires — P3 is
-   write-only. Remember the ephemeral-path caveat in §2.
-7. **Mirror queue.** With a valid `INVO_TRADING_REFRESH`, record a close and
-   watch `mirror_data/pending_records.jsonl`: the line count must return to zero.
-   The audit/event log must not gain new `record_close_failed` entries.
-8. **Duplicate watch (at-least-once).** After any restart during a flush, compare
-   record counts per signal in Invo. A duplicate is the known failure mode, not a
-   regression; it is the reason `clientTxId` exists.
+**Finding 2 — the id is stable across retries.**
+- It is generated **once**, when the payload dict is built.
+- `TradingSession.post()` serialises that dict into `pending_records.jsonl`
+  **before** raising, so a queued replay sends the **same** id.
+- `flush()` re-posts the stored body verbatim; it never rebuilds it.
+- `_post_now`'s 401 refresh retry reuses the same `payload` object.
+- Neither the open path nor the close path rebuilds a payload after a failure:
+  the open catches and returns; the close logs `record_close_failed`, and a later
+  cycle hits the `already-flat` early return before any record is built.
+- The queue rewrite is the only at-least-once window: POST succeeds, the process
+  dies before `_rewrite_queue` → the row replays with the **same** id.
 
-## 4. Rollback
+**Finding 3 — Invo-side dedup is NOT proven from this repository.**
+The client always sends `clientTxId`, and
+`reports/MIMIC_RECORD_FAILED_INVESTIGATION.md` says a successful record
+"registers" the id server-side. That is consistent with dedup but is not proof of
+a uniqueness constraint, and no code or doc shows Invo rejecting a duplicate. A
+read-only check of the API can't resolve it either — it needs a deliberate
+duplicate submission.
 
-**Preferred: redeploy the previous Railway deployment.** Both services were
-uploaded from the local tree, so the prior image is the true previous state.
-Redeploy from the Railway dashboard; do not rebuild from an untagged tree.
+**Finding 4 — id space is 32 bits.** `uuid4().hex[:8]`. Collision probability is
+~4.7 × 10⁻⁶ at 200 records and ~1.2% at 10,000. A collision would make two
+distinct fills carry the same id; if Invo dedupes, the second is silently
+dropped. Low severity at current volume, rising with age. The main bot's
+`build_position_payload` uses a full UUID (128-bit), so this is mirror-only.
 
-**If a rebuild is required:** check out the last known-good revision
-(`f2dfde8` for the mirror; the confirmed main-service revision for the main bot)
-and `railway up`. Do not `git revert` the 37-commit range as a unit — it mixes
-tests, scripts, and lint with runtime changes and will produce conflicts.
+**Verdict:** retries send byte-identical ids. **Retries are safe only if Invo
+dedupes on `clientTxId`** — which remains unconfirmed. Mitigation until
+confirmed:
+1. Deploy W6 **with monitoring**, not standalone: count POSTs per `clientTxId`;
+   any count > 1 after a queue replay is a duplicate.
+2. If duplicates appear, do not patch the recorder blind. A reconcile pass that
+   queries Invo for the id and skips existing records is the fix; propose it
+   before writing it.
+3. Widening the id to `hex[:16]` is a one-line change — **not made**, because it
+   requires operator approval and would not fix missing server dedup anyway.
 
-**Rollback consequences to expect:**
+**No code change has been made for this finding.**
 
-- Reverting the image restores `ema_trend_20_50` and `rsi_mean_reversion`; the
-  signal rate rises and the negative family returns. That is the intended
-  meaning of rolling back W5, not a side effect to patch.
-- P2 disappears: a widening proposal would be accepted again. No historical
-  decision changes either way (31/31 replay).
-- The P3 shadow file stops being written; the existing file is untouched.
-- **No data rollback is needed or possible.** Exit ledgers are append-only
-  overlays; the outcome ledger is written by the evaluator, not by this change
-  set. `pending_records.jsonl` is a durable queue: rolling the mirror back
-  leaves it in place, and either version will drain it (the old version simply
-  fails to queue new ones during a credential gap).
-- Rolling back the mirror does **not** un-send records already delivered.
+---
 
-**Verification after rollback:** repeat steps 1, 2, 4, and 7. Step 3 should now
-show whichever stop formula the restored revision used.
+## 5. p3_shadow persistence
 
-## 5. Authorization
+`src/exits/p3_shadow.py` writes **`data_store/p3_shadow.jsonl`**. `data_store` is
+the main service's mounted volume, so the sample survives redeploys. The earlier
+`mirror_data/` path was container-local on the main service and would have
+reset on every deploy — that is fixed in `2f5c06a`, and the test pins the default
+path.
 
-- Nothing in this document has been deployed, run against production, or pushed
-  to a remote. All commits are local.
-- The deploy strategy is still the operator's open decision: (a) deploy now,
-  (b) deploy after Phase 04, (c) partial deploy now.
-- The mirror change (`fcfdc33`) is independent of the main-service changes and
-  can ship on its own. W9/W10/W5 all live in the main image and ship together
-  with it.
-- Railway reads remain blocked until `railway login` is refreshed; the running
+The file is append-only JSONL, one row per pending invalidation. It is not read
+by any decision path.
+
+---
+
+## 6. Pre-deploy operator actions
+
+All are operator actions; none has been performed.
+
+1. **`railway login`** — auth is expired. Until refreshed, the running revision
+   of each service cannot be confirmed and none of the post-deploy checks can be
+   run.
+2. **Confirm the running revision per service.** Do not assume `f2dfde8` for the
+   mirror or any particular commit for main.
+3. **Confirm `INVO_TRADING_REFRESH` is set on `pariston-mimic`.** Without it,
+   W6 queues records safely but delivers none — `post()` raises
+   `no trading session (refresh failed)` on every attempt.
+4. **Confirm Invo dedup on `clientTxId`** (§4). One deliberate duplicate
+   submission of a harmless record settles it.
+5. **Authorize the wave.** Wave 1 and Wave 2 may ship together or in sequence;
+   the mirror may ship independently of both.
+
+Env vars: **Wave 1 mirror** — `INVO_TRADING_REFRESH` (required),
+`INVO_TRADING_TOKEN` (optional). **Wave 1 main** — no new variables.
+**Wave 2** — no new variables.
+
+---
+
+## 7. Post-deploy verification
+
+### 7.1 Wave 1 (main)
+
+- **V1.1 Liveness.** `GET /healthz` OK; one completed scan cycle in the log with
+  no traceback.
+- **V1.2 Registry.** Startup lists four families; `ema_trend_20_50` and
+  `rsi_mean_reversion` appear in neither the registry nor today's signal file.
+- **V1.3 Stop sanity (forward change).** Spot-check one new signal's stop against
+  the ATR formula. A stop exactly one ATR too tight means `674c86b` is not
+  running. Stop must sit on the correct side of entry.
+- **V1.4 Persistence.** New exit-decision rows carry `applied` and `applied_at`;
+  a write leaves valid JSON (atomic path).
+- **V1.5 Signal volume.** Compare the first 72h against the 11-day baseline
+  (16.5 signals/day across 14 coins; **Measured** on 204 signals, **Estimated**
+  as a rate). A drop caused by the retirements is expected; a drop elsewhere is
+  not.
+
+### 7.2 Wave 1 (mirror)
+
+- **V1.6 Queue drains.** With a valid session, record a close and watch
+  `mirror_data/pending_records.jsonl` return to zero.
+- **V1.7 No new close failures.** The audit stream gains no `record_close_failed`
+  entries.
+- **V1.8 Duplicate watch.** Count POSTs per `clientTxId` (§4).
+
+### 7.3 Wave 2 (main)
+
+- **V2.1 P2 wiring.** New `ADJUST_TAKE_PROFITS` rows have `plan_after.tp` closer
+  to the mark than the prior target. Grep for `TP_WIDEN_REJECTED`: 0 is expected
+  (31/31 on replay). A hit is not a bug — it is the guard doing its job; log it.
+- **V2.2 Shadow writes.** After the first pending invalidation,
+  `data_store/p3_shadow.jsonl` has one row per invalidation with
+  `structure_pass`, `counter_pass`, `verdict`, `breach_margin_pct`.
+- **V2.3 Invalidation unchanged.** Pending invalidations still fire at the same
+  rate; P3 is write-only.
+
+---
+
+## 8. Rollback
+
+**Mechanics:** redeploy the previous Railway deployment for the affected service.
+Both services were uploaded from the local tree, so the prior image is the true
+prior state. If a rebuild is required, check out the confirmed prior revision and
+`railway up`. Do **not** `git revert` the 37-commit range as a unit — it mixes
+runtime, tests, and lint.
+
+**No data rollback is needed or possible.** Exit ledgers are append-only overlays;
+the outcome ledger is written by the evaluator, not this change set.
+`pending_records.jsonl` is a durable queue that both versions can drain.
+`p3_shadow.jsonl` is append-only and unaffected by a rollback.
+
+### 8.1 Wave 1 criteria — roll back if any is true
+
+- **Stop geometry:** a new signal's stop is on the wrong side of entry, or
+  `|entry − stop| / entry` falls outside **[0.05%, 10%]**.
+- **Persistence:** any ledger or daily signal file is unreadable, or a daily file
+  is overwritten instead of archived.
+- **Volume:** 72h signal count outside **[50%, 200%]** of the 11-day baseline
+  (16.5/day, Estimated) **and** attributable to the deploy rather than the regime.
+- **Mirror:** `pending_records.jsonl` does not reach 0 within **60 minutes** of a
+  valid session, or `record_close_failed` repeats.
+
+### 8.2 Wave 2 criteria — roll back if any is true
+
+- **P2 bypass:** an `ADJUST_TAKE_PROFITS` is accepted while the new target is
+  farther from the mark than the old target. This should be impossible; its
+  presence means the guard is not wired and the invariant is fiction.
+- **Shadow blocks decisions:** any exit decision is missing, or a cycle is
+  delayed, because the shadow write raised. Shadowing is not allowed to affect
+  exits under any condition.
+- **Decision collapse:** the exit-decision rate over 72h falls below **50%** of
+  the pre-deploy 7-day mean, with no market explanation. Before rolling back,
+  count `TP_WIDEN_REJECTED` rows — if they explain the drop, the finding is P2
+  rejecting real proposals, which is a Phase 04 question, not a rollback
+  reflex.
+
+### 8.3 Rollback consequences to expect
+
+- Reverting the main image restores `ema_trend_20_50` and `rsi_mean_reversion`;
+  the signal rate rises and the −0.736R family returns. That is the intended
+  meaning of rolling back the retirements.
+- P2 disappears; widening proposals are accepted again. No historical decision
+  changes either way.
+- The P3 shadow file stops growing; existing rows are untouched.
+- Rolling back the mirror does not un-send records already delivered.
+
+---
+
+## 9. Authorization
+
+- Nothing here has been deployed, run against production, or pushed. All commits
+  are local.
+- The deploy strategy is the operator's open decision: (a) now, (b) after
+  Phase 04, (c) partial.
+- Wave 1 and Wave 2 are separable; the mirror is separable from both.
+- Railway reads remain blocked until `railway login` is refreshed, so the running
   main-service revision cannot be confirmed before then.
