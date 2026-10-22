@@ -36,20 +36,21 @@ def test_research_universe_stays_gated_to_validated_history():
 def test_every_tradable_coin_has_registered_picks():
     for sym in CONFIG.get_tradable_symbols():
         picks = CONFIG.get_symbol_config(sym).priority_strategies
-        # RSI retirement (Phase 02) left 9 coins with 2 picks.
-        assert 2 <= len(picks) <= 3, f"{sym} picks: {picks}"
+        # RSI retirement (Phase 02) and ema_trend retirement (W5) left
+        # BTC and ADA with a single pick; the rest carry 2-3.
+        assert 1 <= len(picks) <= 3, f"{sym} picks: {picks}"
         for fam in picks:
             assert fam in STRATEGY_REGISTRY, f"{sym} picks unknown family {fam}"
 
 
 def test_btc_picks_match_doc_matrix():
     picks = CONFIG.get_symbol_config("BTCUSDT").priority_strategies
-    assert picks == ["momentum", "ema_trend"]
+    assert picks == ["momentum"]
 
 
 def test_pipeline_covers_btc_with_its_picks():
     pipe = SignalPipeline(config=CONFIG)
-    assert pipe._get_strategies_for_symbol("BTCUSDT") == ["momentum", "ema_trend"]
+    assert pipe._get_strategies_for_symbol("BTCUSDT") == ["momentum"]
     assert pipe.symbol_registry.is_tradable("BTCUSDT")
 
 
@@ -69,6 +70,31 @@ def test_rsi_family_fully_retired():
 def test_rsi_module_stays_deleted():
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("src.strategies.rsi_mean_reversion")
+
+
+def test_ema_trend_family_fully_retired():
+    """Retired in W5: the only family whose production CI excluded zero
+    (negative: [-1.291, -0.181]), 71% stop-out, 12/22 signals on BTC+ETH,
+    and negative gross R before fees. It must not creep back through any
+    registry surface."""
+    assert "ema_trend" not in STRATEGY_REGISTRY.list_families()
+    assert "ema_trend" not in STRATEGY_TIMEFRAMES
+    for fams in COIN_PRIORITY_STRATEGIES.values():
+        assert "ema_trend" not in fams
+    for sym in CONFIG.get_tradable_symbols():
+        picks = CONFIG.get_symbol_config(sym).priority_strategies
+        assert "ema_trend" not in picks, sym
+    assert "ema_trend_20_50" not in STRATEGY_REGISTRY.list_families()
+
+
+def test_ema_module_stays_deleted():
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("src.strategies.ema_trend")
+
+
+def test_importing_strategies_does_not_import_ema_trend():
+    import sys
+    assert "src.strategies.ema_trend" not in sys.modules
 
 
 def test_live_gate_excludes_unvalidated_by_default(monkeypatch):

@@ -7,7 +7,6 @@ from typing import Any, Dict
 from .base import BaseStrategy, Direction, SignalCandidate, StrategyRegistry, Timeframe
 from .bollinger_atr import BollingerATRStrategy
 from .donchian import DonchianBreakoutStrategy
-from .ema_trend import EMATrendStrategy
 from .momentum import MomentumFilterStrategy
 from .volume_breakout import VolumeBreakoutStrategy
 
@@ -17,7 +16,6 @@ STRATEGY_REGISTRY = StrategyRegistry()
 # Register all strategy families with the canonical registry
 STRATEGY_REGISTRY.register_family("donchian", DonchianBreakoutStrategy)
 STRATEGY_REGISTRY.register_family("momentum", MomentumFilterStrategy)
-STRATEGY_REGISTRY.register_family("ema_trend", EMATrendStrategy)
 STRATEGY_REGISTRY.register_family("bollinger_atr", BollingerATRStrategy)
 STRATEGY_REGISTRY.register_family("volume_breakout", VolumeBreakoutStrategy)
 
@@ -25,27 +23,26 @@ STRATEGY_REGISTRY.register_family("volume_breakout", VolumeBreakoutStrategy)
 STRATEGY_TIMEFRAMES = {
     "donchian": "15m",
     "momentum": "15m",
-    "ema_trend": "15m",
     "bollinger_atr": "15m",
     "volume_breakout": "15m",
 }
 
 # Map coins to their priority strategies (for research prioritization)
 COIN_PRIORITY_STRATEGIES = {
-    "BTCUSDT": ["momentum", "ema_trend"],
-    "ETHUSDT": ["donchian", "momentum", "ema_trend"],
+    "BTCUSDT": ["momentum"],
+    "ETHUSDT": ["donchian", "momentum"],
     "SOLUSDT": ["bollinger_atr", "momentum", "volume_breakout"],
     "ZECUSDT": ["donchian", "bollinger_atr"],
     "XRPUSDT": ["volume_breakout", "donchian"],
-    "BNBUSDT": ["ema_trend", "donchian", "momentum"],
+    "BNBUSDT": ["donchian", "momentum"],
     "HYPEUSDT": ["bollinger_atr", "volume_breakout"],
     "DOGEUSDT": ["donchian", "momentum"],
     "UNIUSDT": ["donchian", "momentum"],
     "NEARUSDT": ["donchian", "momentum"],
-    "ADAUSDT": ["volume_breakout", "ema_trend"],
-    "AVAXUSDT": ["bollinger_atr", "ema_trend", "donchian"],
+    "ADAUSDT": ["volume_breakout"],
+    "AVAXUSDT": ["bollinger_atr", "donchian"],
     "LINKUSDT": ["volume_breakout", "momentum"],
-    "DOTUSDT": ["volume_breakout", "donchian", "ema_trend"],
+    "DOTUSDT": ["volume_breakout", "donchian"],
 }
 
 def create_strategy(family: str, config: dict[str, Any], symbol: str) -> BaseStrategy:
@@ -70,7 +67,6 @@ __all__ = [
     "BollingerATRStrategy",
     "Direction",
     "DonchianBreakoutStrategy",
-    "EMATrendStrategy",
     "MomentumFilterStrategy",
     "SignalCandidate",
     "StrategyRegistry",

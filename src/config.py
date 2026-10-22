@@ -33,20 +33,20 @@ class StrategyFamilyConfig:
 class UniverseConfig:
     min_volume_usdt: float = 10_000_000    # minimum 24h USDT volume
     symbols: list[SymbolConfig] = field(default_factory=lambda: [
-        SymbolConfig(symbol="BTCUSDT", priority_strategies=["momentum", "ema_trend"]),
-        SymbolConfig(symbol="ETHUSDT", priority_strategies=["donchian", "momentum", "ema_trend"]),
+        SymbolConfig(symbol="BTCUSDT", priority_strategies=["momentum"]),
+        SymbolConfig(symbol="ETHUSDT", priority_strategies=["donchian", "momentum"]),
         SymbolConfig(symbol="SOLUSDT", priority_strategies=["bollinger_atr", "momentum", "volume_breakout"]),
         SymbolConfig(symbol="ZECUSDT", priority_strategies=["donchian", "bollinger_atr"], data_availability=DataAvailability.DATA_MISSING),
         SymbolConfig(symbol="XRPUSDT", priority_strategies=["volume_breakout", "donchian"]),
-        SymbolConfig(symbol="BNBUSDT", priority_strategies=["ema_trend", "donchian", "momentum"]),
+        SymbolConfig(symbol="BNBUSDT", priority_strategies=["donchian", "momentum"]),
         SymbolConfig(symbol="HYPEUSDT", priority_strategies=["bollinger_atr", "volume_breakout"], data_availability=DataAvailability.DATA_MISSING),
         SymbolConfig(symbol="DOGEUSDT", priority_strategies=["donchian", "momentum"]),
         SymbolConfig(symbol="UNIUSDT", priority_strategies=["donchian", "momentum"], data_availability=DataAvailability.DATA_MISSING),
         SymbolConfig(symbol="NEARUSDT", priority_strategies=["donchian", "momentum"], data_availability=DataAvailability.DATA_MISSING),
-        SymbolConfig(symbol="ADAUSDT", priority_strategies=["volume_breakout", "ema_trend"]),
-        SymbolConfig(symbol="AVAXUSDT", priority_strategies=["bollinger_atr", "ema_trend", "donchian"]),
+        SymbolConfig(symbol="ADAUSDT", priority_strategies=["volume_breakout"]),
+        SymbolConfig(symbol="AVAXUSDT", priority_strategies=["bollinger_atr", "donchian"]),
         SymbolConfig(symbol="LINKUSDT", priority_strategies=["volume_breakout", "momentum"], data_availability=DataAvailability.DATA_MISSING),
-        SymbolConfig(symbol="DOTUSDT", priority_strategies=["volume_breakout", "donchian", "ema_trend"], data_availability=DataAvailability.DATA_MISSING),
+        SymbolConfig(symbol="DOTUSDT", priority_strategies=["volume_breakout", "donchian"], data_availability=DataAvailability.DATA_MISSING),
     ])
 
 

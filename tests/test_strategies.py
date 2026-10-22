@@ -7,7 +7,6 @@ import pytest
 from src.strategies import (
     BollingerATRStrategy,
     DonchianBreakoutStrategy,
-    EMATrendStrategy,
     MomentumFilterStrategy,
     VolumeBreakoutStrategy,
 )
@@ -211,89 +210,6 @@ class TestMomentumFilterStrategy:
         assert candidates[0].side == "SHORT"
 
 
-class TestEMATrendStrategy:
-    def test_ema_trend_long_pullback(self):
-        """Test EMA trend pullback generates LONG."""
-        strategy = EMATrendStrategy({"params": {"fast_period": 20, "slow_period": 50, "pullback_pct": 1.0}}, "SOLUSDT")
-        
-        # Create klines with bullish EMA alignment and pullback
-        klines = []
-        price = 100.0
-        for i in range(60):
-            price *= 1.001  # Uptrend
-            vol = 1000000.0
-            if i == 59:
-                vol = 3000000.0  # High volume on pullback
-            klines.append({
-                "timestamp": 1700000000000 + i * 900000,
-                "open": price * 0.999,
-                "high": price * 1.002,
-                "low": price * 0.998,
-                "close": price,
-                "volume": vol,
-            })
-        # Pullback to fast EMA (within 1%)
-        klines[-1]["close"] = 105.5
-        klines[-1]["high"] = 105.8
-        klines[-1]["low"] = 105.2
-        klines[-1]["volume"] = 3000000.0
-        
-        # Fast EMA will be ~105.18, so pullback price should be ~104.66 (within 1% below fast EMA)
-        pullback_price = 104.66
-        
-        candidates = strategy.generate_candidates(
-            klines_15m=klines,
-            klines_1h=_make_klines_1h(50, 100.0, "up"),
-            klines_4h=_make_klines_4h(50, 100.0, "up"),
-            btc_regime="bullish",
-            oi_data={},
-            funding_rate=0.0,
-            current_price=pullback_price,
-        )
-        
-        assert len(candidates) >= 1
-        assert candidates[0].side == "LONG"
-    
-    def test_ema_trend_short_pullback(self):
-        """Test EMA trend pullback generates SHORT."""
-        strategy = EMATrendStrategy({"params": {"fast_period": 20, "slow_period": 50, "pullback_pct": 1.0}}, "SOLUSDT")
-        
-        klines = []
-        price = 100.0
-        for i in range(60):
-            price *= 0.999  # Downtrend
-            vol = 1000000.0
-            if i == 59:
-                vol = 3000000.0
-            klines.append({
-                "timestamp": 1700000000000 + i * 900000,
-                "open": price * 1.002,
-                "high": price * 1.002,
-                "low": price * 0.998,
-                "close": price,
-                "volume": vol,
-            })
-        # Fast EMA will be ~95.08, so pullback price should be ~95.55 (within 1% above fast EMA)
-        pullback_price = 95.55
-        klines[-1]["close"] = pullback_price
-        klines[-1]["high"] = 95.8
-        klines[-1]["low"] = 95.2
-        klines[-1]["volume"] = 3000000.0
-        
-        candidates = strategy.generate_candidates(
-            klines_15m=klines,
-            klines_1h=_make_klines_1h(50, 100.0, "down"),
-            klines_4h=_make_klines_4h(50, 100.0, "down"),
-            btc_regime="bearish",
-            oi_data={},
-            funding_rate=0.0,
-            current_price=pullback_price,
-        )
-        
-        assert len(candidates) >= 1
-        assert candidates[0].side == "SHORT"
-
-
 class TestBollingerATRStrategy:
     def test_bollinger_breakout_long(self):
         """Test Bollinger band breakout long."""
@@ -455,8 +371,7 @@ class TestStrategyGeometry:
     @pytest.mark.parametrize("StrategyClass", [
         DonchianBreakoutStrategy,
         MomentumFilterStrategy,
-        EMATrendStrategy,
-        BollingerATRStrategy,
+            BollingerATRStrategy,
         VolumeBreakoutStrategy,
     ])
     def test_long_signal_geometry(self, StrategyClass):
@@ -485,8 +400,7 @@ class TestStrategyGeometry:
     @pytest.mark.parametrize("StrategyClass", [
         DonchianBreakoutStrategy,
         MomentumFilterStrategy,
-        EMATrendStrategy,
-        BollingerATRStrategy,
+            BollingerATRStrategy,
         VolumeBreakoutStrategy,
     ])
     def test_short_signal_geometry(self, StrategyClass):
@@ -842,161 +756,6 @@ class TestVolumeBreakoutATRStopLevels:
         strategy = VolumeBreakoutStrategy({"params": {}}, "ADAUSDT")
         closes = [100.0] * 29 + [102.5]
         cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
-                 if c.side == "LONG"]
-        assert len(cands) == 1
-        cd = cands[0]
-        risk = cd.entry_price - cd.stop_loss
-        assert risk > 0
-        assert cd.tp == pytest.approx(cd.entry_price + 2.0 * risk, abs=1e-9)
-        engine = RiskEngine(account_size=1000.0, max_risk_pct=1.0,
-                            max_leverage=10)
-        out = engine.calculate_risk_parameters(
-            cd.entry_price, cd.stop_loss, {"tp": cd.tp})
-        assert "error" not in out
-        assert out["position_size"] == pytest.approx(round(10.0 / risk, 4))
-
-
-def _ema_klines(closes, volume=1000.0, last_volume=5000.0):
-    """Deterministic klines with correctly chained opens."""
-    klines = []
-    prev = float(closes[0])
-    for i, c in enumerate(closes):
-        c = float(c)
-        klines.append({"timestamp": 1700000000000 + i * 900000,
-                       "open": prev, "high": max(prev, c) + 0.2,
-                       "low": min(prev, c) - 0.2, "close": c,
-                       "volume": last_volume if i == len(closes) - 1 else volume})
-        prev = c
-    return klines
-
-
-def _ema_gen(strategy, klines, current_price):
-    return strategy.generate_candidates(
-        klines_15m=klines,
-        klines_1h=[],
-        klines_4h=[],
-        btc_regime="neutral",
-        oi_data={},
-        funding_rate=0.0,
-        current_price=current_price,
-    )
-
-
-class TestEMATrendATRStopLevels:
-    """ATR stop must compare price-to-price (Donchian pattern).
-
-    Reference numbers were produced by the corrected implementation on
-    these exact fixtures and hand-checked against the formulas. The
-    ATR-wins cases fail under the old implementation (which selected
-    structural: LONG 101.858, SHORT 101.6415); the structural,
-    filter-off, and clamp cases pin behavior shared by both.
-    """
-
-    def test_long_atr_stop_wins_over_structural(self):
-        strategy = EMATrendStrategy({"params": {}}, "SOLUSDT")
-        base = [100.0 + 0.06 * i for i in range(55)]
-        closes = base + [base[-1] - 0.24, base[-1] - 0.42, base[-1] - 0.60]
-        cands = [c for c in _ema_gen(strategy, _ema_klines(closes), closes[-1])
-                 if c.side == "LONG"]
-        assert len(cands) == 1
-        cd = cands[0]
-        assert cd.stop_loss == pytest.approx(101.905, abs=1e-3)
-        assert cd.stop_loss == pytest.approx(
-            cd.entry_price - 1.5 * cd.metadata["atr"], abs=1e-9)
-        risk = cd.entry_price - cd.stop_loss
-        assert risk == pytest.approx(0.735, abs=1e-3)
-        assert cd.tp == pytest.approx(cd.entry_price + 2.0 * risk, abs=1e-9)
-
-    def test_short_atr_stop_wins_over_structural(self):
-        strategy = EMATrendStrategy({"params": {}}, "SOLUSDT")
-        base = [103.5 - 0.06 * i for i in range(55)]
-        closes = base + [base[-1] + 0.24, base[-1] + 0.42, base[-1] + 0.60]
-        cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
-                 if c.side == "SHORT"]
-        assert len(cands) == 1
-        cd = cands[0]
-        assert cd.stop_loss == pytest.approx(101.595, abs=1e-3)
-        assert cd.stop_loss == pytest.approx(
-            cd.entry_price + 1.5 * cd.metadata["atr"], abs=1e-9)
-        risk = cd.stop_loss - cd.entry_price
-        assert risk == pytest.approx(0.735, abs=1e-3)
-        assert cd.tp == pytest.approx(cd.entry_price - 2.0 * risk, abs=1e-9)
-
-    def test_long_structural_stop_wins_when_tighter(self):
-        strategy = EMATrendStrategy({"params": {}}, "SOLUSDT")
-        base = [100.0 + 0.06 * i for i in range(55)]
-        closes = base + [base[-1] - 0.4, base[-1] - 0.7, base[-1] - 1.0]
-        cands = [c for c in _ema_gen(strategy, _ema_klines(closes), closes[-1])
-                 if c.side == "LONG"]
-        assert len(cands) == 1
-        cd = cands[0]
-        assert cd.stop_loss == pytest.approx(101.858, abs=1e-3)
-        assert cd.stop_loss > cd.entry_price - 1.5 * cd.metadata["atr"]
-        assert cd.stop_loss < cd.entry_price
-        assert cd.entry_price - cd.stop_loss > 0
-
-    def test_short_structural_stop_wins_when_tighter(self):
-        strategy = EMATrendStrategy({"params": {}}, "SOLUSDT")
-        base = [103.5 - 0.06 * i for i in range(55)]
-        closes = base + [base[-1] + 0.4, base[-1] + 0.7, base[-1] + 1.0]
-        cands = [c for c in _gen(strategy, _atr_klines(closes), closes[-1])
-                 if c.side == "SHORT"]
-        assert len(cands) == 1
-        cd = cands[0]
-        assert cd.stop_loss == pytest.approx(101.6415, abs=1e-3)
-        assert cd.stop_loss < cd.entry_price + 1.5 * cd.metadata["atr"]
-        assert cd.stop_loss > cd.entry_price
-        assert cd.stop_loss - cd.entry_price > 0
-
-    def test_atr_filter_off_falls_back_to_structural(self):
-        strategy = EMATrendStrategy(
-            {"params": {"atr_stop": False}}, "SOLUSDT")
-        base = [100.0 + 0.06 * i for i in range(55)]
-        closes = base + [base[-1] - 0.4, base[-1] - 0.7, base[-1] - 1.0]
-        cands = [c for c in _ema_gen(strategy, _ema_klines(closes), closes[-1])
-                 if c.side == "LONG"]
-        assert len(cands) == 1
-        cd = cands[0]
-        # atr_stop off forces ATR distance 0, but the min-risk clamp still
-        # applies (0.5% fallback): structural would sit inside it.
-        assert cd.stop_loss == pytest.approx(101.7288, abs=1e-4)
-        assert cd.stop_loss < cd.entry_price
-        assert cd.entry_price - cd.stop_loss > 0
-
-    def test_min_risk_clamp_bounds_tight_stops(self):
-        # Elevated swing with oversized upside-wick ATR: structural wins
-        # max(), then the 0.5*ATR clamp binds exactly. Same under both
-        # implementations; pins the clamp so it cannot regress silently.
-        closes = [102.0 + 0.05 * i for i in range(44)]
-        wicks = [(0.2, 0.2)] * 44 + [(5.0, 0.2)] * 14 + [(0.2, 0.2)]
-        closes = closes + [104.2 - 0.1 * i for i in range(10)] + [103.3]
-        assert len(closes) == 55
-        strategy = EMATrendStrategy({"params": {}}, "SOLUSDT")
-        klines = []
-        prev = float(closes[0])
-        for i, c in enumerate(closes):
-            c = float(c)
-            wu, wd = wicks[i]
-            klines.append({"timestamp": 1700000000000 + i * 900000,
-                           "open": prev, "high": max(prev, c) + wu,
-                           "low": min(prev, c) - wd, "close": c,
-                           "volume": 5000.0 if i == len(closes) - 1 else 1000.0})
-            prev = c
-        cands = [c for c in _ema_gen(strategy, klines, closes[-1])
-                 if c.side == "LONG"]
-        assert len(cands) == 1
-        cd = cands[0]
-        assert cd.stop_loss == pytest.approx(
-            cd.entry_price - 0.5 * cd.metadata["atr"], abs=1e-9)
-        assert cd.stop_loss == pytest.approx(101.175, abs=1e-3)
-        assert cd.entry_price - cd.stop_loss > 0
-
-    def test_stops_and_tp_geometry_and_sizing(self):
-        from src.engines.risk_engine import RiskEngine
-        strategy = EMATrendStrategy({"params": {}}, "SOLUSDT")
-        base = [100.0 + 0.06 * i for i in range(55)]
-        closes = base + [base[-1] - 0.24, base[-1] - 0.42, base[-1] - 0.60]
-        cands = [c for c in _ema_gen(strategy, _ema_klines(closes), closes[-1])
                  if c.side == "LONG"]
         assert len(cands) == 1
         cd = cands[0]

@@ -67,7 +67,7 @@ for sym in sorted(set(r['symbol'] for r in results)):
 
 # 4. Cross-strategy analysis
 print("\n\nCROSS-STRATEGY ANALYSIS (Regime-Aware):")
-for strat in ['bollinger_atr', 'donchian', 'ema_trend', 'momentum', 'volume_breakout']:
+for strat in ['bollinger_atr', 'donchian', 'momentum', 'volume_breakout']:
     strat_results = [r for r in results if r['strategy'] == strat and r['regime_condition'] == 'regime_aware']
     exp_r_vals = [r['metrics'].get('expected_r', 0) for r in strat_results]
     pf_vals = [r['metrics'].get('profit_factor', 0) for r in strat_results]
@@ -86,7 +86,7 @@ for strat in ['bollinger_atr', 'donchian', 'ema_trend', 'momentum', 'volume_brea
 
 # 5. Signal frequency analysis
 print("\n\nSIGNAL FREQUENCY ANALYSIS (Regime-Aware):")
-for strat in ['bollinger_atr', 'donchian', 'ema_trend', 'momentum', 'volume_breakout']:
+for strat in ['bollinger_atr', 'donchian', 'momentum', 'volume_breakout']:
     strat_results = [r for r in results if r['strategy'] == strat and r['regime_condition'] == 'regime_aware']
     sig_per_day = [r['eval_count'] / (r['train_timestamps'] / 96.0) for r in strat_results]
     print(f"\n{strat}:")

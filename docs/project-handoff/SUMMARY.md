@@ -22,7 +22,7 @@ Deterministic Binance USDT-perp futures signal bot (Python ≥3.10): 15-minute s
 
 - **Data:** `src/data/binance_client.py` → fapi.binance.com (exchangeInfo, klines, openInterest(+Hist 15m×10), fundingRate/premiumIndex, 24hr ticker). Replay via `CachedFuturesClient` (`ts <= end_time`, no future leak; `get_mark_price` mocked 0).
 - **Universe:** 14 coins; 8 validated (BTC/ETH/SOL/XRP/BNB/DOGE/ADA/AVAX), 6 DATA_MISSING (ZEC/HYPE/UNI/NEAR/LINK/DOT). `LIVE_REQUIRE_VALIDATED` (default true) gates live scans. Timeframes 4h/1h/15m; all strategies evaluate 15m.
-- **Strategies** (`src/strategies/`): donchian, momentum, ema_trend (only regime veto), bollinger_atr, rsi_mean_reversion (**TP 1.5R — always fails `min_rr=2.0` gate, effectively dead**), volume_breakout. All others TP 2R.
+- **Strategies** (`src/strategies/`): donchian, momentum, bollinger_atr, volume_breakout. **Retired:** rsi_mean_reversion (Phase 02 — TP 1.5R could never pass the `min_rr=2.0` gate) and ema_trend (W5 — only family whose production CI excluded zero). All active families TP 2R.
 - **Risk** (`src/engines/risk_engine.py`): $1,000 / 1% risk / 10% margin / max-lev-10 → $10/trade, size = 10/risk_distance. Liq: LONG `entry*(1-1/lev+0.004)` (SHORT mirrored).
 - **Scoring** (weights=100, floor 60): regime 20, structure 15 (**always +10**), momentum 15 (**always +7 — `price_trend` never set**), volume 15, OI 15 (**SHORT broken — trend hardcoded `"up"`**), funding 5, liquidity 5 (always), RR 10. Strategy confidence discarded.
 - **Lifecycle** (`src/models/lifecycle.py`): GENERATED → WAITING_FOR_ENTRY → ACTIVE → TP1_HIT/STOPPED_OUT/INVALIDATED/EXPIRED; single-TP full close; tracker passive (live driver UNKNOWN).
