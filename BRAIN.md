@@ -212,3 +212,54 @@ That file is read at the start of the next session.
 - `MIMIC_LIVE=true` on Railway; $16 real money.
 - Statistical caveat: 11 days / 204 entry signals, 5.1 days / 97 exit signals, one regime.
   No claim is a 30-day result.
+- **Baseline populations (2026-10-22):** the "+0.03" baseline is the **candidate-level
+  (pre-gate)** correlation on the 6,438-candidate TRAIN replay; the **published-signal**
+  correlation is **+0.12** (204). Complementary measurements of different objects, not
+  contradictory — every report must state which population it measures.
+
+### Regime Dominance Analysis (2026-10-22)
+
+Regime weight in isolation: partial r **+0.101** (204) / **+0.109** (177 live-only).
+Non-regime components, with regime held out: partial r **+0.109** (204) / **+0.112**.
+`corr(non-regime, regime)` = **−0.582** — the two are not redundant.
+Regime is not trend-following in disguise: vs EMA200-15m r = **+0.311** (partial +0.122);
+vs 1h momentum r = **+0.016** (partial +0.101). Neither operator test threshold
+(r ≥ 0.8 for duplication, ≥ 0.15 for dominance) fires.
+
+**Correction to "regime is the entire score" — retracted by the operator.** Regime carries
+a real but weak independent signal; non-regime components carry equal independent signal.
+The honest statement is: **all components are weak; none is doing the work alone.**
+
+### Decision: (f) status quo + observe (2026-10-22)
+
+- **(a) rebuild — rejected:** W-S found no mechanically broken strategy.
+- **(d) raise gate — rejected:** no R-weighted support. Gate 75/80 = halt (n = 4 / 0);
+  gate 70 → −30% R; 65 → 70 discards 71 signals worth +10.27R.
+- **(e) regime filter — rejected:** same money on fewer trades, and a hard filter is
+  un-testable inside a single regime window (the single-regime trap).
+- **(f) observe — adopted:** fixes the data debt, produces real out-of-sample data, keeps
+  every option open.
+
+Operator acknowledgment on record: **$16 cannot prove profitability.** The distribution is
+tail-dependent (top-5 trades = 60% of profit). CI lower **+0.003** at gate 60 live-only is
+the edge of noise — *the possibility of an edge*, not an edge. The 30-day test asks "does a
+measurable signal exist and do the pre-registered hypotheses hold", not "does the strategy
+work".
+
+### 30-day observation protocol (standing, 2026-10-22 → +30d or n = 200)
+
+Governs the Phase 04B/04C go/no-go. Hypotheses and criteria live in
+`reports/PRE_REGISTERED_HYPOTHESES_2026-10.md` (H1 gate 65 vs 60, H2 hard regime filter,
+H3 side-opposed vs aligned, H4 regime-only vs full score); the window and the five-band
+verdict live in `reports/OBSERVATION_PROTOCOL_2026-10.md`.
+
+- Minimum useful n = **100** published signals. Primary metrics: mean / median net R,
+  CI 95% lower bound, top-5 concentration, win rate, fee/gross ratio.
+- Verdict bands: strong pass (CI lower ≥ +0.10, median ≥ −0.05) · weak pass (≥ +0.05,
+  ≥ −0.10) · inconclusive · weak fail (CI lower < 0 or median < −0.20) · strong fail
+  (CI lower < −0.10, median < −0.30, or fee/gross > 0.70).
+- Re-evaluation triggers: a bullish 7-day BTC 4h regime inside the window (re-examine H2's
+  single-regime trap); a 5-trade streak of >2R wins (mean moves, median does not).
+- **No behaviour change ships during the window.** Persistence/provenance work only.
+- Pre-committed: no hypothesis is re-worded after seeing the data. A miss is reported as a
+  miss.
