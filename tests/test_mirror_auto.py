@@ -52,6 +52,18 @@ POST_OPEN = {
     },
 }
 
+POST_CLOSE = {
+    "id": "post-3",
+    "update": {
+        "ticker": "HYPE", "directionLong": False, "leverage": 4,
+        "isOpen": False, "closingPrice": 80.0, "verifiedTrade": True,
+        "baseId": "SRC-1", "baseShortId": "SH-1",
+        "owner": {"id": "7fd09aef-d45f-47dd-aa7f-72143e7d5a05",
+                  "username": "paristoon"},
+        "portfolio": {"id": "17cc19aa-d854-4857-9cca-7f05f21ec2da"},
+    },
+}
+
 
 def test_classify_open_and_pariston_filter():
     ev = classify_post(POST_OPEN)
@@ -266,18 +278,36 @@ def test_cycle_close_mirrors_exit(tmp_path):
     feed.posts.append(dict(POST_OPEN, id="post-2"))
     bot.run_once("tok")
     assert bot.open_count() == 1
-    close_post = {"id": "post-3", "update": {
-        "ticker": "HYPE", "directionLong": False, "leverage": 4,
-        "isOpen": False, "closingPrice": 80.0, "verifiedTrade": True,
-        "baseId": "SRC-1", "baseShortId": "SH-1",
-        "owner": {"id": "7fd09aef-d45f-47dd-aa7f-72143e7d5a05",
-                  "username": "paristoon"},
-        "portfolio": {"id": "17cc19aa-d854-4857-9cca-7f05f21ec2da"}}}
-    feed.posts.append(close_post)
+    feed.posts.append(POST_CLOSE)
     out = bot.run_once("tok")
     assert out["closed"] == 1
     assert hl.closes == ["HYPE"] and len(sess.closes) == 1
     assert bot.open_count() == 0 and bot.committed_usd() == 0.0
+
+
+def test_close_record_failure_is_audited(tmp_path):
+    """W1: 11 genuine closes failed to record and left no trace. The fill
+    still stands, but the failure must be visible in the audit log."""
+    got = []
+    feed = PostFeed([POST_OPEN])
+    mc = MirrorConfig(email="", app_password="", device_id="d",
+                      data_dir=str(tmp_path))
+    hl, sess = FakeHl(), FakeSession()
+
+    def boom(payload):
+        raise RuntimeError("HTTP 500: upstream")
+
+    sess.record_close = boom
+    bot = AutoBot(mc, _cfg(live=True), hl=hl, session=sess,
+                  watcher=FeedWatcher(fetch_fn=feed), notify_fn=got.append)
+    bot.run_once("tok")
+    feed.posts.append(dict(POST_OPEN, id="post-2"))
+    bot.run_once("tok")
+    feed.posts.append(POST_CLOSE)
+    assert bot.run_once("tok")["closed"] == 1
+    hits = [a for a in bot.store.recent_audit(50)
+            if a["event"] == "record_close_failed"]
+    assert hits and hits[-1]["detail"]["coin"] == "HYPE"
 
 
 def test_cycle_respects_max_concurrent(tmp_path):

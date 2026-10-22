@@ -732,6 +732,10 @@ class AutoBot:
                     "summary": {"qtyBefore": "?", "qtyAfter": "0"}})
             except Exception as e:
                 logger.warning(f"[Auto] close-record failed: {e}")
+                self.store.audit("record_close_failed",
+                                 {"coin": coin, "error": str(e)})
+                self._ev("WARN", "record_close_failed",
+                         {"coin": coin, "error": str(e)})
 
     def _follow_update(self, ev: Dict[str, Any], summary: Dict[str, Any]) -> None:
         coin = (ev.get("ticker") or "").replace("USDT", "").replace("USDC", "")

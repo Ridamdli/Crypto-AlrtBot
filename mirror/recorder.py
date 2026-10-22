@@ -3,8 +3,11 @@
 Holds the operator-exported trading refresh JWT (350-day). Access tokens
 (~10 min) rotate silently; every record call retries once after a 401.
 All record calls are best-effort by policy: an HL fill stands on its own —
-a failed record alerts but never unwinds a position.
+a failed record alerts but never unwinds a position. Records that cannot be
+sent are appended to pending_records.jsonl and flushed once a session exists.
 """
+import json
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -38,6 +41,9 @@ class TradingSession:
         self.refresh_token = refresh_token
         self.access_token = access_token
         self.state_path = state_path
+        self.pending_path = (
+            os.path.join(os.path.dirname(state_path), "pending_records.jsonl")
+            if state_path else "")
         if state_path:
             self._load()
 
@@ -112,12 +118,83 @@ class TradingSession:
         return self.refresh()
 
     def post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
-        """POST with one refresh-and-retry on 401. Raises on failure."""
+        """POST with one refresh-and-retry on 401. Raises on failure.
+
+        With no usable session the payload is queued first, so a credential
+        gap delays a record instead of losing it. The caller still sees the
+        raise and still alerts.
+        """
+        if not self.ensure():
+            self._queue(path, body)
+            raise RuntimeError("no trading session (refresh failed)")
+        self.flush()
+        return self._post_now(path, body)
+
+    def _queue(self, path: str, body: Dict[str, Any]) -> None:
+        if not self.pending_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.pending_path) or ".", exist_ok=True)
+            line = json.dumps({"path": path, "body": body,
+                               "queued_at": int(time.time())})
+            with open(self.pending_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+        except OSError as e:
+            logger.warning(f"[Recorder] queue write failed: {e}")
+
+    def flush(self) -> int:
+        """Drain queued records oldest-first; returns how many left the queue.
+
+        Stops at the first transient failure so ordering is preserved. A 400,
+        404 or 422 can never succeed, so it is dropped instead of blocking
+        the queue forever.
+
+        shortcut: at-least-once. A crash between send and rewrite can resend,
+        so payloads carry a clientTxId and Invo must dedupe on it.
+        """
+        if not self.pending_path or not os.path.exists(self.pending_path):
+            return 0
+        try:
+            with open(self.pending_path, encoding="utf-8") as f:
+                lines = [ln for ln in f if ln.strip()]
+        except OSError as e:
+            logger.warning(f"[Recorder] queue read failed: {e}")
+            return 0
+        drained = 0
+        for line in lines:
+            try:
+                rec = json.loads(line)
+                self._post_now(rec["path"], rec["body"])
+            except Exception as e:
+                msg = str(e)
+                if any(code in msg for code in ("HTTP 400", "HTTP 404", "HTTP 422")):
+                    logger.warning(f"[Recorder] dropping rejected record: {msg}")
+                    drained += 1
+                    continue
+                logger.warning(f"[Recorder] flush stopped after {drained}: {e}")
+                break
+            drained += 1
+        self._rewrite_queue(lines[drained:])
+        return drained
+
+    def _rewrite_queue(self, rest: list) -> None:
+        try:
+            if rest:
+                tmp = self.pending_path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.writelines(rest)
+                os.replace(tmp, self.pending_path)
+            elif os.path.exists(self.pending_path):
+                os.remove(self.pending_path)
+        except OSError as e:
+            logger.warning(f"[Recorder] queue rewrite failed: {e}")
+
+    def _post_now(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         import urllib.request as _req
         import urllib.error as _err
         import json as _json
-        if not self.ensure():
-            raise RuntimeError("no trading session (refresh failed)")
         payload = _json.dumps(body).encode()
         for attempt in (0, 1):
             req = _req.Request(f"{BASE}{path}", data=payload,
