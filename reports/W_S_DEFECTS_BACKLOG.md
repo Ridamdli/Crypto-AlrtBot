@@ -64,6 +64,19 @@ extras 11 -> ADA 1 (80), NEAR 4 (75,75,60,60; one at 55 filtered), UNI 2 (both 5
               ZEC 3 (75; two at 55 filtered)
 ```
 
+**Window-relevant note (added 2026-10-22).** During the active observation window the Bollinger gate rejects
+**7 would-be-published signals** (ADA SHORT score 80, NEAR SHORT 75 ×2, NEAR LONG 60 ×2, ZEC SHORT 75). They are
+potential signal loss in the window sample, and they cluster on NEAR — 4 of the 7.
+
+Read them conditionally, once the tree decides:
+
+- **H1–H4 show edge** → evaluate whether these 7 would have improved or worsened outcomes. Their absence is a
+  mitigating factor *for the gate*, not evidence that it works.
+- **H1–H4 inconclusive** → these 7 are potential noise; the gate's effect stays unmeasured either way.
+
+**Do not remove the gate mid-window.** A post-window removal decision must cite this deferred set, not the
+bandwidth distribution.
+
 ---
 
 ## 3. Strategy parameters invisible to provenance
