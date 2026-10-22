@@ -14,8 +14,10 @@ def _cand(conf):
 def test_rank_candidates_uncapped_returns_all_viable():
     eng = ScoringEngine.__new__(ScoringEngine)
     eng.min_confidence = 60
-    # bypass scoring: pre-set confidence and stub score_candidate
-    eng.score_candidate = lambda cand, config=None: cand["confidence"]
+    # bypass scoring: pre-set confidence and stub the breakdown
+    eng.score_breakdown = lambda cand, config=None: {
+        "engine": "stub", "points": {}, "inputs": {},
+        "total_raw": cand["confidence"], "clamped": False}
     cands = [_cand(90), _cand(80), _cand(70), _cand(60), _cand(59)]
     out = eng.rank_candidates(cands, top_n=None)
     assert [c["confidence"] for c in out] == [90, 80, 70, 60]
@@ -24,7 +26,9 @@ def test_rank_candidates_uncapped_returns_all_viable():
 def test_rank_candidates_top_n_still_caps_when_asked():
     eng = ScoringEngine.__new__(ScoringEngine)
     eng.min_confidence = 60
-    eng.score_candidate = lambda cand, config=None: cand["confidence"]
+    eng.score_breakdown = lambda cand, config=None: {
+        "engine": "stub", "points": {}, "inputs": {},
+        "total_raw": cand["confidence"], "clamped": False}
     cands = [_cand(90), _cand(80), _cand(70)]
     out = eng.rank_candidates(cands, top_n=2)
     assert [c["confidence"] for c in out] == [90, 80]

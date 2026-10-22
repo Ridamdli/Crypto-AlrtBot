@@ -29,6 +29,12 @@ class SignalModel(BaseModel):
 
     # Scoring
     confidence: int
+    # W-DD Option A: per-component points and the inputs the scorer saw, so a
+    # published score is explainable from the record alone. None means the
+    # signal predates the contract — audits must reconstruct and label that
+    # Estimate, never read it as zero. Audits join outcomes by signal_id:
+    # pariston_outcomes.json is an evidence export, not written by this tree.
+    scoring_breakdown: dict[str, Any] | None = None
 
     # Human-readable output
     conditions: list[str]
