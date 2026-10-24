@@ -157,10 +157,17 @@ everything; the config simply describes a stop rule that does not exist.
   identical, docs stop advertising a filter that does not exist. Should leave one line in the family docstring
   saying the stop is structural, since (b) otherwise erases the record that ATR was ever intended.
 
-**Impact note.** Operator reports momentum at **+1.42R mean on 22 signals** in the current evidence set
-(*User-provided* — not re-derived here; `signals.jsonl` holds **21** momentum signals, so the count needs
-reconciling before the figure is cited). If that edge is real it comes from the structural swing-low stop, not from
-ATR — which argues for (b) rather than for wiring ATR in to "fix" a family that already works.
+**Impact note — the `+1.42R` figure is now reconciled against production and does not hold.**
+Operator carried **+1.42R mean on 22 signals** (*User-provided*). The production outcome ledger
+(`data_store/outcomes.json`, pulled 2026-10-24, *Measured*) holds **25** `momentum_20` rows,
+**24 with `final=True`**: 11 stopped out, 5 TP1, 1 TP2, **6 still open at mark-to-market**,
+1 expired. Net over all 24 is **−1.727R**; over the **17 resolved** it is **−1.470R
+(mean −0.086R)**. **Neither 21 nor 22 reproduces**, and the sign is opposite. The likely
+explanation is that `+1.42R` was a harness/backtest figure, not a production outcome — the two
+must be cited separately from here on. Consequence for the disposition: there is **no measured
+momentum edge** arguing for (b) over (a); the family is mildly negative on production, so neither
+wiring ATR in nor deleting it can be justified by momentum performance. Choose on honesty grounds
+(delete the inert params) or leave it alone.
 
 **Window-safe: do not touch.** Current momentum behaviour is what the window measures; inert parameters change
 nothing about it.
@@ -253,6 +260,10 @@ BEARISH, `rejected: 0`. No cross-sectional or per-direction limit is visible in 
 *User-provided*, screenshot). Immediate stop-outs, not exit mismanagement — which is consistent
 with 03-B-2 being CLOSED and means the loss pattern is an **entry-side** property. A burst of
 same-direction entries stopping out together is exactly what an uncapped cross-section produces.
+**Caveat (Measured, W-LIVE Phase 5):** the outcome ledger is 15-minute bar resolution and cannot
+see a 3-minute hold — every `holding_minutes` value is a multiple of 15 and 17 of 45 settled
+trades sit on the 15-minute floor. The operator's observation stands as *User-provided*; it is
+not independently confirmed by the outcome file, and the bar-resolution limit is why.
 
 **Options**
 - Per-direction concurrent cap (e.g. max 3) as a portfolio-level gate, not a per-strategy one.
@@ -281,6 +292,88 @@ event type or whether it is internal state leaking into the audit stream.
 
 ---
 
+## 10. Worker attribution — the data exists; the log line and an explicit field do not
+
+**Impact: high for every future worker analysis; zero for behaviour.**
+The brief for this item said "`SupervisorDecision` logs action and reason, but not proposing
+worker_id", and proposed adding `worker_id` to `models.py`/`supervisor.py`. **That premise is
+partly wrong, and the real fix is smaller.** Verified read-only against the pulled ledger:
+
+- `WorkerAssessment.to_dict()` (`src/exits/models.py:165`) **already writes** `worker_id` and
+  `worker_version`.
+- **Every one of the 1,315** in-window decisions carries `assessments[]`: **6,575 assessments**,
+  all five workers, on every decision. Worker identity is persisted and complete.
+
+So no schema change is needed to *record* who assessed. What is genuinely missing:
+
+1. **The `[Exits]` log line carries no worker** (`src/exits/monitor.py:170`:
+   `[Exits] {sid} {state} -> {action} (plan vN, …)`). Logs are the only surface available when the
+   volume is not mounted, and they cannot attribute a decision.
+2. **No explicit adopted-worker field.** `SupervisorDecision` records the action but not *which*
+   worker's proposal was taken, so adoption must be re-derived by matching `action` against each
+   assessment's `proposed_action`. That is **ambiguous**: 391 in-window decisions had more than
+   one distinct non-`NO_CHANGE` proposal, and the re-derivation cannot say whose proposal won.
+
+**Evidence of why this matters (Measured, W-LIVE Phase 5):** per-decision adoption computes to
+`structure` 100%, `counter` 57.1%, `riskreward` 11.9%, `stop` 8.0%, `target` 3.2%. Those numbers
+read as "the supervisor ignores three workers" but are mostly an artifact of `monitor.py:162`
+deduping repeated identical decisions — the same proposal recurs every cycle without being
+re-applied. **The metric cannot be trusted until adoption is recorded explicitly and computed as
+*first proposal per signal*, not per decision.**
+
+**Fix (smallest complete):**
+- Add `adopted_worker_id: str = ""` and `adopted_worker_version: str = ""` to `SupervisorDecision`,
+  set at the single point where the supervisor selects a proposal.
+- Add the worker id to the `[Exits]` line: `… -> {action} by {worker_id} (plan vN, …)`.
+- Both are additive fields and a format-string change: **no behaviour change**, no new decisions,
+  no changed gating — window-safe by construction, but still post-window in practice, because a
+  deploy mid-window changes the running code.
+
+**Priority: HIGH** (blocks all future worker analysis). **Disposition: DEFER to post-window.**
+
+---
+
+## 11. Production still runs a retired strategy family (deploy lag)
+
+**Impact: high for this window's validity, zero for code correctness.** `ema_trend_20_50` was
+retired by standing decision and the retirement is committed locally at **`a29831a`
+(2026-10-22)**. Production runs **pre-`49ff810`** and predates that commit (`git merge-base`
+confirms `a29831a` is *after* the deployed base), so the family is still live there.
+
+**Evidence (Measured, W-LIVE Phase 5):**
+
+| Item | Value |
+|---|---|
+| `ema_trend_20_50` published in-window | **8** |
+| Settled | 7 |
+| Sum net R | **−6.896** |
+| Stop-out rate | **85.7%** |
+| Share of the window's net loss (−7.736R) | **89%** |
+| Families registered locally | 4 (`donchian`, `momentum`, `bollinger_atr`, `volume_breakout`) |
+| Families publishing in production | 5 |
+
+Excluding it, the four intended families sum to **−0.840R over 42 settled signals** (mean
+−0.020R) — essentially flat.
+
+**Why it is not a code defect:** nothing has been deployed since 2026-10-13/14, by design. The
+retirement simply never reached the running system. There is no config switch to flip.
+
+**Options**
+- **(a) Nothing now** — the next authorized deploy carries the retirement. Correct, and it is the
+  disposition.
+- **(b) Verify at deploy time** — grep the first post-deploy scan for `strategy_id` emissions and
+  assert zero `ema_trend` publishes. One line of release verification, worth doing because a
+  retirement that silently fails to take effect is invisible otherwise.
+
+**Why it is tracked rather than dismissed:** it is a **validity caveat on every per-strategy
+number in this window**. Any 04B read that cites window per-strategy R is citing a **5-family
+system**, not the intended 4-family system, and must say so.
+
+**Disposition: DEFER — no mid-window deploy.** Tracked so the retirement is not lost and so the
+caveat travels with the data.
+
+---
+
 ## Order of work (when authorized)
 
 | # | Item | When | Kind of change |
@@ -288,6 +381,8 @@ event type or whether it is internal state leaking into the audit stream.
 | 6 | Ouroboross Invo session churn / missed mirrors | **after the window**; investigate root cause before any edit | observation first — may be an Invo session/rate limit, not a code bug |
 | 7 | `CLOSE_PAPER_POSITION` state persistence | **after the window** | behaviour (terminal state + `_is_due` exclusion); shared root cause with reservation drift |
 | 8 | Cross-sectional / per-direction exposure cap | after the window, before any 04B risk citation | behaviour — needs its own observation |
+| 10 | Worker attribution: `adopted_worker_id` + worker on the `[Exits]` line | after the window | additive fields / logging — no behaviour change |
+| 11 | Deploy lag: `ema_trend_20_50` retirement not in production | at the next authorized deploy | release verification — assert zero `ema_trend` publishes |
 | 2 | Bollinger gate: remove or re-threshold | **after the window closes**; before any 04B citation of +19R | behaviour (11 extra detections, 7 publish) — needs a published-set diff |
 | 4 | Docs correction | before any 04B decision references the docs | documentation |
 | 1 | `regime_filter` fix-or-remove | after H3 resolves | behaviour - needs H3 evidence |
@@ -295,9 +390,11 @@ event type or whether it is internal state leaking into the audit stream.
 | 9 | Map the `suppressed` audit event | after the window | no-op / logging |
 | 3 | Provenance completeness | after the window, as its own work package | evidence plumbing |
 
-**Analysis rule added with items 6–9 (2026-10-24):** any exit analysis on this ledger groups by
+**Analysis rules added with items 6–11 (2026-10-24):** any exit analysis on this ledger groups by
 unique `signal_id` (item 7). Any mimic claim is stated as *recorded* positions, not *actual*
-positions, until item 6 is resolved — the record is known to undercount.
+positions, until item 6 is resolved — the record is known to undercount. Worker adoption is
+computed as **first proposal per signal**, not per decision (item 10). Per-strategy R from this
+window is a **5-family** number until item 11 ships.
 
 ## Not in this backlog (on purpose)
 
@@ -306,6 +403,7 @@ positions, until item 6 is resolved — the record is known to undercount.
   terminal-state persistence defect: the exit policy is not in question, only whether a decision
   it made is recorded once and honoured. Do not use item 7 as licence to reopen 03-B-2.
 - Retired families (`ema_trend_20_50`, `rsi_mean_reversion`) — standing decision, they stay retired.
+  Item 11 is **not** an exception: it tracks the retirement reaching production, not a revival.
 - Momentum threshold (M1), `confirmation_bars` (M2), partial-bar volume (M4), forming-bar bands (M5), duplicate
   method definitions (L1/L2), donchian close-vs-price wording (L4), orphan `.pyc` (L6), Bollinger SHORT tests (L7).
   These are real but none is decision-blocking; they are recorded in the findings register and wait for a work

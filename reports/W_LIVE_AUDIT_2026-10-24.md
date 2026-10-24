@@ -1,8 +1,9 @@
 # W-LIVE — Live Production Audit (2026-10-24)
 
 Read-only audit of the Railway-hosted bot during the active observation window
-(2026-10-22 → 2026-11-21). No code change, no deploy, no restart, no env write,
-no `railway login`. Logs and MCP metadata only.
+(2026-10-22 → 2026-11-21). No code change, no deploy, no restart, no env write.
+Phase 1–3 read logs and MCP metadata only; Phase 4–5 (this revision) read the pulled
+`data_store/*.json` and `mirror_data/*` files over read-only `railway ssh`.
 
 Labeling: **Measured** = read directly from Railway/MCP output or repo. **User-provided**
 = operator or prior-session figure carried in. **Estimated** = my inference, stated as such.
@@ -13,6 +14,17 @@ as backlog items 6–9 (`reports/W_S_DEFECTS_BACKLOG.md`); aggregation rule adde
 committed with a `.gitignore` exception. Findings and window status unchanged — no production
 action, no restart.
 
+**Revision 3 (2026-10-24, Phases 4–5 complete):** file access granted, ten files pulled
+byte-exact into `prod_evidence/2026-10-24/` (gitignored). §3–§7 now carry computed numbers
+instead of "blocked" placeholders. Three findings are new and material:
+
+- **The window's net loss is fee drag, not signal quality.** Gross realized R over 49 settled
+  trades is **+1.000R**; modeled fees are **−8.736R**; net is **−7.736R**. Fees are **8.7×** gross.
+- **`ema_trend_20_50` is retired by standing decision but published 8 in-window signals**
+  (7 settled, −6.896R, 85.7% stopped out).
+- **The momentum `+1.42R / 21` figure does not reproduce.** The production outcome ledger holds
+  24 settled `momentum_20` rows at **−1.727R net** (gross −0.750R).
+
 ---
 
 ## 1. Executive summary
@@ -21,17 +33,31 @@ action, no restart.
    delivered to Telegram, **51 outcomes booked**, zero errors in scan, supervision, or
    tracking paths. Nothing is stalled.
 2. **No BLOCKER.** No crash loop, no restart, no OOM, no exposed secret, no uncontrolled loss,
-   no traceback in either service across 2.8 days. No trigger fired; nothing forces a stop.
+   no traceback in either service across 2.8 days. **No trigger forces a stop** — but note that
+   the fee-exceeds-gross condition is met on every available span, and CI lower ≤ 0 is true
+   (−0.545) while the 30-day sample gate is not; see *Triggers* below.
 3. **Paper equity fell over the window: 1028.75 → 941.93, −86.82 (−8.44%)**, with an
    intra-window low of **803.30 (−21.9%)** on 10-23 14:05 recovering to −8.44% by 10-24 15:33.
-   *Measured, self-reported `[Paper]` log line. This is the only P&L read obtainable.*
-4. **One genuine defect found: `CLOSE_PAPER_POSITION` does not terminate supervision.**
+   *Measured, self-reported `[Paper]` log line.*
+4. **The loss is fee drag.** Over 49 settled window signals: mean net **−0.158R**, median
+   **−1.096R**, sum **−7.736R**, CI95 **[−0.545, +0.229]** (includes 0). Decomposed: gross
+   realized **+1.000R**, modeled fees **−8.736R** (0.178R per trade). Gross expectancy per trade
+   is **+0.020R** against a **0.178R** cost — an **8.7×** cost-to-edge ratio. *Measured from
+   `outcomes.json`; the fee figure is the harness's own fee model, not an exchange statement.*
+5. **One genuine defect found: `CLOSE_PAPER_POSITION` does not terminate supervision.**
    7 distinct positions were told to close **78 times** (one 26×, one 43×), state stayed `open`
    up to 33h, and supervision kept re-deciding after the close. Closes are deduped server-side,
    so this is a **measurement/observability defect, not a capital defect**.
-5. **Worker- and strategy-level attribution is unobservable in production.** Neither worker
-   adoption, RR_DEAD, per-strategy signal counts, nor H2/H3 aligned-vs-opposed can be derived
-   from logs or files. Recorded here as blocked, not as "fine".
+6. **Attribution is no longer blocked — and it immediately surfaces two contradictions of
+   standing figures.** Worker identity *is* persisted (6,575 assessments over 1,315 decisions);
+   `RR_DEAD` is measurable (31 in-window, not 0/8); RiskGuard ran on **71/1,315** decisions
+   (5.4%), not the 124/124 carried in from the prior snapshot.
+7. **A retired strategy family is still publishing — deploy lag, not a strategy question.**
+   `ema_trend_20_50` was retired by standing operator decision (`AGENTS.md` §5) and the
+   retirement is committed locally (`a29831a`, 2026-10-22), but production runs pre-`49ff810` and
+   predates it. It published **8** in-window signals, 7 settled at **−6.896R** with **85.7%**
+   stopped out — **89% of the window's net loss**. Excluding it, the four intended families sum
+   to **−0.840R over 42** (mean −0.020R). Tracked as backlog item 11.
 
 ---
 
@@ -105,6 +131,13 @@ Two independent counters (outcome tracker `finalized_this_run` summed = 51; pape
 `newly_booked` summed = 51) agree exactly. That rules out double-booking and silent
 mis-counting in the tracking path. *Measured.*
 
+**Reconciliation of 51 vs 49.** 51 bookings happened in-window, but only **49** belong to
+signals *published* in-window. The other 2 are pre-window signals that settled after the window
+opened (`SIG-20261021-XRPUSDT-CE53C8`, `SIG-20261021-SOLUSDT-5B02EE`, both STOPPED_OUT).
+Every hypothesis below uses the **49-signal window-published population**. Sensitivity: adding
+the 2 carry-ins gives n=51, mean **−0.194R**, median −1.096R, sum −9.909R — the conclusion does
+not move. *Measured.*
+
 **Signal distribution per coin** (61 distinct signals reached exit supervision; 14 coins):
 ETH 7, LINK 6, AVAX 6, XRP 5, SOL 5, BNB 5, DOGE 5, ADA 4, NEAR 4, ZEC 4, DOT 3, UNI 3,
 HYPE 3, **BTC 1**. *Measured.* BTC coverage: 1 signal in 2.8 d extrapolates to ~10 per 30 d,
@@ -129,6 +162,9 @@ of the items below are ranked the way they are.
    paper equity as **immediate stop-outs, not exit mismanagement** — consistent with 03-B-2 being
    CLOSED and with a zero-error supervision path. The loss pattern is therefore an **entry-side**
    property, and an uncapped cross-section (§8 item 5) makes simultaneous stop-outs likely.
+   *Phase 5 qualification:* the outcome ledger is **15-minute bar resolution** and cannot see a
+   3-minute hold (§7), so this remains **User-provided** — and the loss is now better explained
+   by fee drag (§7.1) plus one retired family (§4) than by hold duration alone.
 3. **The `CLOSE_PAPER_POSITION` loop means exit analysis must group by unique `signal_id`.**
    78 close decisions = **7 positions**. Now a binding rule in the backlog (item 7).
 
@@ -137,152 +173,281 @@ of the items below are ranked the way they are.
 mimic side they lose real money**, because a missed mirror is a missed +13.61% trade. None of that
 justifies a mid-window fix; it is why backlog item 6 sits first in the queue.
 
-### Triggers — none fired
+### 3.2 Phase 4 — window metrics (n=49 settled, 10 still active)
 
-- **Bullish regime week?** No. Regime counts in-window: BEARISH 174, NEUTRAL 63, BULLISH 11 (Measured).
-- **5 consecutive R > 2.0?** Not evaluable — per-trade R is not readable (no file access),
-  and the published series is 59 signals not 5 closed winners. No reason to believe it fired.
-- **CI lower bound ≤ 0?** Not computable — requires the R sample; blocked (§11).
+| Metric | Value | Label |
+|---|---|---|
+| Settled / still active | **49** / 10 | Measured |
+| Mean net R | **−0.158** | Measured |
+| Median net R | **−1.096** | Measured |
+| Sum net R | **−7.736** | Measured |
+| Win rate | **30.6%** (15/49) | Measured |
+| CI95 on mean | **[−0.545, +0.229]** — includes 0 | Measured |
+| Gross profit R | +27.306 | Measured |
+| Gross loss R | −35.042 | Measured |
+| Gross realized R (before fees) | **+1.000** | Measured |
+| Fees R | **−8.736** (0.178/trade) | Measured (fee model) |
+| Top-5 winners | 9.676R = **35.4%** of gross profit | Measured |
+| Exit status mix | STOPPED_OUT 29, TP1_HIT 15, EXPIRED 4, ACTIVE 1 | Measured |
 
-### Hypotheses H1–H4
+**Top-5 concentration is 35.4% of gross profit**, and the five best trades are tightly clustered
+at 1.915–1.952R (all TP1 exits) — the profit base is *narrow but not single-trade dependent*.
+The distribution is bimodal: 29 trades at exactly −1.0R gross, 15 at exactly +2.0R gross, 5 at
+0.0R. *Measured.*
 
-- **H1 (gate 65 vs 60):** *not evaluable at n=59/2.8 d.* One observable: the
-  `Live gate: N unvalidated coins excluded` line fired **0 times in 248 scans** → no coin was
-  excluded by the validation gate in-window. That is about *exclusions*, not about the 65-vs-60
-  threshold, and does not settle H1. *Measured, scope-limited.*
-- **H2 (regime filter):** *cannot be evaluated.* Per-signal side is not logged, so aligned vs
-  opposed counts are not derivable. Only proxy: the mimic's TPSL placements skew 84 SHORT /
-  5 LONG — consistent with signals following a bearish regime, which is *alignment by
-  construction*, not evidence of filter value. *Estimated proxy.*
-- **H3 (side-opposed):** *cannot be evaluated* for the same reason; neither count nor mean exists.
-- **H4 (regime-only scoring):** remains acknowledged degradation; production persists no
-  `scoring_breakdown`, so nothing changed and nothing is measurable. *Confirmed by absence.*
+**Composition of the 49 — state it precisely.** 49 rows have `final=True`, but not all are
+*resolved*: 29 stopped out, 15 hit TP1, **4 EXPIRED at 0.0R**, and **1 is still open at the data
+edge** (LINKUSDT-400159, −0.054R mark-to-market). The resolved subset is therefore **44 trades:
+sum −7.682R, mean −0.175R, win rate 34.1%**. The conclusion does not move; the count is stated so
+the 49 is not mistaken for 49 completed round trips. *Measured.*
+
+**The headline is not "strategies lose".** Gross expectancy is **+0.020R per trade** — slightly
+positive. The system loses because a round trip costs **0.178R** in modeled fees at 10× leverage
+on a ~$2.1k notional against a $10 risk unit. See §7.1.
+
+### Triggers — one fired
+
+- **Bullish regime week?** No. Regime counts in-window: BEARISH 174, NEUTRAL 63, BULLISH 11.
+  Published signals: bearish 44, neutral 13, bullish 2. *Measured.*
+- **5 consecutive wins > 2R?** **Not fired — and it could not have fired.** The best net R
+  anywhere in the window is **1.952R**; **zero** settled trades exceeded 2.0R net. *Measured.*
+- **CI lower bound ≤ 0?** **True** (−0.545), but the standing kill-switch requires a **30-day
+  sample**; this is a 2.8-day sample. Not armed. *Measured, sample-gated.*
+- **Fees exceed gross?** **Met on every span available.** Whole window: fees 8.736R vs gross
+  1.000R. Per day: 10-22 fees 2.549 > gross −11.000; 10-24 fees 1.847 > gross −3.000; 10-23
+  gross +15.000 > fees 4.340. The literal *rolling 7-day* window cannot be fully formed until
+  10-29, so this is recorded as **met on the available span, not yet as a 7-day verdict**.
+  *Measured.*
+
+**Read this as one sentence:** on today's numbers, if the window closed now, the entry
+kill-switch conditions (CI lower ≤ 0 **and** median ≤ −0.5R **and** fees > gross) would all be
+met. The 30-day sample gate is the only thing standing between this window and a halt decision.
+That is not a recommendation to act — it is the number to watch.
+
+### Hypotheses H1–H4 (n=49 settled)
+
+- **H1 (gate 65 vs 60):** gate 60 arm n=49 mean −0.158R; **gate 65 arm n=35 mean −0.000R**,
+  median −1.100, win 37.1%. The sub-65 band carries the entire loss: **n=14, mean −0.552R,
+  win 14.3%, ≈ −7.73R of the −7.736R total**. Directionally this supports the 65 gate, and the
+  mechanism is clean — the 60–64 band is where the money goes. **But** the pre-registered
+  failure branch requires mean < +0.10 **or** n < 50: both are true today (mean −0.000, n=35).
+  With 27 days left this is a mid-window reading, not a verdict. **If the window closed today,
+  H1 would be recorded FAILURE by sample, not success.** *Measured; verdict withheld.*
+- **H2 (regime filter):** aligned n=36 mean **+0.051R** (win 38.9%, median −1.088) vs all n=49
+  mean −0.158R. The pre-registered failure branch (filtered mean < +0.20R) is met today, but
+  n=36 is far below the n ≥ 80 success requirement, so it is a mid-window reading.
+  **Protocol flaw to fix before the close:** the "filtered total R ≥ 0.9 × unfiltered total R"
+  condition is degenerate when the unfiltered total is negative — 1.84R ≥ −6.96R is true by
+  construction. It cannot discriminate. Flagged, not changed (thresholds are frozen).
+- **H3 (side-opposed):** **not testable in this window — zero opposed signals.** All 49 settled
+  signals were either aligned (36) or in a neutral regime (13); none was side-opposed. The
+  pre-window "14 of 204 opposed" figure **does not reproduce** here. H3 needs a window where
+  signals actually oppose the regime; this one cannot supply it.
+- **H4 (regime-only scoring):** unmeasurable and *confirmed by absence* — production runs
+  pre-`49ff810`, so `scoring_breakdown` does not exist in `outcomes.json` at all. Nothing
+  changed, nothing measurable.
 
 ---
 
 ## 4. Strategy quality analysis
 
-**What I could not check, and why (stated plainly):** per-strategy signal counts are **not
-logged**. `pipeline.py` logs only aggregate `Scan complete: N candidates, M rejected` and
-`Publishing N signals`; strategy identity appears only in error lines, of which there were
-**zero**. Without `signals.jsonl` (file access blocked, §11) the four-family breakdown
-(bollinger / volume_breakout / donchian / momentum) **cannot be produced**. Any per-strategy
-claim in this window would be fabricated.
+Per-strategy attribution is now available from `outcomes.json` (`strategy_id` is persisted on
+every outcome row), not from the logs — the logs still do not carry it. *Measured.*
 
-**What is measurable:**
+| Strategy | Published | Settled | Coins | Mean net R | Median | Sum R | Stop-out | TP hit |
+|---|---|---|---|---|---|---|---|---|
+| `donchian_20` | 23 | 23 | 7 | −0.256 | −1.112 | −5.878 | 60.9% | 26.1% |
+| `volume_breakout_20` | 15 | 7 | 4 | **+0.800** | +1.922 | **+5.598** | 28.6% | 57.1% |
+| `bollinger_atr_20_2.0` | 12 | 12 | 3 | −0.047 | −1.098 | −0.560 | 58.3% | 33.3% |
+| `ema_trend_20_50` | **8** | 7 | 5 | **−0.985** | −1.321 | **−6.896** | **85.7%** | 14.3% |
+| `momentum_20` | 1 | 0 | — | — | — | — | — | — |
 
-- Zero strategy exceptions: `Error in strategy …` and `Error processing …` → **0 occurrences
-  in 248 scans.** All four families ran without raising. *Measured.*
-- Zero zero-signal failure mode at the pipeline level: the pipeline never aborted, never
-  published a partial scan, and `rejected` never exceeded the eligible symbol set behaved
-  anomalously (`rejected` = symbols yielding no candidate: 186 scans rejected 14/14,
-  consistent with `N+M ≈ 14`). Burst scans reject 0. No scan showed a nonsensical count.
-- Publication ratio 30.7% of candidates → dedupe/gating is doing real work, not passing
-  everything through.
-- Baseline comparison is **not possible** on R: the pre-window family figures
-  (bollinger +19.06R / 51 signals / 4 coins; volume_breakout +11.62R / 42 / 5;
-  donchian +6.38R / 68 / 8; momentum +1.42R / 21 / 7 — **User-provided**) cannot be extended
-  without the outcome file. The only comparable measured series is aggregate paper equity,
-  which is **negative in-window** (§3). That divergence is itself the finding:
-  **R and equity are not telling the same story, and only equity is measured right now.**
+Sums check: −5.878 + 5.598 − 0.560 − 6.896 = **−7.736R**, the window total. *Measured.*
 
-**Assessment:** no strategy-level anomaly is *detectable*, which is not the same as *absent*.
-The observability gap is the finding, and it should be closed post-window (§9).
+**Finding 1 — 89% of the window's net loss comes from a family that is already retired.**
+`ema_trend_20_50` was retired by standing decision and the retirement is committed locally
+(`a29831a`, 2026-10-22), but **production runs pre-`49ff810` and predates that commit**, so the
+family is still live there. Excluding it, the four intended families sum to **−0.840R over 42
+settled signals** (mean **−0.020R**) — essentially flat. This is not a strategy-quality problem;
+it is **deploy lag**. It also means the window is measuring a **5-family system, not the intended
+4-family system**, which is a validity caveat on every per-strategy conclusion below and a
+material one for 04B.
+
+**Finding 2 — `volume_breakout_20` is the only family with a positive point estimate**, +0.800R
+mean over 7 settled (57% TP, 28.6% stopped). n=7 is far too small to act on, but it is the one
+family worth watching through the close.
+
+**Finding 3 — `donchian_20` carries the most volume** (23 settled, −5.878R, 60.9% stopped). It is
+the best-sampled family and still negative; the largest single loss belongs to `ema_trend_20_50`.
+
+**Finding 4 — the momentum figure does not reproduce.** `outcomes.json` holds **25** `momentum_20`
+rows, **24 with `final=True`**: 11 stopped out, 5 TP1, 1 TP2, **6 still open at mark-to-market**,
+1 expired. Lifetime net over all 24 is **−1.727R**; over the **17 resolved** it is **−1.470R
+(mean −0.086R)**. **Neither 21 nor 22 reproduces**, and the carried `+1.42R` figure is **not
+supported by production data — it is negative on every cut**. The likely explanation is that
+`+1.42R` was a harness/backtest number, not a production outcome; that distinction matters and
+should be stated wherever the figure is cited. Only **1** momentum signal was published in-window
+and it has not settled. *Measured.*
+
+**Finding 5 — the Bollinger gate check is answered.** 12 Bollinger signals published in-window,
+**all on AVAX / HYPE / SOL** (confidence 60/62/67/72). **None on ADA, NEAR or ZEC.** The 7
+would-be-published signals (ADA, NEAR×4, ZEC) that backlog item 2 cites **did not appear**, which
+is consistent with the compression gate blocking them. *Measured, consistent — not proof of
+causality, since the gate's own decisions are not logged.*
+
+**Assessment:** the strategy layer is not broken, and the window's aggregate loss is not
+distributed evenly across it — it is concentrated in one retired family plus a uniform fee drag
+(§7.1). The observability gap that forced the Phase 1–3 "cannot be produced" verdict is now
+closed for strategy, and remains open for the *publish* path (strategy id still is not logged at
+publish time).
 
 ---
 
 ## 5. Worker quality analysis
 
-**Blocked, and it is a design gap, not a tooling accident.** The exit path logs only the
-final action (`monitor.py:170`: `[Exits] {sid} {state} -> {action} (plan vN, …)`). It does
-**not** log which worker(s) proposed the action, their assessments, or their abstentions.
-Therefore:
+**The Phase 1–3 "blocked" verdict was wrong, and this corrects it.** Worker identity **is**
+persisted: `WorkerAssessment.to_dict()` writes `worker_id` and `worker_version`
+(`src/exits/models.py:165`), and every one of the **1,315** in-window decisions carries an
+`assessments[]` array — **6,575** assessments in total. What is missing is only the *log line*
+(`monitor.py:170` prints the action, not the proposer). **No schema change is needed to measure
+worker behaviour; only the file read.** Backlog item 10 is rewritten accordingly.
 
-- **Adoption rate per worker: not computable.**
-- **RiskReward `RR_DEAD` 0/8 adoptable: cannot be re-tested.** The pre-window finding stands
-  unverified in this window.
-- **Silently-failing worker detection: not possible.** A worker that abstains on every
-  position is indistinguishable in logs from a worker that never runs.
+**Worker verdict mix (in-window, Measured):**
 
-**What the action mix implies** (*Estimated* — inference from action semantics, not logged
-attribution):
+| Worker | Verdicts | Proposals (non-NO_CHANGE) | Adopted | Adoption |
+|---|---|---|---|---|
+| `structure` | THESIS_INTACT 1174, THESIS_INVALIDATED 89, THESIS_WEAKENED 52 | 89 | **89** | **100%** |
+| `counter` | NO_OPPOSITION 1247, WEAK_OPPOSITION 61, GENUINE_REVERSAL 7 | 7 | 4 | 57.1% |
+| `riskreward` | RR_OK 1256, **RR_DEAD 31**, RR_DEGRADED 28 | 59 | 7 | 11.9% |
+| `stop` | STOP_OK 700, STOP_TIGHTEN_CANDIDATE 615 | 615 | 49 | 8.0% |
+| `target` | TARGETS_OK 790, TARGETS_UNREALISTIC 525 | 471 | 15 | 3.2% |
 
-| Action | Decisions | Distinct signals | Likely worker |
-|---|---|---|---|
-| TIGHTEN_STOP | 49 | 25 | Stop |
-| ADJUST_TAKE_PROFITS | 15 | 14 | Target |
-| REDUCE_PAPER_POSITION | 7 | 7 | Risk/Structure |
-| INVALIDATE_PENDING_SETUP | 11 | 11 | Structure / CounterSignal |
-| FLAG_CONFLICT | 6 | 6 | CounterSignal |
+**Overall:** of **166** decisions that were not `NO_CHANGE`, **163 adopted a worker proposal
+(98.2%)** and 3 had no proposer at all (all `FLAG_CONFLICT`, which the supervisor raises itself).
+So when the supervisor acts, it is almost always acting *on* a worker. *Measured.*
 
-Read-through: **at most 53 of 61 supervised signals ever received a non-NO_CHANGE
-proposal** (and each of those signals can receive several). No worker dominates; no worker is
-provably dead. `NO_CHANGE` at 87.6% of decisions means the orchestrator is mostly holding —
-consistent with positions that are open and quiet, not with an abstaining worker.
+**Read the adoption column carefully — it is not a "supervisor ignores workers" finding.**
+`stop` proposed a tighten on 615 decisions and got 49 actions; `target` proposed on 471 and got
+15. But a signal is re-evaluated many times, and `monitor.py:162` dedupes an identical
+`decision_key`, so the same proposal recurs on every cycle without being re-applied. 615
+proposals across 61 signals ≈ 10 per signal, against 49 actions across 25 signals ≈ 2 per
+signal. **The honest metric is "first proposal per signal", which this audit has not computed**;
+per-decision adoption systematically understates and should not be quoted as a worker-quality
+number. That is a measurement design note, not a defect.
 
-**This is the highest-value instrumentation gap in the system** (§9): without worker
-attribution, every future exit-quality debate is unfalsifiable.
+**`RR_DEAD` is now measurable and the carried figure does not reproduce.** 31 in-window verdicts,
+7 adopted. The pre-window "RR_DEAD 0/8 adoptable" cannot be re-tested against a different
+population, but the claim that RR_DEAD is never adoptable is **contradicted** — 7 of 31 were.
+*Measured.*
+
+**Silent-worker detection is now possible and no worker is silent.** All five workers produced
+verdicts on every decision; the lowest-volume (`counter`) still emitted 1,315 verdicts. *Measured.*
+
+**`structure` is the only worker whose proposal is adopted unconditionally (89/89).** It is also
+the worker that owns `INVALIDATE_PENDING_SETUP`, the one action with a measurable R consequence
+(§7). That asymmetry — one worker effectively decides cancellations, the other four advise — is
+worth a design look post-window, but it is not evidence of a defect on 89 events.
 
 ---
 
 ## 6. Orchestrator quality analysis
 
-**Supervisor volume** (248 runs, 66,783 skipped, **0 errors**): *Measured.*
+**Supervisor volume** — now read from `exit_decisions.json` (authoritative), not the log recount:
+1,315 in-window decisions over **61** distinct signals, 0 errors. *Measured.*
 
-| Action | Count | % | Distinct signals |
+| Action | Decisions | % | Distinct signals |
 |---|---|---|---|
-| NO_CHANGE | 1143 | 87.6% | 50 |
-| CLOSE_PAPER_POSITION | 78 | 6.0% | **7** |
-| TIGHTEN_STOP | 48 | 3.7% | 25 |
+| NO_CHANGE | 1,149 | 87.4% | 50 |
+| CLOSE_PAPER_POSITION | 78 | 5.9% | **7** |
+| TIGHTEN_STOP | 49 | 3.7% | 25 |
 | ADJUST_TAKE_PROFITS | 15 | 1.1% | 14 |
 | INVALIDATE_PENDING_SETUP | 11 | 0.8% | 11 |
 | REDUCE_PAPER_POSITION | 7 | 0.5% | 7 |
-| FLAG_CONFLICT | 3 | 0.2% | 6* |
+| FLAG_CONFLICT | 6 | 0.5% | 6 |
 
-\* recount from log lines gives 6 for FLAG_CONFLICT; the scheduler dict says 3. Reason for the
-delta is not established (paging boundary vs. per-run dict). The dict is authoritative for
-rates; the per-line recount is authoritative for distinct signals. *Measured, minor discrepancy.*
+The ledger supersedes the two earlier tallies (scheduler dict 1,305; log recount 1,314) and
+resolves the `FLAG_CONFLICT 3 vs 6` discrepancy in favour of **6**. *Measured.*
 
 **Critical read-through correction.** The scheduler dict is **decisions, not positions**.
-78 closes = **7 positions**. 48 tightens = 25 positions. Anyone reading
+78 closes = **7 positions**. 49 tightens = 25 positions. Anyone reading
 `{'CLOSE_PAPER_POSITION': 78}` as "78 positions closed" is wrong by **11×**. This is the
 single easiest way to misreport this window.
 
 **Idempotency is working.** `monitor.py:162` skips re-recording an identical decision key, which
-is why 1,143 NO_CHANGE decisions produced far fewer log lines than evaluations. Two independent
-tallies (scheduler dict 1,305; log-line recount 1,314) agree within 0.7% — the gap is the
-paging boundary, not a leak. *Measured.*
+is why 1,149 NO_CHANGE decisions produced far fewer log lines than evaluations. Three independent
+tallies — scheduler dict 1,305, log-line recount 1,314, ledger 1,315 — agree within 0.8%; the gap
+is the paging boundary, not a leak. *Measured.*
 
-**Decision density changed.** In-window: 1,305 evaluations / 61 signals / 2.8 d ≈ **7.7
-evaluations per signal-day**. Pre-window snapshot: 2,000 decisions / 97 signals ≈ **1.9 per
-signal-day** (over the pre-window span; **User-provided**). That is a **~4× increase in
-per-signal re-decision rate**. Explanations that fit: more concurrent open positions, and
-event-driven `_is_due` gating firing on more 15m candle events. It is *not* an error (0 errors)
-but it is a real behavioural delta vs baseline and it is the mechanism that amplifies the
-CLOSE-repeat defect in §8 item 1.
+**Decision density — the earlier "~4× increase" is withdrawn.** In-window the rate is
+**1,315 decisions / 61 signals / 2.8 d ≈ 7.7 per signal-day**. The pre-window comparison
+(2,000 / 97 ≈ 1.9) is **invalid**: `exit_decisions.json` is a **capped ring buffer**
+(`max_decisions: int = 2000`, `ledger.py:37`, trimmed at line 153) and holds **exactly 2,000**
+decisions spanning only **2026-10-20T08:49 → 2026-10-24T19:06**. "2,000" is the cap, not a total,
+so any density computed from it is an artifact of when the file was last trimmed. What *is*
+measurable: the re-decision rate is high (≈7.7 per signal-day, ≈21 decisions per signal over the
+window), which is the mechanism that amplifies the CLOSE-repeat defect. *Measured; prior
+comparison retracted.*
 
-**RiskGuard:** not separately logged; invocation rate is **not verifiable** from logs. The
-pre-window 124/124 cannot be re-tested. *Blocked.*
+**RiskGuard: measurable now, and far rarer than carried.** Present on **71 of 1,315** decisions
+(**5.4%**), always `ok: true`, and only on the three actions that move a stop or a target:
+`TIGHTEN_STOP` 49, `ADJUST_TAKE_PROFITS` 15, `REDUCE_PAPER_POSITION` 7. Sample reason:
+`stop 1.352746 -> 1.359539: risk distance never wider than original`. The pre-window "124/124"
+figure **does not reproduce** and should not be cited. Interpretation: RiskGuard is a
+*post-proposal* veto, not an always-on gate, and in this window it never vetoed anything —
+consistent with a guard that is only consulted on monotone-improving adjustments. *Measured.*
 
 ---
 
 ## 7. Exit management quality analysis
 
-**The CORRECT / PREMATURE / MISSED classification is not reproducible.** It needs per-decision
-forward bar movement plus the outcome record for each signal; both live in
-`data_store/*.json`, which is unreadable (§11). I am not going to assign labels I cannot test.
+**Classification, deduped to `signal_id` first** (the binding rule from Revision 2). Rules, stated
+so they can be attacked: `CLOSE` → CORRECT if the signal later stopped out, PREMATURE if it later
+hit TP, else NEUTRAL. `INVALIDATE` → CORRECT if the entry never triggered, MISSED if it did.
+`TIGHTEN`/`REDUCE`/`ADJUST_TP` → PREMATURE if the signal later hit TP, CORRECT if it stopped out,
+else NEUTRAL. `FLAG_CONFLICT` is informational. **These rules use the final outcome as the
+counterfactual — there is no forward-bar replay — so "CORRECT" means "the final state agrees with
+the decision", not "the decision caused a better result".** That limit is real and is not papered
+over. *Measured, method-limited.*
+
+| Action | Signals | CORRECT | PREMATURE | NEUTRAL / unknown | MISSED | Settled Σ net R | Mean |
+|---|---|---|---|---|---|---|---|
+| `CLOSE_PAPER_POSITION` | 7 | 6 | 0 | 1 | – | **−6.593** (6 settled + 1 open at MTM) | −0.942 |
+| `INVALIDATE_PENDING_SETUP` | 11 | 1 | 0 | 0 | **10** | **−2.799** | −0.254 |
+| `TIGHTEN_STOP` | 25 | 6 | 8 | 11 | – | **+8.492** (15 settled) | +0.566 |
+| `REDUCE_PAPER_POSITION` | 7 | 1 | 5 | 1 | – | **+7.600** (6) | +1.267 |
+| `ADJUST_TAKE_PROFITS` | 14 | 3 | 3 | 8 | – | **+2.524** (7) | +0.361 |
+| `FLAG_CONFLICT` | 6 | – | – | 6 | – | **−2.336** (3) | −0.779 |
+
+**The R-weighted read is the one that matters** (*Measured*):
+
+- **`INVALIDATE` has positive aggregate R-value and a bad hit rate.** The 11 invalidated signals
+  would have summed **−2.799R**. It missed 3 winners (ZECUSDT-4BD342 **+1.915R**,
+  DOGEUSDT-301089 +1.774R, ETHUSDT-A00BE8 +1.635R = **+5.32R** foregone) and avoided 7 losers
+  (**−8.12R**). Net: cancelling **saved ≈2.8R**. A 10/11 "MISSED" count reads as a failure and is
+  not one — this is exactly why a count-only read is banned for policy.
+- **`CLOSE` shows no measurable R benefit.** All 7 closed signals were already losing at the data
+  edge — six stopped out at ≈−1.1R, one still open at −0.054R — summing **−6.593R**. Closing did
+  not avoid the loss; it fired at a loss. Recorded as an observation — **exit policy stays closed
+  per 03-B-2**, this does not reopen it.
+- **`REDUCE` fired on winners** (+7.600R over 6 settled, 5 wins, 5 flagged PREMATURE). Trimming
+  exposure on positions that then ran is an opportunity cost, visible here for the first time.
+- **`FLAG_CONFLICT` fired on losers only** (−2.336R over 3 settled). Small n; consistent with a
+  conflict flag being informative rather than actionable.
+
+**Holding time — the operator's ~3-minute claim is not visible here, and the ledger cannot see
+it.** Settled median **90 min** (p25 15, p75 585, max 1,500); the STOPPED_OUT subset median
+**30 min**, p25 **15**, min **15**. **Every value is a multiple of 15** and **17 of 45** settled
+trades sit exactly on the **15-minute floor**. The outcome ledger is bar-resolution, so a
+3-minute hold is below its measurement floor. This neither confirms nor refutes the operator's
+Invo observation — it states that the outcome file is the wrong instrument for that claim.
+*Measured, resolution-limited.*
 
 **Aggregate evidence that is measurable:**
 
 - 51 booked outcomes in 2.8 d is a **high turnover** rate (≈18/day) against 61 supervised
   signals — positions are being resolved, not left dangling.
-- Equity path: 1028.75 → 803.30 (10-23 14:05) → 941.93 (10-24 15:33). A −21.9% drawdown
-  then a +17.3% recovery off the low within ~25 h. **Operator evidence resolves the drawdown
-  half:** losing trades were held ~3 minutes, so the drop is immediate stop-outs on entries, not
-  exits cutting early. The **recovery** half is still unexplained by anything I can read — that
-  needs the outcome file, not a guess.
 - No `[Exits] Ledger unreadable / write failed / Ledger unhealthy` lines → the ledger was
-  healthy for all 1,314 decisions (`apply=True` on every one). Exit application never fell
+  healthy for all 1,315 decisions (`apply=True` on every one). Exit application never fell
   back to record-only. *Measured — and a genuinely good result.*
 
 **The one exit-quality defect I can prove** (§8 item 1) contaminates any per-signal
@@ -291,15 +456,59 @@ decision sequences contain post-close re-decisions that no bar-level method woul
 sensibly.
 
 **Aggregation rule (binding from this audit on).** Exit decisions **must be grouped by unique
-`signal_id`**, never counted per decision. 1,314 decisions sit on 61 signals; closes are
+`signal_id`**, never counted per decision. 1,315 decisions sit on 61 signals; closes are
 overstated **11×** (78 decisions → 7 positions). Any Phase 5 classification run later against
 `exit_decisions.json` must dedupe to `signal_id` first, or it will report a 78-position sample
 that does not exist.
 
-**Direction of the loss, per operator confirmation (§3.1).** Losing trades were held ~3 minutes
-(DOGE, AVAX, NEAR, BNB, SOL). That makes the −8.44% an **entry-side** outcome — stops hit almost
-immediately — rather than an exit-quality failure, and it is why this section does not recommend
-any exit tuning.
+**Direction of the loss and the equity path — one explanation.** 29 of 49 settled signals (59%)
+stopped out at exactly −1.0R gross and the median settled trade is −1.096R net, so the loss is
+**entry-side** and the exit layer is not the cause: supervision ran with **0 errors**, RiskGuard
+never vetoed, and no exit action shows negative aggregate R-value except `CLOSE` (which fired on
+already-losing positions). The equity path is the same story at daily resolution — 10-22
+**−11.000R** gross (13 stops / 1 TP) is the −21.9% low at 803.30, 10-23 **+15.000R** (9 stops /
+**12 TPs**) is the +17.3% recovery off it, 10-24 **−3.000R** (7 stops / 2 TPs) is the drift since.
+There is no hidden exit mechanism in either half of that path. **This section does not recommend
+exit tuning, and 03-B-2 stays closed.** *Measured.*
+
+### 7.1 Economic decomposition — the loss is fee drag (new in Revision 3)
+
+This is the most consequential number in the audit and it was invisible until the files were
+read. *Measured from `outcomes.json`; the fee figure is the harness's own fee model
+(`policy.fee_cost_r`), not an exchange statement.*
+
+| Component | R | Per trade (n=49) |
+|---|---|---|
+| Gross realized (before fees) | **+1.000** | **+0.020** |
+| Fees | **−8.736** | **−0.178** |
+| **Net** | **−7.736** | **−0.158** |
+
+**Fees are 8.7× the gross edge.** Gross expectancy is slightly *positive*; the system loses
+because a round trip costs **0.178R** while the average trade earns **0.020R**. Mechanism: 10×
+leverage on a ~$2,119 notional against a $10 risk unit means ~$1.9 of round-trip cost at taker
+rates ≈ 0.19R — the model is internally consistent.
+
+**Cross-check against equity — first time the R series and the dollar series agree.**
+−7.736R × $10 risk = **−$77.36** against a measured equity change of **−$86.82**. The 11% gap is
+consistent with slippage and per-trade rounding. The two independent measurements now tell the
+same story, which they did not in Revision 1.
+
+**What this means for 04B (and what it does not).** At this fee model, break-even needs gross
+expectancy ≥ **0.178R per trade**; the system produces 0.020R. Closing that gap by win rate alone
+is not plausible on this sample, and the two levers that would do it — fewer, larger trades
+(reduce frequency ~9×, or widen TP from +2.0R to ~+2.35R) — are **behaviour changes that cannot
+be made inside the window**. The honest statement is: *this configuration cannot be profitable
+after costs, regardless of which strategy wins*, and that is a cost-structure finding, not a
+signal-quality finding.
+
+**Two caveats that must be resolved before anyone cites this in a decision:**
+
+1. `fees_cost_r` is a **model**, not a reconciled exchange fee. If real fills are maker or the
+   account has a fee tier, the drag scales down proportionally. Verify against Invo/HL statements
+   before treating 0.178R as fact.
+2. The 10× leverage is what makes the fee 0.178R rather than ~0.018R. **Leverage is therefore a
+   cost multiplier here, not only a risk multiplier** — a framing the current risk discussion
+   does not contain.
 
 ---
 
@@ -397,12 +606,27 @@ any exit tuning.
   (bad/missing token)"}`. Correct security posture; it also means the only readable production
   surface during an audit is logs. That is why §11 is long.
 
-### 8. INFO — window P&L is negative
+### 8. INFO — window P&L is negative, and it is cost-driven
 
 - 1028.75 → 941.93 (−8.44%). Lifetime equity 941.93 across 299 bookings ⇒ the system is **−5.8%
   since inception**, and the pre-window period was net **positive** (+2.9% over 249 bookings).
-  One regime, 2.8 days: this says the current regime is losing, not that the strategies are
-  broken.
+  One regime, 2.8 days. **The mechanism is now known and it is not the signals:** gross
+  +1.000R vs fees −8.736R over 49 settled trades (§7.1). Gross expectancy is +0.020R/trade
+  against a 0.178R cost. This says the current *cost structure* loses money in this regime, not
+  that the strategies are broken.
+
+### 9. WARNING — production still runs a retired strategy family (deploy lag)
+
+- **Finding:** `ema_trend_20_50` published **8** in-window signals (7 settled, **−6.896R**,
+  85.7% stopped out). The retirement is committed locally at **`a29831a` (2026-10-22)**, which is
+  **after** the deployed base `49ff810`. The local registry no longer contains the family
+  (`src/strategies/__init__.py` registers 4 families); production still runs 5.
+- **Impact:** (a) **89% of the window's net loss** comes from a family the operator already
+  retired; (b) the window is measuring a 5-family system, so per-strategy R from this window is
+  not a clean read on the intended 4-family system; (c) no code is wrong — nothing has been
+  deployed since 10-13, by design.
+- **Action:** **no mid-window deploy.** The fix is the next authorized deploy, not a patch. Tracked
+  as backlog item 11 so the retirement is not silently lost.
 
 ---
 
@@ -415,10 +639,11 @@ found is a capital risk: no crash, no uncontrolled loss, no double-close, no dou
 exposed secret. Every defect worth fixing is either a measurement/record defect or a behaviour
 change; fixing either mid-window would destroy the comparison the window exists to make.
 
-The one urgent item is operator awareness: **`CLOSE_PAPER_POSITION: 78` is 7 positions, not 78**,
-and **the mimic is provably dropping trades** (+13.61% DOT missed).
+The urgent items are **operator awareness, not action**: **`CLOSE_PAPER_POSITION: 78` is 7
+positions, not 78**; **the mimic is provably dropping trades** (+13.61% DOT missed); and **the
+window's loss is fee drag, not signal quality** (+1.000R gross vs −8.736R fees).
 
-### Post-window backlog — queued as items 6–9 in `reports/W_S_DEFECTS_BACKLOG.md`
+### Post-window backlog — items 6–11 in `reports/W_S_DEFECTS_BACKLOG.md`
 
 | Backlog | Item | Priority |
 |---|---|---|
@@ -426,21 +651,33 @@ and **the mimic is provably dropping trades** (+13.61% DOT missed).
 | 7 | `CLOSE_PAPER_POSITION` state persistence — terminal state + `_is_due` exclusion; shared root cause with reservation drift | HIGH |
 | 8 | Cross-sectional / per-direction exposure cap (e.g. max 3) | HIGH |
 | 9 | Map the Invo `suppressed` audit event type | INFO |
+| 10 | Worker attribution: `assessments[]` already persists `worker_id`/`worker_version`; the gaps are the `[Exits]` log line and an explicit adopted-worker field | HIGH |
+| 11 | Deploy lag: `ema_trend_20_50` retirement (`a29831a`) never reached production; verify at the next authorized deploy | HIGH |
 
 Also queued there but not yet numbered, and worth doing in the same pass:
 
-1. **Log worker identity + assessment per exit decision** — without it worker adoption, RR_DEAD
-   and silent-worker detection stay untestable forever. Highest-value observability fix.
-2. **Log `strategy_id`/`strategy_version` on publish** — makes per-strategy attribution possible
+1. **Log `strategy_id`/`strategy_version` on publish** — makes per-strategy attribution possible
    without file access. (`F601` duplicated keys are known and intentional.)
-3. **Retire reservations on close** and assert `diff_reserved` returns to 0 after a settle cycle.
-4. **Log skipped-because-too-small** distinctly from skipped-because-stale in the mimic.
+2. **Retire reservations on close** and assert `diff_reserved` returns to 0 after a settle cycle.
+3. **Log skipped-because-too-small** distinctly from skipped-because-stale in the mimic.
+4. **Fix the H2 total-R condition** before the close: "filtered total R ≥ 0.9 × unfiltered total
+   R" is degenerate when the unfiltered total is negative. Recorded as a protocol defect, not
+   changed mid-window (thresholds are frozen).
+
+### The one thing to watch before 2026-11-21
+
+**The fee drag, not the signal edge.** Gross expectancy is +0.020R/trade against a 0.178R cost
+(§7.1). If the remaining 27 days look like the first 2.8, the window closes with the entry
+kill-switch conditions met (CI lower ≤ 0, median ≤ −0.5R, fees > gross) and a 30-day sample
+behind them. That is a *decision the operator will face*, not an action available now. The
+question to resolve in the meantime is the §7.1 caveat: is `fees_cost_r` the real fee, or a
+conservative model?
 
 ### Working well — do not break
 
 - **Scan loop:** 248/248, max gap 16.6 min, 0 errors, 0 tracebacks, both services stable.
 - **Ledger idempotency:** identical decisions deduped (`monitor.py:162`); ledger healthy on
-  **1,314/1,314** decisions (`apply=True` every time); no `Ledger unreadable/write failed`.
+  **1,315/1,315** decisions (`apply=True` every time); no `Ledger unreadable/write failed`.
 - **Server-side dedupe:** `already-applied` ×10, `already gone server-side` ×5 — the W6
   `clientTxId` assumption is confirmed in production.
 - **Counting integrity:** published 59 = ledger +59; booked 51 = finalized 51 (two independent
@@ -459,78 +696,89 @@ no restart).
 
 Still open:
 
-1. **Equity definition:** is `[Paper] equity 941.93` net of fees and slippage on a $1,000 start?
-   If yes, the window's headline result is **−8.44% measured**, and R-based hypotheses must be
-   read against it, not instead of it.
-2. **Burst entries (issue 5 / backlog 8):** confirm these stay an in-window observation for the
+1. **Fee model (new, highest value):** is `fees_cost_r` the **real** exchange fee, or the
+   harness's conservative model? It is the single input that decides whether the window's −7.736R
+   is real or overstated (§7.1). One Invo/HL statement settles it.
+2. **Equity definition:** is `[Paper] equity 941.93` net of fees and slippage on a $1,000 start?
+   The R×$10 cross-check (−$77.36 vs −$86.82) says *yes, net* — worth a one-word confirmation.
+3. **Burst entries (issue 5 / backlog 8):** confirm these stay an in-window observation for the
    11-21 review, with the cap decision taken after the window closes.
-3. **Reservation drift (issue 2):** is the reserved bank supposed to be authoritative for sizing?
+4. **Reservation drift (issue 2):** is the reserved bank supposed to be authoritative for sizing?
    If yes, −$60 of phantom reservations is a sizing input, and that changes its severity.
-4. **`suppressed` events (issue 3 / backlog 9):** new Invo event type to be mapped, or internal
+5. **`suppressed` events (issue 3 / backlog 9):** new Invo event type to be mapped, or internal
    state leaking into the audit reader?
-5. **Mimic session concurrency (backlog 6):** does the main bot hold the *same* Invo account
+6. **Mimic session concurrency (backlog 6):** does the main bot hold the *same* Invo account
    session the mimic uses? If yes, a one-session-per-account rule is the leading root cause and
    the first thing to test post-window — before any code change.
+7. **Deploy lag (backlog 11):** confirm the `ema_trend_20_50` retirement ships at the next
+   authorized deploy, so the window's remaining 27 days and any 04B read are not silently
+   measuring a retired family.
 
 ---
 
-## 11. Could not check — and exactly why
+## 11. What was checked, and what remains blocked
+
+**Resolved in Revision 3** (files pulled read-only over `railway ssh`, gzip+base64, byte-exact,
+JSON-validated; stored in the gitignored `prod_evidence/2026-10-24/`):
+
+| File | Size | Used for |
+|---|---|---|
+| `data_store/exit_decisions.json` | 9,592,085 B | §5, §6, §7 (deduped to 61 signals) |
+| `data_store/outcomes.json` | 324,959 B | §3.2, §4, §7, §7.1 (309 rows, 299 settled) |
+| `data_store/paper_portfolio.json` | 219,873 B | equity cross-check |
+| `data_store/invo_exit_sync.json`, `sim_reservations.json` | 34,940 / 71,624 B | drift context |
+| `data_store/signals_2026-10-22/23/24.json` | 38,375 / 57,186 / 45,591 B | 59 published signals, per-strategy, Bollinger check |
+| `mirror_data/mirror_events.jsonl` | 606,182 B | mimic events (capped at 5,000 lines) |
+| `mirror_data/mirrored.json` | 8,716 B | mirrored-position record |
+
+**Still blocked, and why:**
 
 | Blocked item | Reason |
 |---|---|
-| `data_store/*.json` (exit_decisions, outcomes, signals, paper_portfolio, invo_exit_sync) | No shell into the service; volume not downloadable via MCP; dashboard 401. **Operator to run `railway login`, then these are pullable** |
-| `mirror_data/*` (mirrored, mirror_events, pending_records) | Same |
-| `p3_shadow.jsonl` / A2 status | Same. Indirect: **0** `[P3 shadow]` lines in 248 scans → A2 not active (consistent with "not deployed") |
-| Commit hash of deployed revisions | MCP exposes deploy/snapshot ids only, not commits. Deploy timestamps prove nothing shipped since 10-13/10-14 |
-| Mean/median/top-5 net R; CI lower bound | R series lives in the unreadable outcome file |
-| H2 aligned/opposed, H3 side-opposed | Per-signal side not logged |
-| Per-strategy signal counts, stop-out rate | Strategy id not logged on publish; only aggregate counts exist |
-| Worker adoption, RR_DEAD, silent-worker detection | Worker identity not logged |
-| RiskGuard invocation rate | Not separately logged |
-| CORRECT / PREMATURE / MISSED exit classification | Requires per-decision forward bars + outcome record; unreadable |
-| Secrets / flag *values* | Redacted by connector (`valuesRedacted: true`) — by design, not worked around |
-
-**Unblock path (agreed, operator action required):**
-
-```
-railway login     # operator runs this in their own shell — not attempted by the agent
-```
-
-Then pull, read-only, into the local tree:
-
-- `data_store/exit_decisions.json`
-- `data_store/outcomes.json`
-- `mirror_data/mirror_events.jsonl`
-
-Those three files unblock §3 (R distribution), §4 (per-strategy counts and stop-out rate),
-§5 (worker attribution is still blocked — that is a logging gap, not a file gap), §7 (CORRECT /
-PREMATURE / MISSED) and the full R/CI computation for H1–H3. When they land, Phase 4 and Phase 5
-are completed against them, **grouping exit decisions by `signal_id`** (§7 rule).
+| Commit hash of deployed revisions | MCP exposes deploy/snapshot ids only. Deploy timestamps + `git merge-base` prove `a29831a` is not deployed |
+| True decision totals before 2026-10-20 | `exit_decisions.json` is a 2,000-row ring buffer; older rows are gone |
+| `mirror_events` before 2026-10-15 | that file is capped at 5,000 lines |
+| Tick-level holding time (~3 min claim) | outcome ledger is 15-minute bar resolution; floor is exactly 15 min |
+| `p3_shadow.jsonl` / A2 status | not present in the volume. Indirect: **0** `[P3 shadow]` lines in 248 scans → A2 not active |
+| Secrets / flag *values* | redacted by the connector (`valuesRedacted: true`) — by design, not worked around |
+| Real exchange fees | `fees_cost_r` is the harness model; needs an Invo/HL statement (§10 q1) |
+| First-proposal-per-signal worker adoption | not computed in this pass; per-decision rates understate (§5) |
 
 ---
 
 ## 12. Bottom line
 
-The window is alive and producing at the expected rate with clean plumbing, one real measurement
-defect, and one real money defect on the mimic side. Its measured result so far is **−8.44% paper
-equity over 51 bookings**, driven by ~3-minute stop-outs rather than exit management, in one
-regime — not enough to judge any hypothesis and not claimed to be. **No action is required before
-2026-11-21.** Four defects are queued, and §11 is the reason this audit should be re-run with
-file access before the window closes.
+The window is alive, producing at the expected rate, with clean plumbing and three defects on the
+mimic/measurement side. Its measured result is **−8.44% paper equity over 49 window-published
+settled signals (−7.736R, mean −0.158R, CI95 [−0.545, +0.229])**, and the cause is now identified:
+**fees of 8.736R against gross of 1.000R** — an 8.7× cost-to-edge ratio, not a signal-quality
+failure. **89% of the net loss comes from `ema_trend_20_50`, a family already retired locally but
+still live in production because nothing has been deployed since 10-13.**
+
+Hypotheses: **H1** directionally supports the 65 gate (the 60–64 band is the entire loss) but is
+**failure-by-sample at n=35**; **H2** is under-sampled and its total-R test is degenerate;
+**H3** is **not testable** — zero opposed signals; **H4** unmeasurable, confirmed by absence.
+
+**No action is required before 2026-11-21, and none is recommended.** The one thing worth watching
+is the fee structure: on today's numbers the entry kill-switch conditions would all be met at
+window close. Six backlog items are queued (6–11), and the report's remaining uncertainty is
+concentrated in one question — is `fees_cost_r` the real fee?
 
 ---
 
 ### Verification
 
-No code change was made. The only tracked files touched are this report, the defects backlog, and
-one `.gitignore` exception so the report survives a clean checkout. Working tree clean at commit.
+No code change was made. Tracked files touched by this revision: this report and the defects
+backlog. Production evidence lives in the gitignored `prod_evidence/2026-10-24/`; the temporary
+analysis scripts used to compute §3.2–§7.1 were deleted before commit. No deploy, no restart, no
+env write, no production write.
 
 Last five commits **before** this report's commit — the report cannot contain its own hash:
 
 ```
+2bd1968 Add W-LIVE production audit and queue four window defects
 fdb5c89 Label momentum +1.42R as User-provided in volatile state
 ec7f97b Establish weekly reporting cadence and trigger alerts for observation window
 3b7ec50 Promote momentum ATR inert-params to backlog item 5 (behavioral, not cleanup)
 05fa27d Audit F601 and queue post-window lint cleanup
-894d833 Add mandatory commit-verification rule to AGENTS.md
 ```
