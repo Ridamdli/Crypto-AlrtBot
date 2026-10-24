@@ -20,9 +20,14 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
+
 from src.backtest.evaluator import SignalOutcomeEvaluator
 from src.data.binance_client import BinanceFuturesClient
 from src.data.ohlcv_fetcher import OHLCVFetcher
+from src.db import get_session_factory, is_pg_enabled
+from src.db import models as db
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -66,6 +71,11 @@ def holding_info(entry_ts_ms, holding_bars: int, is_final: bool, now_ms: int):
 
 
 class OutcomeTracker:
+    # Class-level defaults: tests construct instances with __new__ and set only
+    # the paths, so the backend flags must exist without __init__.
+    _pg = False
+    _pg_load_ok = True
+
     def __init__(
         self,
         client: BinanceFuturesClient | None = None,
@@ -80,10 +90,25 @@ class OutcomeTracker:
         self.storage_dir = storage_dir
         self.ledger_path = os.path.join(storage_dir, ledger_name)
         self.future_limit = future_limit
-        os.makedirs(self.storage_dir, exist_ok=True)
+        self._pg = is_pg_enabled()
+        if not self._pg:
+            os.makedirs(self.storage_dir, exist_ok=True)
 
     # ── ledger ──────────────────────────────────────────────────────────
     def load_ledger(self) -> dict[str, dict[str, Any]]:
+        if self._pg:
+            try:
+                with self._pg_session() as s:
+                    rows = list(s.execute(
+                        select(db.Outcome.signal_id, db.Outcome.payload)))
+            except (SQLAlchemyError, RuntimeError) as e:
+                # Returning {} here and then saving would delete every row;
+                # the flag makes save_ledger() refuse to do that.
+                logger.error(f"[Tracker] Failed to load outcomes ledger: {e}")
+                self._pg_load_ok = False
+                return {}
+            self._pg_load_ok = True
+            return {sid: dict(p) for sid, p in rows}
         try:
             with open(self.ledger_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -92,11 +117,31 @@ class OutcomeTracker:
             return {}
 
     def save_ledger(self, ledger: dict[str, dict[str, Any]]) -> None:
+        if self._pg:
+            if not self._pg_load_ok:
+                logger.error("[Tracker] Skipping outcomes save: the last load "
+                             "failed, refusing to delete rows.")
+                return
+            try:
+                with self._pg_session() as s, s.begin():
+                    for sid, rec in ledger.items():
+                        s.merge(db.Outcome(signal_id=sid,
+                                           payload=rec,
+                                           **_outcome_columns(rec)))
+                    # Mirror the JSON backend: the dict IS the ledger.
+                    s.execute(delete(db.Outcome)
+                              .where(~db.Outcome.signal_id.in_(list(ledger))))
+            except SQLAlchemyError as e:
+                logger.error(f"[Tracker] Failed to save outcomes ledger: {e}")
+            return
         try:
             from src.utils.atomic import atomic_write_json
             atomic_write_json(self.ledger_path, ledger)
         except OSError as e:
             logger.error(f"[Tracker] Failed to save outcomes ledger: {e}")
+
+    def _pg_session(self):
+        return get_session_factory()()
 
     def load_all_signals(self, include_archive: bool = False) -> list[dict[str, Any]]:
         """Persisted signals, oldest first. Active files only by default
@@ -251,3 +296,47 @@ class OutcomeTracker:
         }
         logger.info(f"[Tracker] {summary}")
         return summary
+
+
+def _outcome_columns(rec: dict[str, Any]) -> dict[str, Any]:
+    """Promoted outcomes columns for one ledger record (payload stays verbatim)."""
+    return {
+        "symbol": rec.get("symbol"),
+        "side": rec.get("side"),
+        "strategy_id": rec.get("strategy_id"),
+        "signal_timestamp": rec.get("signal_timestamp"),
+        "entry": rec.get("entry"),
+        "stop_loss": rec.get("stop_loss"),
+        # records written by this tree carry "tp"; migrated rows carry tp1..tp3
+        "tp1": rec.get("tp", rec.get("tp1")),
+        "tp2": rec.get("tp2"),
+        "tp3": rec.get("tp3"),
+        "confidence": rec.get("confidence"),
+        "btc_regime": rec.get("btc_regime"),
+        "leverage": rec.get("leverage"),
+        "margin": rec.get("margin"),
+        "position_notional": rec.get("position_notional"),
+        "risk_amount": rec.get("risk_amount"),
+        "evaluated_at": rec.get("evaluated_at"),
+        "future_bars_seen": rec.get("future_bars_seen"),
+        "final": rec.get("final"),
+        "status": rec.get("status"),
+        "entry_triggered": rec.get("entry_triggered"),
+        "expired": rec.get("expired"),
+        "first_event": rec.get("first_event"),
+        "actual_entry_price": rec.get("actual_entry_price"),
+        "tp1_hit": rec.get("tp1_hit"),
+        "tp2_hit": rec.get("tp2_hit"),
+        "tp3_hit": rec.get("tp3_hit"),
+        "sl_hit": rec.get("sl_hit"),
+        "liquidated": rec.get("liquidated"),
+        "liq_price": rec.get("liq_price"),
+        "mfe_r": rec.get("mfe_r"),
+        "mae_r": rec.get("mae_r"),
+        "holding_bars": rec.get("holding_bars"),
+        "holding_minutes": rec.get("holding_minutes"),
+        "realized_r": rec.get("realized_r"),
+        "net_realized_r": rec.get("net_realized_r"),
+        "fees_cost_r": rec.get("fees_cost_r"),
+        "close_timestamp": rec.get("close_timestamp"),
+    }
