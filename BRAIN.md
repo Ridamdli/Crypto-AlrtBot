@@ -239,6 +239,8 @@ That file is read at the start of the next session.
 - `MIMIC_LIVE=true` on Railway; $16 real money.
 - Statistical caveat: 11 days / 204 entry signals, 5.1 days / 97 exit signals, one regime.
   No claim is a 30-day result.
+- **Momentum R +1.42R is `User-provided`, not Measured** (22 signals per the report, 21 in `signals.jsonl`).
+  Post-window: re-derive from settled outcomes before any decision cites it.
 - **Baseline populations (2026-10-22):** the "+0.03" baseline is the **candidate-level
   (pre-gate)** correlation on the 6,438-candidate TRAIN replay; the **published-signal**
   correlation is **+0.12** (204). Complementary measurements of different objects, not
