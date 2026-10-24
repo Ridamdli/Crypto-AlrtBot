@@ -40,6 +40,8 @@ reports/*.md
 !reports/PRE_REGISTERED_HYPOTHESES_2026-10.md
 !reports/OBSERVATION_PROTOCOL_2026-10.md
 !reports/W_S_DEFECTS_BACKLOG.md
+# Live production audit: the window's evidence record, must survive a clean checkout.
+!reports/W_LIVE_AUDIT_2026-10-24.md
 
 # Graphify knowledge graph (generated, regenerable)
 graphify-out/

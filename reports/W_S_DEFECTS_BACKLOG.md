@@ -167,19 +167,144 @@ nothing about it.
 
 ---
 
+## 6. Ouroboross Invo session churns every ~7 minutes and drops trade records
+
+**Impact: highest of the four W-LIVE items, and the only one that costs money outside paper.**
+The mimic service loses its Invo session constantly and misses trades. Operator-confirmed:
+**DOT (+13.61%) was published by Pariston and never mirrored by Ouroboross**
+(*User-provided*, screenshot). The mechanism fits — `[Auto] RECORD FAILED <COIN> (fill stands):
+no trading session (refresh failed)` means the HL fill exists and only the *record* is lost.
+
+**Evidence (Measured, W-LIVE 2026-10-24, 2026-10-22 → 10-24):**
+
+| Signal | Value |
+|---|---|
+| `Invo session rotated silently` | **561** in 2.8 d, **median gap 7.1 min** |
+| `bootstrap` runs reporting `errors > 0` | **1,252** (1,031 are the canonical `mimicked 0 / skipped 1 / errors 1`) |
+| `sims sync` runs reporting `errors > 0` | **726** |
+| Record failures | `RECORD FAILED ADA`, `RECORD FAILED SOL`, … — fill stands, record dropped |
+| Trades that did mirror | 89 TPSL placements across 18 coin/side combinations |
+
+These are **not** stderr duplicates of INFO lines — the "mimic logs every line twice" caveat does
+not apply to these counter values.
+
+**Capital status (operator directive): capital-neutral in paper, loses real money on the mimic
+side.** Missed entries are opportunity loss, not a loss of principal; no evidence of a wrong
+position being opened.
+
+**Options** — investigate before deciding, do **not** assume a code bug:
+- **(a) Token expiry vs concurrent-session cap** — if Invo enforces one session per account, the
+  main bot and the mimic are evicting each other. This is the leading hypothesis and it is not a
+  code defect.
+- **(b) API rate limit / throttling** on session refresh.
+- **(c) Durable record write** — queue or retry the record instead of dropping it, so a fill is
+  never unrecorded regardless of session state. Worth doing even if (a) is the root cause.
+
+**Disposition: DEFER — investigate after the window, and do not "fix" it locally first.** The
+operator's constraint stands: it may be an Invo API/rate-limit behaviour, and a speculative local
+change would hide the real cause. First question is an observation, not an edit: how many distinct
+sessions does this account open, and who else holds one.
+
+---
+
+## 7. `CLOSE_PAPER_POSITION` does not terminate supervision
+
+**Impact: high for measurement, zero for capital.** 7 positions were told to close **78 times**;
+two of them account for **69** of the decisions (LINKUSDT-400159 **26×**, ADAUSDT-E50B12 **43×**).
+State stays `open` for 33+ hours and supervision keeps re-deciding after the close.
+
+**Evidence (Measured, W-LIVE 2026-10-24):** `[Exits] SIG-… open -> CLOSE_PAPER_POSITION
+(plan v4 …)` repeats, then flips back to `NO_CHANGE` with `state=open`; 1,314 recorded decisions
+across only **61 distinct signals**; `apply=True` on every one.
+
+**Why it is not capital-critical:** closes are idempotent downstream —
+`already-applied — reconciled, stop retrying` ×10 and `already gone server-side, stop retrying` ×5.
+Booked (51) = finalized (51), so nothing is double-booked. On the mimic side this would re-send
+closes rather than double-close, but it is churn the mirror should not be carrying.
+
+**Binding rule for any post-window analysis (operator directive):** **aggregate exit decisions by
+unique `signal_id`, never by decision count.** The decision count overstates positions by ~11× for
+closes. A per-decision read of this ledger is wrong before any code is touched.
+
+**Options**
+- Mark the position closed in the ledger on the CLOSE decision and exclude terminal states from
+  `_is_due`.
+- Assert on transition: once `CLOSED`, no further decision may be recorded for that `signal_id`.
+- Likely shares a root cause with the `Sim reconcile DIVERGENT` reservation drift
+  (`diff_reserved` 40 → 60, one-way), since a close that does not retire the position also does
+  not retire its reservation.
+
+**Disposition: DEFER to post-window.** Fixing it mid-window changes exit behaviour and would
+invalidate the comparison the window exists to make.
+
+---
+
+## 8. No cross-sectional exposure cap — bursts open 10–11 same-direction positions at once
+
+**Impact: high, and it is the leading structural risk in the current regime.** Publication is
+event-clustered: 210 of 248 scans produced zero candidates, then single scans published 10–11
+signals into one move.
+
+**Evidence (Measured, W-LIVE 2026-10-24):** 6 scans published ≥11 signals. Two studied:
+2026-10-23 22:42 (**15 candidates → 10 published**) and 2026-10-24 14:27 (**24 → 11**), both
+BEARISH, `rejected: 0`. No cross-sectional or per-direction limit is visible in behaviour.
+
+**Related operator finding:** losing trades were held **~3 minutes** (DOGE, AVAX, NEAR, BNB, SOL;
+*User-provided*, screenshot). Immediate stop-outs, not exit mismanagement — which is consistent
+with 03-B-2 being CLOSED and means the loss pattern is an **entry-side** property. A burst of
+same-direction entries stopping out together is exactly what an uncapped cross-section produces.
+
+**Options**
+- Per-direction concurrent cap (e.g. max 3) as a portfolio-level gate, not a per-strategy one.
+- Correlation-aware sizing so 10 short alts in one move is not 10 independent bets.
+- Both are behaviour changes and both need their own observation before any 04B citation.
+
+**Disposition: DEFER — post-window design decision.** Do not add a cap mid-window: it would move
+entry behaviour and confound H1–H4.
+
+---
+
+## 9. `suppressed` is an unknown audit event type
+
+**Impact: low — noise, with a small risk of lost audit information.** **2,943** occurrences,
+~10.5/min across the whole window, drowning any future `WARNING`-level scan of the logs.
+
+**Evidence (Measured, W-LIVE 2026-10-24):** `Invo exit-sync audit gap: unknown audit event type:
+'suppressed'`, 2026-10-22 11:26 → 10-24 09:18. Exit sync still completed 248 runs (41 modified,
+0 closed), so nothing functional failed.
+
+**Options:** map `suppressed` in the audit reader; if it carries no information the bot needs,
+filter it at the source rather than logging a warning per event.
+
+**Disposition: DEFER — post-window, one-line enum addition.** Confirm first whether Invo added the
+event type or whether it is internal state leaking into the audit stream.
+
+---
+
 ## Order of work (when authorized)
 
 | # | Item | When | Kind of change |
 |---|---|---|---|
+| 6 | Ouroboross Invo session churn / missed mirrors | **after the window**; investigate root cause before any edit | observation first — may be an Invo session/rate limit, not a code bug |
+| 7 | `CLOSE_PAPER_POSITION` state persistence | **after the window** | behaviour (terminal state + `_is_due` exclusion); shared root cause with reservation drift |
+| 8 | Cross-sectional / per-direction exposure cap | after the window, before any 04B risk citation | behaviour — needs its own observation |
 | 2 | Bollinger gate: remove or re-threshold | **after the window closes**; before any 04B citation of +19R | behaviour (11 extra detections, 7 publish) — needs a published-set diff |
 | 4 | Docs correction | before any 04B decision references the docs | documentation |
 | 1 | `regime_filter` fix-or-remove | after H3 resolves | behaviour - needs H3 evidence |
 | 5 | Momentum ATR: wire in or delete the params | after the window; before any momentum figure is cited as an ATR result | behaviour (a) or no-op deletion (b) - needs a decision |
+| 9 | Map the `suppressed` audit event | after the window | no-op / logging |
 | 3 | Provenance completeness | after the window, as its own work package | evidence plumbing |
+
+**Analysis rule added with items 6–9 (2026-10-24):** any exit analysis on this ledger groups by
+unique `signal_id` (item 7). Any mimic claim is stated as *recorded* positions, not *actual*
+positions, until item 6 is resolved — the record is known to undercount.
 
 ## Not in this backlog (on purpose)
 
-- Exit management / P2–P3 tuning — **03-B-2 is CLOSED**; do not reopen.
+- Exit management / P2–P3 tuning — **03-B-2 is CLOSED**; do not reopen. This closes exit *policy*
+  (stop placement, target ladders, threshold tuning). It does **not** cover item 7, which is a
+  terminal-state persistence defect: the exit policy is not in question, only whether a decision
+  it made is recorded once and honoured. Do not use item 7 as licence to reopen 03-B-2.
 - Retired families (`ema_trend_20_50`, `rsi_mean_reversion`) — standing decision, they stay retired.
 - Momentum threshold (M1), `confirmation_bars` (M2), partial-bar volume (M4), forming-bar bands (M5), duplicate
   method definitions (L1/L2), donchian close-vs-price wording (L4), orphan `.pyc` (L6), Bollinger SHORT tests (L7).
