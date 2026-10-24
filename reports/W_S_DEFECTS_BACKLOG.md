@@ -415,7 +415,8 @@ window is a **5-family** number until item 11 ships.
 
 Static-analysis debt with no decision value **during** the window. `ruff --fix` rewrites bytes: a large mechanical
 diff would obscure the H1–H4 read, because nobody reviewing the tree can tell a cleanup hunk from a behaviour hunk.
-Everything here waits until the window closes (2026-11-21).
+Everything here waits until Window 2 closes (`reports/OBSERVATION_PROTOCOL_2026-10.md` §7) — Window 1 closed early
+on 2026-10-24.
 
 | Rule | Count | Effort | Notes |
 |---|---|---|---|

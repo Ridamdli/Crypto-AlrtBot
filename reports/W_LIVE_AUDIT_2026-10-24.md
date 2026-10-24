@@ -5,6 +5,11 @@ Read-only audit of the Railway-hosted bot during the active observation window
 Phase 1–3 read logs and MCP metadata only; Phase 4–5 (this revision) read the pulled
 `data_store/*.json` and `mirror_data/*` files over read-only `railway ssh`.
 
+> **Timing superseded 2026-10-24.** Window 1 was closed early and the deploy was authorized.
+> Every finding below stands unchanged; only its "wait until 2026-11-21" recommendation is
+> superseded. Read the closure block in `reports/OBSERVATION_PROTOCOL_2026-10.md` and
+> `reports/DEPLOY_READINESS.md` before acting on any timing advice in this report.
+
 Labeling: **Measured** = read directly from Railway/MCP output or repo. **User-provided**
 = operator or prior-session figure carried in. **Estimated** = my inference, stated as such.
 No figure in this report is a 30-day result. Window age at audit time: **2.8 days**.

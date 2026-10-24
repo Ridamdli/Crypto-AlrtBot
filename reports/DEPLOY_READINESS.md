@@ -1,12 +1,22 @@
 # Deploy Readiness — Waves 1 and 2
 
-**Future deploy plan. Execution is blocked until Phase 04 completes AND the
-operator explicitly authorizes a deploy event.** No deploy, no production write,
-and no Railway read has been performed.
+**AUTHORIZED 2026-10-24 by operator decision.** Window 1 was terminated early
+(`reports/OBSERVATION_PROTOCOL_2026-10.md`); this document is now an **execution
+checklist**. **The agent does not deploy. The operator executes every step.**
 
-**Evidence base for every claim below:** 11 days (2026-10-08 → 2026-10-19), 204
-entry signals, one regime (bearish 157 / neutral 47), UNIUSDT-dominated exit
-population. R-weighted where a policy claim is made. No claim is a 30-day result.
+**Target commit: `HEAD` at push time.** Runtime code is **identical to `f80ff11`** — every commit
+after it is documentation only, provable with
+`git diff --stat f80ff11..HEAD -- src mirror scripts` (must print nothing). Nothing has been pushed.
+
+**Evidence base:** Window 1 (`reports/W_LIVE_AUDIT_2026-10-24.md` — 2.8 days, 59 published,
+49 settled, one regime) plus the 11-day / 204-signal baseline where stated. R-weighted where a
+policy claim is made. No claim is a 30-day result.
+
+**Why deploy now, recorded:** the running system lost **−8.44% paper equity in 2.8 days**
+(1028.75 → 941.93), with **89% of the net loss from `ema_trend_20_50`** — a family already
+retired locally — and gross **+1.000R** against modeled fees **−8.736R**. Continuing a 30-day
+observation on a system whose defects are already diagnosed spends capital to re-measure known
+results.
 
 ---
 
@@ -19,11 +29,31 @@ population. R-weighted where a policy claim is made. No claim is a 30-day result
 
 Production reference: **2026-10-13**. Last confirmed mirror revision:
 **`f2dfde8`**. The mirror is uploaded from the local tree with `railway up` —
-GitHub auto-deploy does not fire. The main service's running revision is
-**unconfirmed** (Railway auth expired).
+GitHub auto-deploy does not fire.
 
-**37 commits** since `f2dfde8`; **20 touch runtime code**. 11 days / 204 signals /
-one regime / UNIUSDT-dominated applies to all behaviour claims.
+**Ship set — Measured.** **61 commits** since `f2dfde8`; **78 files** touched under `src/`,
+`mirror/`, `scripts/`. The main service's exact running revision is unconfirmed, but it is
+provably **pre-`49ff810`**, which makes the provable floor **32 commits**:
+
+| Proof | Observation |
+|---|---|
+| `49ff810` not running | no `applied` key on any of the **1,315** in-window exit decisions |
+| `4ddd798` not running | no `scoring_breakdown` on any published signal |
+| `a29831a` not running | `ema_trend_20_50` still publishing (8 in-window signals) |
+
+Railway auth is **valid** as of 2026-10-24. Window 1's 11 days / 204 signals / one regime
+baseline still bounds every behaviour claim.
+
+### 0.1 Deploy event — 2026-10-24, target `HEAD` (runtime `f80ff11`)
+
+| Step | Unit | Action | Gate before the next step |
+|---|---|---|---|
+| 1 | repo | `git push origin master` | push succeeds; remote `master` = local `HEAD` |
+| 2 | main (`crypto-alrtbot`) | auto-deploy on push, or manual deploy from that `HEAD` | deploy status **SUCCESS** + §7.1 checks |
+| 3 | mirror (`pariston-mimic`) | `railway up` from the local tree (auto-deploy does **not** fire) | deploy status **SUCCESS** + §7.2 checks |
+
+The mirror ships second on purpose: if the main service misbehaves, rolling it back does not
+require touching a service that may be holding live positions.
 
 ---
 
@@ -77,6 +107,7 @@ Both commits are **replay-verified no-ops** and change no past decision.
 |---|---|---|
 | `f62d9a1` | **P2** — a target may only move toward the mark; widening rejected | 31/31 historical ADJUSTs accepted, 0 widenings, 0 flips (`scripts/verify_p2_zero_change.py`) |
 | `95db541` | **P3 shadow** — records what P3 would have decided on pending invalidation | write-only; invalidation still applies (test) |
+| `4ddd798` | **W-DD** — persist `scoring_breakdown` on published signals | additive field; `None` on every pre-deploy row, never zero |
 
 Wave 2 depends on Wave 1 only because it is the same image. It has no runtime
 dependency on any Wave 1 commit. 11 days / 204 signals / one regime /
@@ -160,29 +191,60 @@ path.
 The file is append-only JSONL, one row per pending invalidation. It is not read
 by any decision path.
 
+### 5.1 Fee model behind every R figure (D1, open)
+
+Every `net_r` in the audit is gross R minus `fees_cost_r`. The model is
+`total_costs_pct = 2 × (0.0004 taker + 0.0002 slippage) = 0.0012` of notional per
+round trip, converted to R by `actual_entry_price / risk_distance`
+(`src/backtest/evaluator.py:30-31,228-231`; mirrored in `src/exits/config.py:115-117`,
+`src/exits/policy.py:155-161`, `src/exits/harness.py:228-230`).
+
+Against Hyperliquid's published base tier (Measured, 2026-10-24,
+`hyperliquid.gitbook.io/hyperliquid-docs/trading/fees` — perps taker 0.045%, maker
+0.015%; tier 2 >$25M volume 0.035% / 0.008%):
+
+| Fill regime | Round-trip cost | vs model 0.12% |
+|---|---|---|
+| taker / taker | 0.09% | model **+33% conservative** |
+| maker / maker | 0.03% | model **~4× conservative** |
+
+**Verdict: the model overstates cost, so Window 1's −8.736R fee drag is an upper
+bound, not a fact.** It is **not** a MUST-FIX before deploy: a conservative cost
+model biases *against* shipping, never for it. What it does mean is that
+`0.178R/trade` must not be quoted as the real fee rate. One Invo/HL fee statement
+replaces the estimate; until then every snapshot states the model it used.
+
+This also does not reproduce the operator's "61% fee/gross" figure: Measured,
+fees ÷ gross profit = **32.0%**, fees ÷ |gross loss| = **24.9%**, and fees ÷ gross
+edge = **8.7×** — three different ratios, none equal to 61%.
+
 ---
 
 ## 6. Pre-deploy operator actions
 
-All are operator actions; none has been performed.
+Status as of 2026-10-24: **1 is done, 5 is granted; 2, 3 and 4 still need doing.**
 
-1. **`railway login`** — auth is expired. Until refreshed, the running revision
-   of each service cannot be confirmed and none of the post-deploy checks can be
-   run.
-2. **Confirm the running revision per service.** Do not assume `f2dfde8` for the
-   mirror or any particular commit for main.
-3. **Confirm `INVO_TRADING_REFRESH` is set on `pariston-mimic`.** Without it,
-   W6 queues records safely but delivers none — `post()` raises
-   `no trading session (refresh failed)` on every attempt.
-4. **Confirm Invo dedup on `clientTxId`** (§4). One deliberate duplicate
-   submission of a harmless record settles it.
-5. **Authorize the deploy event** — only after Phase 04 completes and the
-   standing deploy policy is lifted. Wave 1 and Wave 2 may then ship together or
-   in sequence; the mirror may ship independently of both.
+1. **`railway login` — DONE** (2026-10-24, authenticated). Keep the session alive for the
+   post-deploy checks; if it expires, verification stops at the logs.
+2. **Confirm the target is `HEAD`** and that `git status` is clean before pushing. Runtime code
+   must still equal `f80ff11`: `git diff --stat f80ff11..HEAD -- src mirror scripts` prints nothing.
+   Do **not** deploy a dirty tree — the mirror is uploaded from the working tree with
+   `railway up`, so an uncommitted edit ships silently.
+3. **Confirm `INVO_TRADING_REFRESH` is set on `pariston-mimic` — REQUIRED.** Without it, W6
+   queues records safely and delivers **none**: `post()` raises
+   `no trading session (refresh failed)` on every attempt (`mirror/recorder.py:128`), which is
+   exactly the 1,252 `RECORD FAILED` events in Window 1. `INVO_TRADING_TOKEN` is **optional** —
+   the access token is minted by the refresh call and rotated into `trading_session.json`
+   (`mirror/__main__.py:39-42`, `recorder.py:82-118`). Setting both is harmless; setting only the
+   access token is not sufficient because it expires.
+4. **Confirm Invo dedup on `clientTxId`** (§4). Still unproven from the repo. One deliberate
+   duplicate submission of a harmless record settles it. If you skip this, W6 ships with the
+   monitoring in V1.8 instead — that is a conscious acceptance, not an oversight.
+5. **Authorize the deploy event — GRANTED 2026-10-24.** Window 1 is closed; the standing
+   no-deploy policy no longer applies.
 
-Env vars: **Wave 1 mirror** — `INVO_TRADING_REFRESH` (required),
-`INVO_TRADING_TOKEN` (optional). **Wave 1 main** — no new variables.
-**Wave 2** — no new variables.
+Env vars: **mirror** — `INVO_TRADING_REFRESH` (required), `INVO_TRADING_TOKEN` (optional). **main**
+— no new variables. No Wave 2 variable.
 
 ---
 
@@ -203,6 +265,16 @@ Env vars: **Wave 1 mirror** — `INVO_TRADING_REFRESH` (required),
   (16.5 signals/day across 14 coins; **Measured** on 204 signals, **Estimated**
   as a rate). A drop caused by the retirements is expected; a drop elsewhere is
   not.
+- **V1.9 Deployed revision.** `GET /api/version` (needs `ADMIN_TOKEN`) returns
+  `commit_sha` from `RAILWAY_GIT_COMMIT_SHA` (`src/dashboard.py:607-612`). It must equal
+  `git rev-parse HEAD` at push time (40 chars). Docs-only commits after `f80ff11` move the hash,
+  not the code — so compare against the pushed SHA, not against `f80ff11`. Caveat: the **mirror**
+  is uploaded with `railway up`, so its `RAILWAY_GIT_COMMIT_SHA` may be empty — verify the mirror
+  by behaviour (V1.6/V1.7), not by hash.
+- **V1.10 `scoring_breakdown` persists.** The first post-deploy published signal carries a
+  non-null `scoring_breakdown` dict; every pre-deploy row still reads `None` (never `0`, never
+  reconstructed). This is the one check that proves `4ddd798` is live, and it is what makes H4
+  Measurable in Window 2.
 
 ### 7.2 Wave 1 (mirror)
 
@@ -230,7 +302,7 @@ Env vars: **Wave 1 mirror** — `INVO_TRADING_REFRESH` (required),
 **Mechanics:** redeploy the previous Railway deployment for the affected service.
 Both services were uploaded from the local tree, so the prior image is the true
 prior state. If a rebuild is required, check out the confirmed prior revision and
-`railway up`. Do **not** `git revert` the 37-commit range as a unit — it mixes
+`railway up`. Do **not** `git revert` the 61-commit range as a unit — it mixes
 runtime, tests, and lint.
 
 **No data rollback is needed or possible.** Exit ledgers are append-only overlays;
@@ -277,12 +349,15 @@ the outcome ledger is written by the evaluator, not this change set.
 
 ## 9. Status and authorization
 
-- **Standing deploy policy: no deploy until Phase 04 completes AND the operator
-  explicitly authorizes a deploy event.** This document is a future plan, not an
-  imminent execution.
-- Nothing here has been deployed, run against production, or pushed. All commits
-  are local.
-- Wave 1 and Wave 2 are separable; the mirror is separable from both.
-- Railway reads remain blocked until `railway login` is refreshed, so the running
-  main-service revision cannot be confirmed before then.
-- The open input is **Phase 04 direction**, not deploy authorization.
+- **AUTHORIZED 2026-10-24.** The standing no-deploy policy is lifted for this event by operator
+  decision; Window 1 was terminated early to enable it.
+- **The agent has not deployed, pushed, restarted, or written to production.** Everything in the
+  repo is local; `HEAD` is `f80ff11` plus the docs-only commits of this record.
+- Target `HEAD` at push time; runtime code is `f80ff11` (docs-only commits may follow). 61 commits
+  since the last confirmed production reference `f2dfde8`, at least 32 since `49ff810`.
+- Order is **main → verify → mirror → verify** (§0.1). Wave 1 and Wave 2 ship as one image; the
+  mirror is a separate unit.
+- Railway auth is valid as of 2026-10-24, so the running revision can now be confirmed.
+- **Window 2 starts on the successful main deploy** and is defined in
+  `reports/OBSERVATION_PROTOCOL_2026-10.md` §7. The deploy's success is the window's start gate.
+- The open input is no longer Phase 04 direction; it is **the deploy result**, then Phase 04.

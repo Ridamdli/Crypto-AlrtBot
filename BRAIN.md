@@ -198,17 +198,29 @@ That file is read at the start of the next session.
 ## 11. Current work state (volatile — maintained by the operator)
 
 - 03-B-2 closed: exit management is **not** the production defect.
-- **30-day observation window is active (2026-10-22 → 2026-11-21 or n = 200).** Pre-registered
-  scope, hypotheses and post-window decision tree: `reports/OBSERVATION_PROTOCOL_2026-10.md`,
-  `reports/PRE_REGISTERED_HYPOTHESES_2026-10.md`. No mid-window policy change — no gate, filter,
-  strategy or exit tuning until it closes; decide from the tree, not from the latest print.
-- **Graph freeze until the window ends (2026-11-21).** No rebuilds. Current graph — 3,006 nodes /
+- **Window 1 CLOSED EARLY 2026-10-24 (operator decision)** — terminated at day 3 of 30 because the
+  running system was losing capital while the fixes were already committed. 49 settled signals are
+  archived as a **pre-deploy baseline, not a 30-day result**; H1–H4 are **paused/inconclusive, not
+  failed**; the post-window decision tree was **not applied**. `reports/OBSERVATION_PROTOCOL_2026-10.md`
+  §7 defines **Window 2**, which starts on the deploy-success date.
+- **Deploy AUTHORIZED 2026-10-24, operator executes — the agent does not deploy.** Target: local
+  `HEAD` at push time; runtime code is **`f80ff11`**. Steps, env vars and verification:
+  `reports/DEPLOY_READINESS.md`. Main service first, mirror second, each verified before the next.
+- **Window 2 protocol (armed on deploy success).** Same H1–H4 claims and thresholds, evaluated only
+  on post-deploy settled rows; Window 1 rows are never pooled in. New: `scoring_breakdown` makes H4
+  Measured, per-strategy R becomes a **4-family** number, and fee drag is read against the stated
+  0.12%-of-notional model (conservative vs Hyperliquid taker/taker 0.09%).
+- **Next scheduled action: the Sunday weekly report** (n, mean net R, median net R, top-5
+  concentration, triggers) — or an immediate trigger alert, whichever comes first.
+- **Graph freeze stands — no rebuild authorized.** No rebuilds. Current graph — 3,006 nodes /
   7,930 edges / 148 communities / 71 curated labels — is frozen as-is. Rationale: each rebuild on a
   drifted community set drops more labels (measured 120 → 83 → 71), `graphify label` is billed and
   rejected, and 71 names still serve queries. The graph lags the tree by the C-series docs; that is
-  accepted. Post-window rebuild **must** carry an explicit label strategy: hand-label the top 30
+  accepted. The next rebuild **must** carry an explicit label strategy: hand-label the top 30
   communities, or operator-authorized `graphify label`, or accept the degradation deliberately.
-- **Window monitoring schedule (active until 2026-11-21).**
+  (Previously tied to the 2026-11-21 window end; Window 1 closed early, so the freeze now ends only
+  on an explicit operator decision.)
+- **Window monitoring schedule (re-armed at Window 2 start).**
   - **Weekly report, every Sunday — 5 lines, no prompt required:** n (settled signals this week), mean net R,
     median net R, top-5 concentration, triggers fired (yes/no, which).
   - **Produce it autonomously** when the session does any work on a Sunday, or when the operator opens a session
@@ -227,20 +239,32 @@ That file is read at the start of the next session.
 - **BTC coverage watch (standing rule):** BTC produces ~1 signal / 11 days. If a 30-day scan
   produces **< 3** BTC signals, Phase 04 must address BTC coverage explicitly.
 - `p3_shadow` writes `data_store/p3_shadow.jsonl` (main-service volume, survives deploys).
-- **Deployment policy (standing): no deploy until Phase 04 completes AND the operator
-  explicitly authorizes a deploy event.** `reports/DEPLOY_READINESS.md` (Wave 1 /
-  Wave 2 / Hold) is a **future plan, not an imminent execution**. The open input is
-  Phase 04 direction, not deploy authorization.
-- Production runs pre-`49ff810` code; 37 local commits are held. Railway auth expired —
-  running revision unconfirmed.
+- **Production runs pre-`49ff810` code — Measured, three ways:** no `applied` key on any of the
+  1,315 in-window exit decisions (`49ff810`), no `scoring_breakdown` on any published signal
+  (`4ddd798`), and `ema_trend_20_50` still publishing (`a29831a`). **61 commits** since the last
+  confirmed production reference `f2dfde8`; **at least 32** since `49ff810`. Railway auth is valid
+  as of 2026-10-24; the exact running revision is still unconfirmed.
+- **Fee model risk (D1, open).** `fees_cost_r` is the harness model
+  `2 × (0.04% taker + 0.02% slippage) = 0.12%` of notional per round trip — **conservative**
+  versus Hyperliquid base taker/taker (0.09%) and ~4× maker/maker (0.03%). Window 1's −8.736R fee
+  drag is therefore an upper bound until a real Invo/HL fee statement replaces it. One statement
+  settles it; do not cite 0.178R/trade as fact before then.
 - W6 delivery is at-least-once: the queue replays byte-identical `clientTxId`s (64-bit
   since `5fcc4e6`), so safety depends on Invo deduping server-side (unproven from the repo).
 - `EXITS_APPLY=true` on Railway; local stays false in fixtures.
 - `MIMIC_LIVE=true` on Railway; $16 real money.
 - Statistical caveat: 11 days / 204 entry signals, 5.1 days / 97 exit signals, one regime.
+  Window 1 adds 2.8 days / 59 published / 49 settled / one regime (bearish 44 of 59 published).
   No claim is a 30-day result.
-- **Momentum R +1.42R is `User-provided`, not Measured** (22 signals per the report, 21 in `signals.jsonl`).
-  Post-window: re-derive from settled outcomes before any decision cites it.
+- **W-LIVE audit complete (`f80ff11`).** `reports/W_LIVE_AUDIT_2026-10-24.md` is the Window 1
+  evidence record: mean net **−0.158R**, median −1.096R, sum −7.736R, CI95 [−0.545, +0.229];
+  gross **+1.000R** vs fees **−8.736R**; 89% of the net loss from retired `ema_trend_20_50`.
+  **11 backlog items** queued in `reports/W_S_DEFECTS_BACKLOG.md` (items 1–11; 6–11 came out of
+  this audit). No intervention and no deploy was performed by the agent.
+- **Momentum `+1.42R` is `User-provided` and does NOT reproduce.** Production ledger: 25
+  `momentum_20` rows, 24 `final`, **net −1.727R** over 24, **−1.470R over the 17 resolved**
+  (mean −0.086R). Neither 21 nor 22 signals reproduces and the sign is opposite. `+1.42R` is
+  most likely a harness/backtest figure — cite the two separately or not at all.
 - **Baseline populations (2026-10-22):** the "+0.03" baseline is the **candidate-level
   (pre-gate)** correlation on the 6,438-candidate TRAIN replay; the **published-signal**
   correlation is **+0.12** (204). Complementary measurements of different objects, not
