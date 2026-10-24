@@ -15,19 +15,31 @@ Simplifications (v1, documented honestly):
 - Fixed risk per trade (no compounding of position size).
 - Limit-entry fills per evaluator rules (entry must touch within 6 bars).
 
-State: data_store/paper_portfolio.json
+State: data_store/paper_portfolio.json, or — when DATABASE_URL is set — the
+paper_state (single row) + paper_booked tables. paper_state carries a
+`version`; settle() uses it as an optimistic lock (conditional UPDATE, retry
+once, then raise) because settlement is read-modify-write on shared equity.
 """
 import json
 import os
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
+
+from src.db import get_session_factory, is_pg_enabled
+from src.db import models as db
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 DEFAULT_STARTING_EQUITY = 1000.0
 DEFAULT_RISK_PER_TRADE = 10.0
+
+
+class _StaleState(Exception):
+    """paper_state moved under us between read and conditional UPDATE."""
 
 
 class PaperPortfolio:
@@ -42,10 +54,28 @@ class PaperPortfolio:
         self.ledger_path = os.path.join(storage_dir, ledger_name)
         self.starting_equity = starting_equity
         self.default_risk = risk_per_trade
-        os.makedirs(self.storage_dir, exist_ok=True)
+        self._pg = is_pg_enabled()
+        # No disk on a serverless deploy: only the JSON backend needs a dir.
+        if not self._pg:
+            os.makedirs(self.storage_dir, exist_ok=True)
 
     # ── ledger ──────────────────────────────────────────────────────────
     def load(self) -> dict[str, Any]:
+        if self._pg:
+            try:
+                with self._pg_session() as s:
+                    state = s.get(db.PaperState, 1)
+                    booked = self._pg_booked(s)
+            except (SQLAlchemyError, RuntimeError) as e:
+                logger.error(f"[Paper] Failed to load portfolio ledger: {e}")
+                state, booked = None, {}
+            return {
+                "starting_equity": (state.starting_equity if state
+                                    else self.starting_equity),
+                "equity": (state.equity if state else self.starting_equity),
+                "peak_equity": (state.peak_equity if state else self.starting_equity),
+                "booked": booked,
+            }
         try:
             with open(self.ledger_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -61,18 +91,82 @@ class PaperPortfolio:
         }
 
     def save(self, ledger: dict[str, Any]) -> None:
+        if self._pg:
+            # Explicit snapshot overwrite: no version precondition here. Only
+            # settle() (the concurrent path) uses the optimistic lock.
+            try:
+                with self._pg_session() as s, s.begin():
+                    vals = {"starting_equity": ledger.get("starting_equity",
+                                                          self.starting_equity),
+                            "equity": ledger.get("equity", self.starting_equity),
+                            "peak_equity": ledger.get("peak_equity",
+                                                      self.starting_equity)}
+                    if s.get(db.PaperState, 1) is None:
+                        s.add(db.PaperState(id=1, version=0, **vals))
+                    else:
+                        s.execute(update(db.PaperState)
+                                  .where(db.PaperState.id == 1)
+                                  .values(version=db.PaperState.version + 1, **vals))
+                    for sid, rec in (ledger.get("booked") or {}).items():
+                        s.merge(db.PaperBooked(signal_id=sid,
+                                               payload=rec,
+                                               **_booked_columns(rec)))
+            except (SQLAlchemyError, RuntimeError) as e:
+                logger.error(f"[Paper] Failed to save portfolio ledger: {e}")
+            return
         try:
             from src.utils.atomic import atomic_write_json
             atomic_write_json(self.ledger_path, ledger)
         except OSError as e:
             logger.error(f"[Paper] Failed to save portfolio ledger: {e}")
 
+    # ── postgres helpers ────────────────────────────────────────────────
+    def _pg_session(self):
+        return get_session_factory()()
+
+    def _pg_booked(self, s) -> dict[str, dict[str, Any]]:
+        return {sid: dict(p) for sid, p in s.execute(
+            select(db.PaperBooked.signal_id, db.PaperBooked.payload))}
+
+    def _pg_write_state(self, s, ledger: dict[str, Any], old_version: int) -> bool:
+        """Conditional UPDATE. False means another writer moved the version."""
+        res = s.execute(
+            update(db.PaperState)
+            .where(db.PaperState.id == 1, db.PaperState.version == old_version)
+            .values(starting_equity=ledger["starting_equity"],
+                    equity=ledger["equity"],
+                    peak_equity=ledger["peak_equity"],
+                    version=old_version + 1)
+        )
+        return res.rowcount == 1
+
     # ── settlement ──────────────────────────────────────────────────────
     def settle(self, outcomes: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """Book all newly-final outcomes. Idempotent. Returns run summary."""
+        if self._pg:
+            return self._settle_pg(outcomes)
         ledger = self.load()
+        newly_booked, _rows = self._book(ledger, outcomes)
+        self.save(ledger)
+        summary = {
+            "equity": ledger["equity"],
+            "newly_booked": newly_booked,
+            "total_booked": len(ledger.get("booked", {})),
+        }
+        if newly_booked:
+            logger.info(f"[Paper] {summary}")
+        return summary
+
+    def _book(self, ledger: dict[str, Any],
+              outcomes: dict[str, dict[str, Any]]) -> tuple[int, dict[str, dict[str, Any]]]:
+        """Apply newly-final outcomes to `ledger` in place.
+
+        Shared by both backends so the money math cannot diverge. Returns
+        (newly_booked, {signal_id: record}) for the rows that were added.
+        """
         booked = ledger.get("booked", {})
         newly_booked = 0
+        rows: dict[str, dict[str, Any]] = {}
         for sid, oc in outcomes.items():
             if sid in booked or not oc.get("final"):
                 continue
@@ -94,7 +188,7 @@ class PaperPortfolio:
                 _notional = float(_notional) if _notional is not None else None
             except (TypeError, ValueError):
                 _notional = None
-            booked[sid] = {
+            rec = {
                 "signal_id": sid,
                 "symbol": oc.get("symbol"),
                 "side": oc.get("side"),
@@ -117,17 +211,54 @@ class PaperPortfolio:
                 "pnl_usd": pnl,
                 "equity_after": ledger["equity"],
             }
+            booked[sid] = rec
+            rows[sid] = rec
             newly_booked += 1
         ledger["booked"] = booked
-        self.save(ledger)
-        summary = {
-            "equity": ledger["equity"],
-            "newly_booked": newly_booked,
-            "total_booked": len(booked),
-        }
-        if newly_booked:
-            logger.info(f"[Paper] {summary}")
-        return summary
+        return newly_booked, rows
+
+    def _settle_pg(self, outcomes: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        """Optimistic-locked settlement: read version, compute, conditional
+        UPDATE; retry once if the version moved, then raise."""
+        for attempt in (1, 2):
+            try:
+                with self._pg_session() as s, s.begin():
+                    state = s.get(db.PaperState, 1)
+                    if state is None:
+                        s.add(db.PaperState(id=1, version=0,
+                                            starting_equity=self.starting_equity,
+                                            equity=self.starting_equity,
+                                            peak_equity=self.starting_equity))
+                        s.flush()
+                        state = s.get(db.PaperState, 1)
+                    old_version = int(state.version or 0)
+                    ledger = {"starting_equity": state.starting_equity,
+                              "equity": state.equity,
+                              "peak_equity": state.peak_equity,
+                              "booked": self._pg_booked(s)}
+                    newly_booked, rows = self._book(ledger, outcomes)
+                    if not self._pg_write_state(s, ledger, old_version):
+                        raise _StaleState()
+                    for sid, rec in rows.items():
+                        s.add(db.PaperBooked(signal_id=sid,
+                                             payload=rec,
+                                             **_booked_columns(rec)))
+            except _StaleState:
+                logger.warning(f"[Paper] paper_state version conflict "
+                               f"(attempt {attempt}/2)")
+                continue
+            except SQLAlchemyError as e:
+                logger.error(f"[Paper] Failed to settle portfolio: {e}")
+                raise
+            summary = {
+                "equity": ledger["equity"],
+                "newly_booked": newly_booked,
+                "total_booked": len(ledger.get("booked", {})),
+            }
+            if newly_booked:
+                logger.info(f"[Paper] {summary}")
+            return summary
+        raise RuntimeError("paper_state version conflict after retry")
 
     def summary(self) -> dict[str, Any]:
         """Portfolio stats for the dashboard."""
@@ -162,3 +293,28 @@ class PaperPortfolio:
             "equity_curve": equity_curve[-60:],
             "recent_trades": sorted(trades, key=lambda x: str(x.get("settled_at") or ""), reverse=True)[:50],
         }
+
+
+def _booked_columns(rec: dict[str, Any]) -> dict[str, Any]:
+    """Promoted paper_booked columns for one settled record."""
+    return {
+        "symbol": rec.get("symbol"),
+        "side": rec.get("side"),
+        "strategy_id": rec.get("strategy_id"),
+        "signal_timestamp": rec.get("signal_timestamp"),
+        "settled_at": rec.get("settled_at"),
+        "close_timestamp": rec.get("close_timestamp"),
+        "status": rec.get("status"),
+        "entry_triggered": rec.get("entry_triggered"),
+        "liquidated": rec.get("liquidated"),
+        "first_event": rec.get("first_event"),
+        "leverage": rec.get("leverage"),
+        "position_notional": rec.get("position_notional"),
+        "position_pct_capital": rec.get("position_pct_capital"),
+        "net_r": rec.get("net_r"),
+        "risk_amount": rec.get("risk_amount"),
+        "pnl_usd": rec.get("pnl_usd"),
+        "equity_after": rec.get("equity_after"),
+        "holding_minutes": rec.get("holding_minutes"),
+        "liq_price": rec.get("liq_price"),
+    }
