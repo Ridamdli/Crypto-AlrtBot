@@ -147,11 +147,6 @@ def pytest_collection_modifyitems(config, items):
     if not _pg_on():
         return
     skip = pytest.mark.skip(reason="asserts JSON-store artifacts (file backend only)")
-    seen = set()
     for item in items:
         if item.name in _JSON_ONLY:
-            seen.add(item.name)
             item.add_marker(skip)
-    unknown = _JSON_ONLY - seen
-    if unknown:
-        print(f"warning: JSON-only list names no collected test: {sorted(unknown)}")

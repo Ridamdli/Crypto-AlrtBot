@@ -182,8 +182,7 @@ class SignalDeduplicator:
             try:
                 with get_session_factory()() as s, s.begin():
                     s.merge(db.SchedulerState(
-                        id=1, cooldown_hours=self.cooldown_hours,
-                        published_signals=state.get("published_signals", {})))
+                        id=1, published_signals=state.get("published_signals", {})))
             except (SQLAlchemyError, RuntimeError) as e:
                 logger.error(f"Failed to save deduplicator state: {e}")
             return
