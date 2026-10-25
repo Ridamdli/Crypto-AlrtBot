@@ -8,6 +8,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
 
 # Local state / evidence — never baked into the image
 data_store/
