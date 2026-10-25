@@ -6,8 +6,13 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+
 from src.config import CONFIG, AppConfig
 from src.data.persistence import SignalPersistence
+from src.db import get_session_factory, is_pg_enabled
+from src.db import models as db
 from src.models.signal import SignalModel
 from src.pipeline import SignalPipeline
 from src.utils.logger import get_logger
@@ -60,6 +65,14 @@ class BotScheduler:
             os.makedirs(state_dir, exist_ok=True)
 
     def _load_state(self) -> dict[str, Any]:
+        if is_pg_enabled():
+            try:
+                with get_session_factory()() as s:
+                    row = s.get(db.SchedulerState, 1)
+            except (SQLAlchemyError, RuntimeError) as e:
+                logger.warning(f"Failed to read scheduler state: {e}")
+                return {"published_signals": {}}
+            return {"published_signals": dict((row.published_signals if row else {}) or {})}
         if os.path.exists(self.state_file):
             try:
                 with open(self.state_file, "r") as f:
@@ -69,6 +82,15 @@ class BotScheduler:
         return {"published_signals": {}}
 
     def _save_state(self, state: dict[str, Any]) -> None:
+        if is_pg_enabled():
+            try:
+                with get_session_factory()() as s, s.begin():
+                    s.merge(db.SchedulerState(
+                        id=1, cooldown_hours=self.cooldown_hours,
+                        published_signals=state.get("published_signals", {})))
+            except (SQLAlchemyError, RuntimeError) as e:
+                logger.error(f"Failed to save scheduler state: {e}")
+            return
         try:
             from src.utils.atomic import atomic_write_json
             atomic_write_json(self.state_file, state)
@@ -219,13 +241,23 @@ class BotScheduler:
                 # Local conflict screen (zero requests): skip coins we already
                 # shared while their outcome is still open.
                 import json as _json
-                try:
-                    with open("data_store/outcomes.json", encoding="utf-8") as _f:
-                        _outcomes = _json.load(_f)
-                        if not isinstance(_outcomes, dict):
-                            _outcomes = {}
-                except (FileNotFoundError, ValueError, OSError):
-                    _outcomes = {}
+                _outcomes = {}
+                if is_pg_enabled():
+                    try:
+                        with get_session_factory()() as _s:
+                            _outcomes = {sid: dict(p) for sid, p in _s.execute(
+                                select(db.Outcome.signal_id, db.Outcome.payload))}
+                    except (SQLAlchemyError, RuntimeError) as _e:
+                        logger.warning(f"[Scheduler] outcome read failed: {_e}")
+                        _outcomes = {}
+                else:
+                    try:
+                        with open("data_store/outcomes.json", encoding="utf-8") as _f:
+                            _outcomes = _json.load(_f)
+                            if not isinstance(_outcomes, dict):
+                                _outcomes = {}
+                    except (FileNotFoundError, ValueError, OSError):
+                        _outcomes = {}
                 # Ground truth (one cheap read): the coins actually open in
                 # the portfolio right now. A non-final outcome must NOT block
                 # a share when Invo shows the slot empty — externally closed

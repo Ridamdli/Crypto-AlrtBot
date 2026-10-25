@@ -9,8 +9,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from src.config import AppConfig
 from src.data.symbol_registry import get_symbol_registry
+from src.db import get_session_factory, is_pg_enabled
+from src.db import models as db
 from src.strategies import STRATEGY_REGISTRY, create_strategy
 from src.utils.logger import get_logger
 
@@ -159,13 +163,30 @@ class SignalDeduplicator:
                               indent=None)
     
     def _load_state(self) -> dict[str, Any]:
+        if is_pg_enabled():
+            try:
+                with get_session_factory()() as s:
+                    row = s.get(db.SchedulerState, 1)
+            except (SQLAlchemyError, RuntimeError) as e:
+                logger.error(f"Failed to read deduplicator state: {e}")
+                return {"published_signals": {}}
+            return {"published_signals": dict((row.published_signals if row else {}) or {})}
         try:
             with open(self.state_file, "r") as f:
                 return json.load(f)
         except Exception:
             return {"published_signals": {}}
-    
+
     def _save_state(self, state: dict[str, Any]):
+        if is_pg_enabled():
+            try:
+                with get_session_factory()() as s, s.begin():
+                    s.merge(db.SchedulerState(
+                        id=1, cooldown_hours=self.cooldown_hours,
+                        published_signals=state.get("published_signals", {})))
+            except (SQLAlchemyError, RuntimeError) as e:
+                logger.error(f"Failed to save deduplicator state: {e}")
+            return
         try:
             from src.utils.atomic import atomic_write_json
             atomic_write_json(self.state_file, state)

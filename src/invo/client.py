@@ -28,7 +28,11 @@ import uuid
 from typing import Any
 
 import requests
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
+from src.db import get_session_factory, is_pg_enabled
+from src.db import models as db
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,6 +44,14 @@ def load_share_ledger(storage_dir: str = "data_store"):
     import json as _json
     import os as _os
 
+    if is_pg_enabled():
+        try:
+            with get_session_factory()() as s:
+                return {sid: dict(p) for sid, p in s.execute(
+                    select(db.InvoShare.signal_id, db.InvoShare.payload))}
+        except (SQLAlchemyError, RuntimeError) as e:
+            logger.error(f"[Invo] Failed to load share ledger: {e}")
+            return {}
     path = _os.path.join(storage_dir, SHARE_LEDGER_NAME)
     try:
         with open(path, encoding="utf-8") as f:
@@ -57,10 +69,17 @@ def record_share(storage_dir: str, signal_id: str, entry: dict) -> None:
     import os as _os
     import time as _time
 
-    _os.makedirs(storage_dir, exist_ok=True)
-    ledger = load_share_ledger(storage_dir)
     entry = dict(entry)
     entry.setdefault("shared_at", int(_time.time()))
+    if is_pg_enabled():
+        try:
+            with get_session_factory()() as s, s.begin():
+                s.merge(db.InvoShare(signal_id=signal_id, payload=entry))
+        except (SQLAlchemyError, RuntimeError) as e:
+            logger.error(f"[Invo] Failed to save share ledger: {e}")
+        return
+    _os.makedirs(storage_dir, exist_ok=True)
+    ledger = load_share_ledger(storage_dir)
     ledger[signal_id] = entry
     # Atomic publish so overlapping writers/readers never see torn JSON.
     path = _os.path.join(storage_dir, SHARE_LEDGER_NAME)

@@ -32,6 +32,13 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests as _requests
+from sqlalchemy.exc import SQLAlchemyError
+
+from src.db import get_session_factory, is_pg_enabled
+from src.db import models as db
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 SYNC_STATE_NAME = "invo_exit_sync.json"
 
@@ -134,6 +141,17 @@ def classify_sync_error(exc: BaseException) -> dict[str, Any]:
 
 def load_sync_state(storage_dir: str = "data_store") -> dict[str, Any]:
     """{synced_levels: {signal_id: {stop_loss, tp}}, closed: [signal_ids]}."""
+    if is_pg_enabled():
+        try:
+            with get_session_factory()() as s:
+                row = s.get(db.InvoExitSync, 1)
+        except (SQLAlchemyError, RuntimeError) as e:
+            logger.error(f"[InvoSync] Failed to load sync state: {e}")
+            return {"synced_levels": {}, "closed": []}
+        state = dict((row.state if row else {}) or {})
+        state.setdefault("synced_levels", {})
+        state.setdefault("closed", [])
+        return state
     path = _os.path.join(storage_dir, SYNC_STATE_NAME)
     try:
         with open(path, encoding="utf-8") as f:
@@ -153,6 +171,13 @@ def save_sync_state(storage_dir: str, state: dict[str, Any]) -> None:
     A crash mid-write leaves the previous valid state in place; the tmp
     file is removed best-effort. Mirrors ExitDecisionLedger._save.
     """
+    if is_pg_enabled():
+        try:
+            with get_session_factory()() as s, s.begin():
+                s.merge(db.InvoExitSync(id=1, state=state))
+        except (SQLAlchemyError, RuntimeError) as e:
+            logger.error(f"[InvoSync] Failed to save sync state: {e}")
+        return
     _os.makedirs(storage_dir, exist_ok=True)
     path = _os.path.join(storage_dir, SYNC_STATE_NAME)
     tmp_path = path + ".tmp"
