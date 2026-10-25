@@ -2,7 +2,7 @@
 Strategy Package
 Exports all strategy families and the base interface.
 """
-from typing import Any, Dict
+from typing import Any
 
 from .base import BaseStrategy, Direction, SignalCandidate, StrategyRegistry, Timeframe
 from .bollinger_atr import BollingerATRStrategy

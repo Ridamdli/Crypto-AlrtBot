@@ -7,7 +7,6 @@ Optimized with in-memory data caching for fast historical backtesting.
 import os
 import json
 import argparse
-import logging
 import bisect
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
@@ -15,10 +14,9 @@ from dataclasses import dataclass
 
 from src.config import AppConfig, CONFIG, DataAvailability
 from src.data.cached_client import CachedFuturesClient
-from src.data.ohlcv_fetcher import OHLCVFetcher
 from src.backtest.evaluator import SignalOutcomeEvaluator
 from src.backtest.tuner import ThresholdTuner
-from src.strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES
+from src.strategies import STRATEGY_REGISTRY
 from src.data.symbol_registry import get_symbol_registry
 from src.engines.btc_regime import BTCRegimeEngine
 from src.utils.logger import get_logger
@@ -347,8 +345,6 @@ def run_focused_research(
             elif not overlap.has_btc_regime:
                 skipped_no_btc += 1
 
-            # Fetch OI data (still uses DB query - typically small/fast)
-            oi_hist = client.get_open_interest_hist(symbol, period="15m", limit=10, end_time=ts)
             oi_data = {"signal": "neutral", "oi_change_pct": 0.0, "status": "neutral"}
 
             # Fetch funding rate (still uses DB query - typically small/fast)
@@ -444,8 +440,8 @@ def run_focused_research(
         f.write(f"**Test**: {len(test_ts)} timestamps ({test_days:.1f} days)\n\n")
         f.write("## Results\n\n")
         m = metrics.__dict__
-        f.write(f"| Metric | Value |\n")
-        f.write(f"| :--- | :---: |\n")
+        f.write("| Metric | Value |\n")
+        f.write("| :--- | :---: |\n")
         f.write(f"| Signals Evaluated | {len(all_evals)} |\n")
         f.write(f"| Win Rate | {m['win_rate']:.3f} |\n")
         f.write(f"| Average R | {m['average_r']:.3f} |\n")
@@ -454,10 +450,10 @@ def run_focused_research(
         f.write(f"| Max Drawdown (R) | {m['max_drawdown_r']:.1f} |\n")
         f.write(f"| Sharpe | {m.get('sharpe', 0):.3f} |\n")
         f.write(f"| Sortino | {m.get('sortino', 0):.3f} |\n")
-        f.write(f"\n")
+        f.write("\n")
         f.write("## Skipped Timestamps\n\n")
-        f.write(f"| Reason | Count |\n")
-        f.write(f"| :--- | :---: |\n")
+        f.write("| Reason | Count |\n")
+        f.write("| :--- | :---: |\n")
         f.write(f"| Insufficient candles (warmup) | {skipped_insufficient} |\n")
         f.write(f"| No BTC regime data | {skipped_no_btc} |\n")
         f.write(f"| No future data for evaluation | {skipped_no_data} |\n")

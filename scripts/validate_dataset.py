@@ -7,10 +7,9 @@ import os
 import json
 import sqlite3
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Tuple, Set
-from collections import defaultdict
+from typing import Dict, Any
 
-from src.config import AppConfig, CONFIG
+from src.config import CONFIG
 from src.data.cached_client import CachedFuturesClient
 from src.data.symbol_registry import get_symbol_registry
 from src.utils.logger import get_logger
@@ -255,7 +254,7 @@ class DatasetValidator:
             lines.append(f"### {symbol}")
             
             if not overlap["valid"]:
-                lines.append(f"- **Status**: [FAIL] NO VALID OVERLAP")
+                lines.append("- **Status**: [FAIL] NO VALID OVERLAP")
                 lines.append(f"- **Reason**: {overlap.get('error', 'Unknown')}")
                 lines.append("")
                 continue
@@ -265,7 +264,7 @@ class DatasetValidator:
             lines.append(f"- **Status**: {'[OK] Full BTC overlap' if has_full_btc else '[WARN] Partial BTC overlap'}")
             
             # Interval details
-            lines.append(f"- **Intervals**:")
+            lines.append("- **Intervals**:")
             for interval in ["15m", "1h", "4h"]:
                 iv = data["intervals"][interval]
                 if iv["valid"]:

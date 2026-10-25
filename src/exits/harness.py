@@ -169,7 +169,7 @@ class CandidateEvaluator:
                 if supervisor_closed or remaining_position <= 0:
                     break
 
-            sl, tp = plan.stop_loss, plan.tp
+            tp = plan.tp
 
             if side == "LONG":
                 bar_favorable = max(0.0, k_high - actual_entry_price)

@@ -6,7 +6,7 @@ Validates: missing candles, duplicates, timestamp gaps, invalid prices, missing 
 import sqlite3
 import os
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -315,7 +315,7 @@ def main():
     print("\nPer-symbol issue counts:")
     for symbol, res in all_results["symbols"].items():
         print(f"  {symbol}: {res['total_issues']} issues")
-    print(f"\nFull report saved to: reports/data_quality_report.json")
+    print("\nFull report saved to: reports/data_quality_report.json")
     
     conn.close()
 

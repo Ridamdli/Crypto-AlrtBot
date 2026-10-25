@@ -22,12 +22,12 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.utils.logger import get_logger
 
 from mirror.config import MirrorConfig
-from mirror.feedmon import FeedWatcher, classify_post
+from mirror.feedmon import FeedWatcher
 from mirror.hl import HlBridge
 from mirror.recorder import TradingSession
 from mirror.store import MirrorStore
@@ -771,7 +771,6 @@ class AutoBot:
         close what he no longer holds (side-flip counts as closed), then
         backfill TP/SL. A malformed/empty-unverifiable read aborts before
         any close — an unreadable board must never flatten the book."""
-        from mirror.feed import fetch_open_positions
         summary: Dict[str, Any] = {"mimicked": 0, "closed": 0,
                                    "skipped": 0, "alerts": 0, "errors": 0}
         try:

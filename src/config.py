@@ -23,13 +23,6 @@ class SymbolConfig:
 
 
 @dataclass
-class StrategyFamilyConfig:
-    enabled: bool = True
-    default_params: dict[str, Any] = field(default_factory=dict)
-    param_grid: dict[str, list[Any]] = field(default_factory=dict)
-
-
-@dataclass
 class UniverseConfig:
     min_volume_usdt: float = 10_000_000    # minimum 24h USDT volume
     symbols: list[SymbolConfig] = field(default_factory=lambda: [

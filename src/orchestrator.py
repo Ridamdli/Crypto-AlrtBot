@@ -254,7 +254,6 @@ class StrategyOrchestrator:
         cache_key = f"{symbol}:{family}"
         if cache_key not in self._strategy_cache:
             # Load config from top3 registry or use defaults
-            config = {}
             if symbol in self.top3_registry:
                 for strat_id in self.top3_registry[symbol]:
                     if strat_id.startswith(family):
@@ -271,13 +270,6 @@ class StrategyOrchestrator:
         from src.config import CONFIG
         symbol_cfg = CONFIG.get_symbol_config(symbol)
         return symbol_cfg.priority_strategies
-    
-    def get_approved_strategies_for_all(self) -> dict[str, list[str]]:
-        """Get approved strategies for all symbols."""
-        result = {}
-        for symbol in self.symbol_registry.get_tradable_symbols():
-            result[symbol] = self.get_approved_strategies(symbol)
-        return result
     
     def process_symbol(
         self,
@@ -318,19 +310,10 @@ class StrategyOrchestrator:
                 
                 # Get market data for this symbol
                 klines_15m = market_data.get("klines_15m", [])
-                klines_1h = market_data.get("klines_1h", [])
-                klines_4h = market_data.get("klines_4h", [])
-                current_price = market_data.get("current_price", 0)
-                
+
                 if len(klines_15m) < 25:
                     continue
-                
-                # Generate candidates
-                oi_data = market_data.get("oi_data", {})
-                funding_rate = market_data.get("funding_rate", 0.0)
-                btc_regime = market_data.get("btc_regime", "neutral")
-                current_price = market_data.get("current_price", 0)
-                
+
                 strategy_candidates = strategy.generate_candidates(
                     klines_15m=market_data.get("klines_15m", []),
                     klines_1h=market_data.get("klines_1h", []),

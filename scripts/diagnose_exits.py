@@ -408,7 +408,7 @@ def _write_tables(meta: dict, records: list[dict]) -> None:
             lines.append(f"| {row} | " + " | ".join(str(rc[row][c]) for c in colset)
                          + f" | {total} |")
         total = len(records)
-        lines.append(f"| **total** | " + " | ".join(
+        lines.append("| **total** | " + " | ".join(
             str(sum(rc[r][c] for r in rc)) for c in colset) + f" | {total} |")
 
     lines.append("\n## Decisions by supervisor rule x action\n")

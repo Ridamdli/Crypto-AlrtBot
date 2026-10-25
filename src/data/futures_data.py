@@ -16,10 +16,6 @@ class FuturesDataService:
         try:
             oi_data = self.client.get_open_interest(symbol)
             mark_data = self.client.get_mark_price(symbol)
-            
-            # Fetch the latest funding rate
-            funding_history = self.client.get_funding_rate(symbol)
-            latest_funding = funding_history[-1] if funding_history else {}
 
             context = {
                 "symbol": symbol,

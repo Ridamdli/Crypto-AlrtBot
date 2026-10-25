@@ -186,7 +186,6 @@ def capture(stride: int, limit_ts: int | None, partition: str = "train") -> None
     TimeframeManager.fetch_multi_timeframe = fast_fetch_multi
 
     pipeline = SignalPipeline(config=config, client=client)
-    engine = pipeline.scoring_engine
 
     captured: list[tuple[int, list[dict[str, Any]]]] = []
     # Candidate dicts carry an ISO "timestamp" string; SQLite compares it as TEXT

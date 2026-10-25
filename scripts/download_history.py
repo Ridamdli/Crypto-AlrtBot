@@ -1,8 +1,8 @@
 import argparse
 import time
 import os
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+from typing import List, Dict, Any
 from src.data.binance_client import BinanceFuturesClient
 from src.data.historical_store import HistoricalStore
 from src.data.universe_filter import UniverseFilter
@@ -320,12 +320,12 @@ def main():
             symbol_results[tf] = result
         
         # Download Open Interest
-        logger.info(f"  Downloading OI data...")
+        logger.info("  Downloading OI data...")
         oi_result = download_oi_data(client, store, symbol, "15m", start_ts, end_ts)
         symbol_results["oi"] = oi_result
         
         # Download Funding Rates
-        logger.info(f"  Downloading Funding data...")
+        logger.info("  Downloading Funding data...")
         fr_result = download_funding_data(client, store, symbol, start_ts, end_ts)
         symbol_results["funding"] = fr_result
         

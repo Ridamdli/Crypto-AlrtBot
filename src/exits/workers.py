@@ -123,7 +123,7 @@ class StructureWorker:
         a.indicators = ["close", "swing20"]
         if not ctx.fresh or ctx.last_close is None:
             return _abstain(a, f"abstain: {ctx.freshness_reason}")
-        side, entry = ctx.side, ctx.entry
+        side = ctx.side
         sl = ctx.plan_stop
         breached = policy.stop_breached(ctx.last_close, side, sl)
         a.evidence = {

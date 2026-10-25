@@ -312,37 +312,6 @@ class SignalPipeline:
                         )
 
                         for cand in strategy_candidates:
-                            # Enrich candidate with common fields
-                            cand_dict = {
-                                "signal_id": "",  # Will be set below
-                                "timestamp": timestamp_str,
-                                "symbol": symbol,
-                                "side": cand.side,
-                                "strategy_id": cand.strategy_id,
-                                "strategy_version": cand.strategy_version,
-                                "configuration_hash": self.config.compute_hash(),
-                                "entry": cand.entry_price,
-                                "tp": cand.tp,
-                                "stop_loss": cand.stop_loss,
-                                "leverage": 0,  # Will be calculated
-                                "margin": 0,
-                                "position_notional": 0,
-                                "risk_amount": 0,
-                                "risk_reward": 0,
-                                "conditions": cand.conditions,
-                                "invalidation_conditions": cand.invalidation_conditions,
-                                "management_rules": cand.management_rules,
-                                "btc_regime": global_regime,
-                                "volume_data": vol_data,
-                                "oi_data": oi_data,
-                                "funding_penalty": 0,  # Will be calculated
-                                "volume_ratio": vol_data.get("ratio"),
-                                "oi_change_pct": oi_data.get("oi_change_pct"),
-                                "funding_rate": funding_rate,
-                                # Strategy-specific metadata
-                                "strategy_metadata": cand.metadata,
-                            }
-
                             # Calculate risk parameters
                             risk_data = self.risk_engine.calculate_risk_parameters(
                                 cand.entry_price, cand.stop_loss, {"tp": cand.tp}
@@ -407,8 +376,6 @@ class SignalPipeline:
                                 "volume_ratio": vol_data.get("ratio"),
                                 "oi_change_pct": oi_data.get("oi_change_pct"),
                                 "funding_rate": funding_rate,
-                                "strategy_id": cand.strategy_id,
-                                "strategy_version": cand.strategy_version,
                                 "strategy_metadata": cand.metadata,
                             }
 

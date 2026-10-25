@@ -3,7 +3,6 @@
 Unified Calibration Experiment Runner
 Runs all controlled calibration experiments.
 """
-import os
 import sys
 import subprocess
 import argparse
@@ -30,9 +29,6 @@ def main():
     parser.add_argument("--train-only", action="store_true", help="Run on TRAIN partition only")
     parser.add_argument("--max-symbols", type=int, default=10, help="Max symbols to test")
     args = parser.parse_args()
-
-    base_cmd = [sys.executable, "-m"]
-    scripts_dir = "scripts"
 
     experiments = []
 

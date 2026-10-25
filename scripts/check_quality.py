@@ -1,5 +1,4 @@
 import sqlite3
-from datetime import datetime
 
 conn = sqlite3.connect('data_store/historical/historical_data.db')
 conn.row_factory = sqlite3.Row

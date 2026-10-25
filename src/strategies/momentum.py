@@ -118,9 +118,6 @@ class MomentumFilterStrategy(BaseStrategy):
         trend_15m = self._get_trend(df_15m, self.params["trend_lookback"])
         trend_1h = self._get_trend(df_1h, self.params["trend_lookback"]) if not df_1h.empty else "neutral"
         
-        # ATR
-        atr_15m = self._calculate_atr(df_15m, self.params["atr_period"]) if self.params["atr_filter"] else 0
-        
         # Volume
         volume_ratio = self._calculate_volume_ratio(df_15m)
         
@@ -136,7 +133,6 @@ class MomentumFilterStrategy(BaseStrategy):
             trend_aligned_long = True
             trend_aligned_short = True
         
-        atr_stop_dist = self._calculate_atr(df_15m, self.params["atr_period"]) * self.params["atr_multiplier"] if self.params["atr_filter"] else 0
         min_risk_dist = self._calculate_atr(df_15m, self.params["atr_period"]) * 0.5 if self._calculate_atr(df_15m, self.params["atr_period"]) > 0 else current_price * 0.005
         
         candidates = []
@@ -145,7 +141,6 @@ class MomentumFilterStrategy(BaseStrategy):
         if trend_aligned_long:
             expansion_pct = (current_price - lowest) / lowest if lowest > 0 else 0
             if expansion_pct >= self.params["threshold_pct"]:
-                entry_price = current_price
                 
                 # Structural SL: recent swing low. Exclude the forming
                 # candle — its low is not printed history (lookahead).
@@ -199,8 +194,6 @@ class MomentumFilterStrategy(BaseStrategy):
         if trend_aligned_short:
             expansion_pct = (highest - current_price) / highest if highest > 0 else 0
             if expansion_pct >= self.params["threshold_pct"]:
-                entry_price = current_price
-                
                 structural_sl = max(pd.DataFrame(klines_15m).iloc[-(self.params["trend_lookback"] + 1):-1]['high'].max(), highest) * 1.001
                 atr_sl = current_price + self._calculate_atr(pd.DataFrame(klines_15m), self.params["atr_period"]) * self.params["atr_multiplier"] if self.params["atr_filter"] else 0
                 sl_price = min(structural_sl, atr_sl) if atr_sl > 0 else structural_sl

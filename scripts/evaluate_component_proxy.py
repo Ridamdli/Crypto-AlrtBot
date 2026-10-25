@@ -400,7 +400,6 @@ def component_rows(signals, market, funding, oi):
         side = sig["side"]
         regime = sig["btc_regime"]
         bars15 = window(market, "15m", sig["symbol"], end, 100)
-        bars1h = window(market, "1h", sig["symbol"], end, 100)
         if not bars15:
             continue
         trend = price_trend(bars15["close"])

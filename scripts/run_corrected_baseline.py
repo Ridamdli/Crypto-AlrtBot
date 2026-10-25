@@ -5,14 +5,14 @@ Run corrected baseline with fixed TP/RR config and OI semantics.
 import os
 import json
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Dict, Any
 
-from src.config import AppConfig, CONFIG
+from src.config import AppConfig
 from src.data.cached_client import CachedFuturesClient
 from src.pipeline import SignalPipeline
 from src.backtest.evaluator import SignalOutcomeEvaluator
-from src.backtest.tuner import ThresholdTuner, DatasetSplit
+from src.backtest.tuner import ThresholdTuner
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -246,9 +246,6 @@ def main():
     train_ts = all_timestamps[:train_end]
     val_ts = all_timestamps[train_end:val_end]
     test_ts = all_timestamps[val_end:]
-    train_days = len(train_ts) / 96.0
-    val_days = len(val_ts) / 96.0
-    test_days = len(test_ts) / 96.0
 
     logger.info("=== Corrected Baseline Run ===")
     baseline_evals_train = generate_evaluations_for_config(config, train_ts, target_symbols, client)

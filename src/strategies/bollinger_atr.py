@@ -128,8 +128,6 @@ class BollingerATRStrategy(BaseStrategy):
         if self.params["regime_filter"]:
             pass  # Handled by pipeline
         
-        min_risk_dist = atr_15m * 0.5 if atr_15m > 0 else current_price * 0.005
-        
         candidates = []
         
         # LONG: Breakout above upper band with compression
@@ -137,7 +135,6 @@ class BollingerATRStrategy(BaseStrategy):
             entry_price = current_price
             
             # SL: ATR-based or middle band
-            atr_sl = current_price - (atr_15m * self.params["atr_multiplier"]) if atr_15m > 0 else 0
             structural_sl = sma_current * 0.995
             sl_price = max(structural_sl, current_price - atr_15m * self.params["atr_multiplier"]) if atr_15m > 0 else structural_sl
             sl_price = min(sl_price, current_price - (atr_15m * 0.5 if atr_15m > 0 else current_price * 0.005))
@@ -187,7 +184,6 @@ class BollingerATRStrategy(BaseStrategy):
         if current_price < lower_current and compression:
             entry_price = current_price
             
-            atr_sl = current_price + (atr_15m * self.params["atr_multiplier"]) if atr_15m > 0 else 0
             structural_sl = sma_current * 1.005
             sl_price = min(structural_sl, current_price + atr_15m * self.params["atr_multiplier"]) if atr_15m > 0 else structural_sl
             sl_price = max(sl_price, current_price + (atr_15m * 0.5 if atr_15m > 0 else current_price * 0.005))

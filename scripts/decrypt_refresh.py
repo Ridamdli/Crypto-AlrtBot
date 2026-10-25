@@ -12,7 +12,6 @@ Usage:
 import base64
 import json
 import os
-import sys
 
 
 def _b64(s: str) -> bytes:
