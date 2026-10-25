@@ -1,12 +1,11 @@
 """One-shot JSON -> Postgres migration for the Window 1 archive (Step 2.4).
 
 Idempotent by construction:
-  * natural-key tables upsert (`merge`) on their primary key;
-  * surrogate-key tables (exit_decisions, exit_events) are deleted for
-    window='W1' and re-inserted in source order, so `decisions_for()` keeps
-    the original insertion order;
-  * single-row tables (paper_state, scheduler_state, invo_exit_sync) merge
-    on id=1.
+  * every archive table is deleted for its (window='W1', source_file) scope
+    and bulk-inserted in source order, so `decisions_for()` keeps the
+    original insertion order and a re-run cannot duplicate rows;
+  * the single-row tables (paper_state, scheduler_state, invo_exit_sync)
+    merge on id=1.
 
 Every row keeps the verbatim source record (where the schema has a payload
 column) plus `payload_sha256`, `source_file` and `window='W1'`, so `--verify`
@@ -290,19 +289,29 @@ def collect(source_dir: str) -> tuple[dict[str, list[dict[str, Any]]], list[str]
     return tables, notes
 
 
+def _replace(s: Session, model: Any, rows: list[dict[str, Any]]) -> None:
+    """Delete this archive's window rows, then bulk-insert them in order."""
+    if not rows:
+        return
+    files = {r["source_file"] for r in rows}
+    s.execute(delete(model).where(model.window == WINDOW,
+                                  model.source_file.in_(files)))
+    s.add_all(model(**row) for row in rows)
+
+
 def write(tables: dict[str, list[dict[str, Any]]]) -> None:
     """All-or-nothing: one transaction for the whole archive."""
     with get_session_factory()() as s, s.begin():
         for name, model, _key in KEYED:
-            for row in tables[name]:
-                s.merge(model(**row))
+            _replace(s, model, tables[name])
+            print(f"  wrote {name:<22} {len(tables[name]):>5}", flush=True)
+        for name, model in ORDERED:
+            _replace(s, model, tables[name])
+            print(f"  wrote {name:<22} {len(tables[name]):>5}", flush=True)
         for name, model in SINGLETON:
             for row in tables[name]:
                 s.merge(model(**row))
-        for name, model in ORDERED:
-            s.execute(delete(model).where(model.window == WINDOW))
-            for row in tables[name]:
-                s.add(model(**row))
+            print(f"  wrote {name:<22} {len(tables[name]):>5}", flush=True)
 
 
 def _compare(problems: list[str], label: str, expected: dict, actual: Any) -> None:
@@ -347,6 +356,7 @@ def verify(tables: dict[str, list[dict[str, Any]]]) -> int:
     """Verify only the rows this source directory claims (by source_file), so
     two archives can coexist in one database."""
     problems: list[str] = []
+    print("verifying...", flush=True)
     with get_session_factory()() as s:
         for name, model, key in KEYED:
             rows = tables[name]
@@ -401,7 +411,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     tables, notes = collect(args.source)
-    print(f"source: {args.source}  window: {WINDOW}")
+    total = sum(len(v) for v in tables.values())
+    print(f"source: {args.source}  window: {WINDOW}  rows: {total}", flush=True)
     if args.dry_run:
         _print_counts(tables, notes)
         print("dry run: no database writes")
@@ -409,7 +420,7 @@ def main(argv: list[str] | None = None) -> int:
 
     write(tables)
     _print_counts(tables, notes)
-    print("migration committed")
+    print("migration committed", flush=True)
     if args.verify:
         return verify(tables)
     return 0

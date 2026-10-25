@@ -28,7 +28,8 @@ COLD_START_BACKOFF_S = (0.5, 1.0, 2.0)
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
-_lock = threading.Lock()
+# Reentrant: get_session_factory() calls get_engine() while holding the lock.
+_lock = threading.RLock()
 
 
 def database_url() -> str | None:

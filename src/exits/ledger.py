@@ -304,22 +304,30 @@ class ExitDecisionLedger:
         plan = decision.plan_after if apply else None
         try:
             with self._pg_session() as s, s.begin():
-                s.add(db.ExitDecision(
-                    decision_key=decision.decision_key,
-                    signal_id=decision.signal_id,
-                    action=decision.action,
-                    data_ts_ms=decision.data_ts_ms,
-                    decided_at_ms=decision.decided_at_ms,
-                    code_version=decision.code_version,
-                    config_version=decision.config_version,
-                    rationale=decision.rationale,
-                    assessments=payload.get("assessments"),
-                    risk_guard=payload.get("risk_guard"),
-                    rejected=payload.get("rejected"),
-                    events_applied=payload.get("events_applied"),
-                    plan_after=payload.get("plan_after"),
-                    payload=payload,
-                ))
+                # One row per decision_key: a repeat keeps the audit row it
+                # already has, but its plan/events/last_eval still apply. (The
+                # file backend appends a duplicate instead.)
+                duplicate = decision.decision_key and s.execute(
+                    select(db.ExitDecision.id).where(
+                        db.ExitDecision.decision_key == decision.decision_key)
+                ).first()
+                if not duplicate:
+                    s.add(db.ExitDecision(
+                        decision_key=decision.decision_key,
+                        signal_id=decision.signal_id,
+                        action=decision.action,
+                        data_ts_ms=decision.data_ts_ms,
+                        decided_at_ms=decision.decided_at_ms,
+                        code_version=decision.code_version,
+                        config_version=decision.config_version,
+                        rationale=decision.rationale,
+                        assessments=payload.get("assessments"),
+                        risk_guard=payload.get("risk_guard"),
+                        rejected=payload.get("rejected"),
+                        events_applied=payload.get("events_applied"),
+                        plan_after=payload.get("plan_after"),
+                        payload=payload,
+                    ))
                 if (decision.decision_key
                         and s.get(db.ExitSeenKey, decision.decision_key) is None):
                     s.add(db.ExitSeenKey(

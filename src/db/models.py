@@ -180,7 +180,8 @@ class Outcome(Base, ProvenanceMixin):
     mfe_r: Mapped[float | None] = mapped_column(Float)
     mae_r: Mapped[float | None] = mapped_column(Float)
     holding_bars: Mapped[int | None] = mapped_column(Integer)
-    holding_minutes: Mapped[int | None] = mapped_column(Integer)
+    # Float: the tracker writes round(ms / 60000, 1), e.g. 1221.1.
+    holding_minutes: Mapped[float | None] = mapped_column(Float)
     realized_r: Mapped[float | None] = mapped_column(Float)
     net_realized_r: Mapped[float | None] = mapped_column(Float)
     fees_cost_r: Mapped[float | None] = mapped_column(Float)
@@ -212,7 +213,7 @@ class PaperBooked(Base, ProvenanceMixin):
     risk_amount: Mapped[float | None] = mapped_column(Float)
     pnl_usd: Mapped[float | None] = mapped_column(Float)
     equity_after: Mapped[float | None] = mapped_column(Float)
-    holding_minutes: Mapped[int | None] = mapped_column(Integer)
+    holding_minutes: Mapped[float | None] = mapped_column(Float)
     liq_price: Mapped[float | None] = mapped_column(Float)
     payload: Mapped[dict] = mapped_column(JSONType)
 
@@ -236,7 +237,6 @@ class SchedulerState(Base, ProvenanceMixin):
     __tablename__ = "scheduler_state"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    cooldown_hours: Mapped[float | None] = mapped_column(Float)
     published_signals: Mapped[dict] = mapped_column(JSONType)
 
 

@@ -6,6 +6,7 @@ keeps one source of truth: the same env var the app uses.
 """
 from logging.config import fileConfig
 
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
@@ -13,6 +14,9 @@ from alembic import context
 from src.db import models  # noqa: F401  (registers tables on Base.metadata)
 from src.db.base import Base
 from src.db.engine import database_url
+
+# DATABASE_URL lives in .env (gitignored); alembic is run from the repo root.
+load_dotenv()
 
 config = context.config
 
