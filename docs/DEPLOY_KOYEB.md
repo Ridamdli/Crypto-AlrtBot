@@ -21,6 +21,9 @@ step, not a formality.
 | Health probe needs no auth and no DB | `src/dashboard.py:598` → `GET /healthz` → `200 {"ok":true}` |
 | Dashboard binds `0.0.0.0` and honours `$PORT` | `src/dashboard.py:642-644` |
 | Neon `production` schema is current | `alembic check` clean, `production` branch |
+| Image is two-stage: deps go into `/opt/venv` in `builder`, only the venv + code reach `runtime` | `Dockerfile` |
+| In-image `HEALTHCHECK` is `SERVICE_TYPE`-aware — a no-op for `mirror`, `/healthz` on `$PORT` for `main` | `Dockerfile`; self-checked for the 4 cases (mirror/no-listener, main/no-listener, main/200, main/503) |
+| Runtime is non-root (uid 10001) with `/app`, `/app/data_store`, `/app/mirror_data` owned by it | `Dockerfile` |
 
 **Neon:** project `withered-bird-68619336`, region `aws-us-east-2`, branch
 `production` (`br-winter-base-b4x95eis`), database `neondb`.

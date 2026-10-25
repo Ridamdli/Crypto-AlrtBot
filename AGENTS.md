@@ -14,6 +14,16 @@ navigation; this file covers the rules that must not be broken.
   reconstruct and label that `Estimated`, never zero. Outcomes join by `signal_id`.
 - Use `python -m pytest`. The `pytest` console script on PATH is Python 3.11 and
   fails collection.
+- **PG mode is a second, different baseline.** `PG_TEST=1` (with
+  `TEST_DATABASE_URL` exported) runs the same suite against Postgres:
+  **593 passed / 27 skipped / 0 failed**. The 27 skips are `_JSON_ONLY`
+  (`tests/conftest.py:115`) — they assert on JSON artifacts Postgres never
+  writes. So 620/0/0 is the JSON baseline only; a PG run reporting 620 passed
+  is a red flag, not a win.
+- Nothing loads `.env` for a test run (only `src/main.py` calls `load_dotenv()`),
+  so `PG_TEST=1` fails all 593 tests unless `TEST_DATABASE_URL` is exported
+  first. A wrong value would `TRUNCATE` production — verify the endpoint differs
+  from `DATABASE_URL` before running.
 - Any deviation means code changed. Investigate; do not update the baseline to
   match a failing tree.
 
@@ -44,11 +54,20 @@ navigation; this file covers the rules that must not be broken.
 
 ## 4. Deploy discipline
 
-- **Local commits only.** No deploys, no production writes, no Railway reads
-  while auth is expired.
+- **Local commits only.** No deploys, no production writes.
 - **Nothing deploys without explicit operator authorization.**
-- The mirror service (`pariston-mimic`) is a separate deploy unit; it is uploaded
-  from the local tree with `railway up` — GitHub auto-deploy does not fire.
+- **Railway is abandoned** (account limits). The deploy target is a container
+  PaaS (Koyeb / Render / Fly.io) built from the repo `Dockerfile`; the
+  walkthrough, env var list and verification steps are in
+  `docs/DEPLOY_KOYEB.md`.
+- **Postgres (Neon) is the deployment target; JSON files are the local/test
+  fallback.** `DATABASE_URL` selects it at runtime (`src/db/engine.py`); absent,
+  every store falls back to `data_store/*.json`. Schema changes go through
+  Alembic (`alembic upgrade head`), never ad-hoc DDL.
+- **One image, two deploy units**, selected by `SERVICE_TYPE`: `main` (dashboard
+  + scheduler, HTTP on `$PORT`) and `mirror` (no listener). The mirror is a
+  separate service from the same image; first deploy must be
+  `MIRROR_MODE=watch`, `MIMIC_LIVE=false`.
 - Mirror bot: no modifications and no runs without authorization.
 - Deploy plan lives in `reports/DEPLOY_READINESS.md` (Wave 1 / Wave 2 / Hold).
 

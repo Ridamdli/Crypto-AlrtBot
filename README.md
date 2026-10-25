@@ -42,16 +42,30 @@ Confidence scoring & ranking
 src/
 ├── config.py                  # Risk/volume/scoring config (versioned hash)
 ├── pipeline.py                # Main signal pipeline (run_pipeline)
+├── orchestrator.py            # Per-symbol strategy fan-out
 ├── scheduler.py               # 15m loop scheduler with duplicate prevention
-├── main.py                    # Entry point
+├── service.py                 # Deploy entrypoint: dashboard thread + scheduler loop
+├── dashboard.py               # Admin dashboard + /healthz (HTTP on $PORT)
+├── main.py                    # Single-cycle entry point
 │
 ├── data/
 │   ├── binance_client.py      # Binance Futures REST client (rate-limited)
+│   ├── cached_client.py       # Cached wrapper over the REST client
 │   ├── ohlcv_fetcher.py       # OHLCV fetcher + standardisation
 │   ├── timeframe_manager.py   # Multi-timeframe data manager
 │   ├── futures_data.py        # OI, funding rate, mark price
+│   ├── historical_store.py    # Local OHLCV archive
+│   ├── archival.py            # Signal archive rotation
+│   ├── symbol_registry.py     # Symbol metadata and tradability
 │   ├── universe_filter.py     # Dynamic symbol eligibility
-│   └── persistence.py         # Local JSON signal storage
+│   └── persistence.py         # Signal store: Postgres if DATABASE_URL, else JSON
+│
+├── db/                        # PostgreSQL layer (Neon in production)
+│   ├── engine.py              # DATABASE_URL -> engine/session; is_pg_enabled()
+│   ├── base.py                # Declarative Base
+│   └── models.py              # ORM tables
+│
+├── strategies/                # donchian, momentum, bollinger_atr, volume_breakout
 │
 ├── engines/
 │   ├── btc_regime.py          # 4H BTC market regime (bullish/bearish/neutral)
@@ -65,6 +79,10 @@ src/
 │   ├── scoring_engine.py      # Confidence score 0–100 + ranking
 │   └── invalidation_engine.py # Invalidation & management rules
 │
+├── exits/                     # Multi-agent exit supervision (paper-only; cannot trade)
+├── invo/                      # Invo paper-portfolio integration (client, mailbox, ledger)
+├── papertrade/                # Paper portfolio + liquidation model
+│
 ├── models/
 │   ├── signal.py              # Pydantic SignalModel (schema validation)
 │   └── lifecycle.py           # Deterministic signal lifecycle state machine
@@ -74,17 +92,24 @@ src/
 │   ├── evaluator.py           # Historical signal outcome evaluator
 │   ├── tuner.py               # Threshold sweep + walk-forward + metrics
 │   └── adapters/
-│       └── jesse_adapter.py   # Jesse strategy export adapter
+│       └── jesse_adapter.py   # Jesse export adapter (external validator, not a runtime dep)
 │
 └── utils/
     ├── logger.py
+    ├── atomic.py
     ├── telegram_formatter.py
     └── telegram_bot.py
 
-tests/
-├── test_engines.py            # 33 core engine tests
-└── test_backtest.py           # 75 replay / evaluator / tuner / lifecycle / scheduler tests
+alembic/                       # Schema migrations (alembic upgrade head)
+mirror/                        # Hyperliquid mirror bot — separate deploy unit
+tests/                         # 620 tests across 31 files (see BRAIN.md §7)
 ```
+
+**Active strategies:** `donchian`, `momentum`, `bollinger_atr`, `volume_breakout`.
+**Retired:** `rsi_mean_reversion` (Phase 02 — TP 1.5R could never pass the `min_rr=2.0` gate) and
+`ema_trend_20_50` (W5 — the only family whose production CI excluded zero). BTC is momentum-only,
+ADA is volume_breakout-only. Details: [`docs/project-handoff/CURRENT_STATE.md`](docs/project-handoff/CURRENT_STATE.md).
+
 
 ---
 
@@ -192,9 +217,21 @@ python -m src.scheduler --once
 **3a. Run 24/7 with Docker (recommended for VPS):**
 ```bash
 docker build -t crypto-alrtbot .
-docker run -d --restart unless-stopped --name alrtbot --env-file .env crypto-alrtbot
+docker run -d --restart unless-stopped --name alrtbot \
+  --env-file .env -p 8080:8080 crypto-alrtbot
 docker logs -f alrtbot
 ```
+- **One image, two deploy units**, selected by `SERVICE_TYPE`: `main` (default) runs
+  `python -m src.service` (dashboard + 15m scheduler); `mirror` runs `python -m mirror` and opens no
+  HTTP port.
+- **`DATABASE_URL`** (Postgres/Neon) is read from the environment. Without it the app falls back to
+  JSON files under `data_store/` — fine locally, not recommended for a deploy.
+- **Schema:** `docker run --rm --env-file .env crypto-alrtbot alembic upgrade head`
+- **Health:** `HEALTHCHECK` probes `/healthz` on `$PORT` for the `main` unit, and is a no-op for
+  `mirror` — the mirror has no listener, so probing a port there would restart-loop it.
+- Runs as non-root uid 10001; no secrets are baked into the image.
+- Full PaaS walkthrough (Koyeb / Render / Fly.io — two services, env var list, verification):
+  [`docs/DEPLOY_KOYEB.md`](docs/DEPLOY_KOYEB.md).
 
 **3b. Run 24/7 on Windows (Task Scheduler):**
 - Action: `python` with argument `-m src.scheduler`, start dir = project folder.
@@ -376,14 +413,22 @@ print(tuner.compare_configurations(baseline_m, candidate_m))
 python -m pytest tests/ -v
 ```
 
-Current status: **620 tests, 0 failures** (30 files)
+Current status: **620 tests, 0 failures** (31 files) — counted from the tree:
 
 ```
-tests/test_engines.py             —  43 tests  (core engine math)
 tests/test_backtest.py            —  89 tests  (replay, evaluator, tuner, lifecycle, scheduler)
+tests/test_exits.py               —  73 tests  (workers, supervisor, RiskGuard, harness parity)
+tests/test_invo.py                —  63 tests  (client, mailbox, sim ledger, sync audit)
+tests/test_engines.py             —  43 tests  (core engine math)
+tests/test_mirror_auto.py         —  40 tests  (mirror bot decision logic)
 tests/test_strategies.py          —  39 tests  (strategy families + registry)
-tests/test_dataset_validation.py  —  12 tests  (dataset alignment, cache correctness, no-lookahead)
+tests/test_dashboard.py           —  31 tests  (dashboard endpoints + /healthz)
+…                                 — 242 tests  (remaining 24 files)
 ```
+
+**Postgres backend:** `PG_TEST=1` (with `TEST_DATABASE_URL` exported) runs the same suite against
+Postgres. 27 tests assert on JSON artifacts Postgres never writes and are skipped by design, so the
+PG baseline is **593 passed / 27 skipped / 0 failed** — not 620/0/0.
 
 ---
 

@@ -176,6 +176,13 @@ python -m pytest --collect-only -q | Select-String "^tests/" |
 Note: the `pytest` console script on PATH belongs to Python 3.11 and fails collection (6 dependency
 errors). Use `python -m pytest` (Python 3.14).
 
+**PG mode is a second, different baseline.** `PG_TEST=1` (with `TEST_DATABASE_URL` exported — nothing
+loads `.env` for a test run) executes the same suite against Postgres:
+**593 passed / 27 skipped / 0 failed**. The 27 skips are `_JSON_ONLY` (`tests/conftest.py:115`) —
+they assert on JSON artifacts Postgres never writes. So **620/0/0 is the JSON baseline only**; a PG
+run reporting 620 passed is a red flag, not a win. Verify the test endpoint differs from
+`DATABASE_URL` before running — a wrong value would `TRUNCATE` production.
+
 ## 8. Obsidian vault
 
 `C:\Users\grimm\OneDrive\Desktop\Crypto-AlrtBot-Vault` (outside the repo; 2,935 notes + `graph.canvas`).
@@ -203,23 +210,42 @@ That file is read at the start of the next session.
   archived as a **pre-deploy baseline, not a 30-day result**; H1–H4 are **paused/inconclusive, not
   failed**; the post-window decision tree was **not applied**. `reports/OBSERVATION_PROTOCOL_2026-10.md`
   §7 defines **Window 2**, which starts on the deploy-success date.
-- **Deploy AUTHORIZED 2026-10-24, operator executes — the agent does not deploy.** Target: local
-  `HEAD` at push time; runtime code is **`f80ff11`**. Steps, env vars and verification:
-  `reports/DEPLOY_READINESS.md`. Main service first, mirror second, each verified before the next.
+- **Postgres is live (Neon, 2026-10-25).** Project `withered-bird-68619336`, region
+  `aws-us-east-2`, branches `production` (deploy) and `test` (suite). Window 1 rows were migrated to
+  `production` and verified: **0 mismatches across 14 tables / 3,624 rows**, `alembic check` clean.
+  `DATABASE_URL` selects Postgres at runtime (`src/db/engine.py`); absent, every store falls back to
+  `data_store/*.json`. `PG_TEST=1` + `TEST_DATABASE_URL` runs the suite on the `test` branch —
+  baseline **593 / 27 / 0** (§7). Known gaps: `sim_reservations.baseline` has no column, and
+  `SimLedger`, `scan_history`, `p3_shadow`, `invo_activity`, `invo_sync_audit`,
+  `telegram_dead_letter` have no PG path yet.
+- **Deploy AUTHORIZED 2026-10-24, operator executes — the agent does not deploy.** Railway is
+  **abandoned** (account limits); the target is a container PaaS built from the repo `Dockerfile`
+  (Koyeb / Render / Fly.io — see `docs/DEPLOY_KOYEB.md`). Local `HEAD` at push time; runtime code was
+  `f80ff11`. Main service first, mirror second, each verified before the next. **Nothing has been
+  built or run in the cloud yet** — the local `docker build` was stopped on request (bandwidth), so
+  the first cloud build is the first real test of the `Dockerfile`. Pre-deploy hardening (cleanup,
+  lint, deps, Dockerfile, docs) is committed locally and **not pushed**.
+  **Free-tier blocker:** Koyeb/Render free instances scale to zero, which stops the 15m scheduler;
+  scale-to-zero must be off, or the free tier cannot host the main service.
 - **Window 2 protocol (armed on deploy success).** Same H1–H4 claims and thresholds, evaluated only
   on post-deploy settled rows; Window 1 rows are never pooled in. New: `scoring_breakdown` makes H4
   Measured, per-strategy R becomes a **4-family** number, and fee drag is read against the stated
   0.12%-of-notional model (conservative vs Hyperliquid taker/taker 0.09%).
 - **Next scheduled action: the Sunday weekly report** (n, mean net R, median net R, top-5
   concentration, triggers) — or an immediate trigger alert, whichever comes first.
-- **Graph freeze stands — no rebuild authorized.** No rebuilds. Current graph — 3,006 nodes /
-  7,930 edges / 148 communities / 71 curated labels — is frozen as-is. Rationale: each rebuild on a
-  drifted community set drops more labels (measured 120 → 83 → 71), `graphify label` is billed and
-  rejected, and 71 names still serve queries. The graph lags the tree by the C-series docs; that is
-  accepted. The next rebuild **must** carry an explicit label strategy: hand-label the top 30
-  communities, or operator-authorized `graphify label`, or accept the degradation deliberately.
-  (Previously tied to the 2026-11-21 window end; Window 1 closed early, so the freeze now ends only
-  on an explicit operator decision.)
+- **Graph rebuilt 2026-10-25 — the freeze is LIFTED by operator decision** (Phase 5 of the pre-deploy
+  hardening pass). Was frozen at 3,006 nodes / 7,930 edges / 148 communities / 71 curated labels.
+  Now **3,163 nodes / 8,333 edges / 142 communities / 65 curated labels** — the delta is the
+  Postgres layer, which the old graph predated: 46 nodes under `src/db/` (engine, models, base) and
+  8 under `alembic/`. Labels went **71 → 65**, and this is the mildest degradation of the three
+  rebuilds so far (measured 120 → 83 → 71 → 65): **0 labels renamed, 6 dropped** because their
+  communities no longer exist (14 Exit Monitor & Decision Ledger, 31 Target Worker & RR Math,
+  39 Historical Data Cache, 64 Paper Portfolio, 93 Scoring & Technical Debt, 95 Dataset Split).
+  Every surviving label kept its curated name. Pre-rebuild labels:
+  `graphify-out/.graphify_labels.backup-2026-10-25.json`; graphify's own backup:
+  `graphify-out/2026-10-25/`. Built with `.\scripts\graphify-safe.ps1 update .` (AST only,
+  `GRAPHIFY_BACKEND=none`). `graphify label` was NOT run (billed). The next rebuild should still
+  carry an explicit label strategy — the drift is slowing, not solved.
 - **Window monitoring schedule (re-armed at Window 2 start).**
   - **Weekly report, every Sunday — 5 lines, no prompt required:** n (settled signals this week), mean net R,
     median net R, top-5 concentration, triggers fired (yes/no, which).
