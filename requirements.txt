@@ -1,9 +1,12 @@
-requests
-python-dotenv
-pandas
-pydantic
-hyperliquid-python-sdk>=0.24.0
-eth-account
-sqlalchemy>=2.0
-alembic>=1.13
-psycopg[binary]>=3.1
+# Pinned to the exact versions the 620-test suite passes on. Unpinned, a fresh
+# cloud build resolves newer releases (e.g. pandas 3.1.0 vs the tested 3.0.3),
+# so the deployed container would run code no test ever touched.
+requests==2.34.2
+python-dotenv==1.2.2
+pandas==3.0.3
+pydantic==2.13.4
+hyperliquid-python-sdk==0.24.0
+eth-account==0.13.7
+sqlalchemy==2.0.51
+alembic==1.20.1
+psycopg[binary]==3.3.5

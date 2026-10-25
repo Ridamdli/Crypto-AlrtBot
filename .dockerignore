@@ -1,14 +1,33 @@
-.env
 .git
+.gitignore
+.env
+.env.*
+!.env.example
+
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
+
+# Local state / evidence — never baked into the image
 data_store/
+prod_evidence/
+mirror_data/
 reports/
+graphify-out/
+*.log
+
+# Not needed at runtime
 tests/
 docs/
-.gitignore
 README.md
 AGENT.md
+AGENTS.md
+BRAIN.md
 tasks.md
 Dockerfile
+.dockerignore
+.agents/
+.opencode/
+opencode.json
+skills-lock.json
