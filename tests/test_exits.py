@@ -600,7 +600,7 @@ def test_repeat_record_keeps_suppression_without_key_dupes(tmp_path):
     assert led.record(d, apply=False) is True
     assert led.record(d, apply=False) is True  # append behavior unchanged
     assert led.has_key("K-same") is True
-    assert list(led._state["seen_keys"]).count("K-same") == 1
+    assert list(led.seen_keys()).count("K-same") == 1
 
 
 def test_proposal_only_decisions_unchanged(tmp_path):
