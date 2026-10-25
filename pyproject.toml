@@ -47,7 +47,10 @@ target-version = "py310"
 
 [tool.ruff.lint]
 # F (pyflakes) = real bugs: undefined names, unused imports/variables, shadowed
-# definitions. E9 = syntax errors — a correctness gate, not a style rule, so a file
+# definitions. E9 = syntax errors - a correctness gate, not a style rule, so a file
 # that fails to parse cannot pass the check silently.
-# shortcut: F+E9 until the 68 F findings are cleared, then widen to E4/E7.
+# F+E9 is clean as of 535a6e9 (0 findings repo-wide). E4/E7 is deliberately not
+# enabled: its 39 findings are almost all E402 in tests, where imports sit below
+# env setup on purpose, plus E741 single-letter names in test data. Turning it on
+# would mean rewriting tests to satisfy a style rule.
 select = ["F", "E9"]
