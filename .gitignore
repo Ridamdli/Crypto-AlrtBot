@@ -68,3 +68,9 @@ logs/
 # Coverage
 .coverage
 htmlcov/
+
+# Agent tooling (local to the workstation, never part of the app or image)
+.agents/skills/
+.opencode/
+opencode.json
+skills-lock.json
